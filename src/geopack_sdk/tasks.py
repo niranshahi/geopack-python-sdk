@@ -7,12 +7,21 @@ class TaskManager:
     def get_status(self, task_id):
         """
         Fetch the current status of a background task.
+
+        REST API: `GET /api/tasks/{taskId}`
         """
         return self.client.get(f"/tasks/{task_id}")
 
     def wait_for_task(self, task_id, timeout=300, interval=2):
         """
         Poll the task status until it is completed or failed.
+
+        REST API: `GET /api/tasks/{taskId}` (polled)
+
+        Expected terminal statuses:
+        - completed
+        - failed
+        - canceled
         """
         start_time = time.time()
         while time.time() - start_time < timeout:

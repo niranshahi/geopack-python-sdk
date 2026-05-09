@@ -7,7 +7,10 @@ class AuthManager:
 
     def login(self, username: str = None, password: str = None):
         """
-        Authenticate with the Geopack API.
+        Authenticate with the Geopack REST API.
+
+        REST API: `POST /api/auth/login`
+
         Priority: explicit parameters > environment variables (GEOPACK_USERNAME, GEOPACK_PASSWORD)
         """
         user = username or os.getenv("GEOPACK_USERNAME")
@@ -20,7 +23,7 @@ class AuthManager:
             )
 
         endpoint = "/auth/login"
-        # Geopack v2 expects 'userName' or 'email' and 'password'
+        # API expects 'userName' (or 'email') and 'password'
         payload = {"userName": user, "password": pwd}
         
         try:

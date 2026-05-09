@@ -36,6 +36,8 @@ The SDK can be configured using parameters or environment variables (recommended
 ### 1. Using Environment Variables
 Create a `.env` file in your project:
 ```bash
+# Note: this should be the API base URL and typically includes `/api`
+# Example: http://localhost:3000/api
 GEOPACK_API_URL=https://your-geoportal.com/api
 GEOPACK_USERNAME=admin
 GEOPACK_PASSWORD=your_secure_password

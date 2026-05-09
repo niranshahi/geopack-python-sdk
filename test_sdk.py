@@ -41,6 +41,16 @@ def main():
         else:
             print("! No datasets found or access restricted.")
 
+        # Dataset filter statistics
+        print("\n[2.5/3] Fetching dataset filter statistics...")
+        stats = client.datasets.get_statistics()
+        if isinstance(stats, dict):
+            org_count = len(stats.get('organizations', []) or [])
+            keyword_count = len(stats.get('keywords', []) or [])
+            print(f"✓ Statistics loaded (organizations={org_count}, keywords={keyword_count})")
+        else:
+            print("! Statistics endpoint returned unexpected format")
+
         # 4. Check Tasks (Optional)
         print("\n[3/3] Testing task system connectivity...")
         # Just a ping to the tasks endpoint

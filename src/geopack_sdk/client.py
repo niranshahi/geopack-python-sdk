@@ -7,6 +7,10 @@ from .tasks import TaskManager
 class GeopackClient:
     """
     The main entry point for the Geopack Python SDK.
+
+    `base_url` should typically point to the REST API base, e.g.:
+    - http://localhost:3000/api
+    - https://your-domain.com/api
     """
     def __init__(self, base_url: str = None):
         # Priority: explicit parameter > environment variable
@@ -14,8 +18,8 @@ class GeopackClient:
         
         if not self.base_url:
             raise ValueError(
-                "Geopack API URL must be provided either as a parameter 'base_url' "
-                "or via the 'GEOPACK_API_URL' environment variable."
+                "Geopack API base URL must be provided either as a parameter 'base_url' "
+                "or via the 'GEOPACK_API_URL' environment variable (example: http://localhost:3000/api)."
             )
 
         self.session = requests.Session()
