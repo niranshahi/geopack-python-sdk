@@ -25,8 +25,8 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/your-username/geopack-python-sdk"
-"Bug Tracker" = "https://github.com/your-username/geopack-python-sdk/issues"
+"Homepage" = "https://github.com/niranshahi/geopack-python-sdk"
+"Bug Tracker" = "https://github.com/niranshahi/geopack-python-sdk/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
