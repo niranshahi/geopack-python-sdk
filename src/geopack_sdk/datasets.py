@@ -13,7 +13,12 @@ class DatasetManager:
         if search:
             params["searchQuery"] = search
             
-        return self.client.get("/datasets", params=params)
+        response = self.client.get("/datasets", params=params)
+        
+        # Based on DatasetsApiResponse, datasets are in the 'datasets' field
+        if isinstance(response, dict) and "datasets" in response:
+            return response["datasets"]
+        return response
 
     def get(self, dataset_id):
         """

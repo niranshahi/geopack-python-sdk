@@ -25,6 +25,37 @@ for ds in datasets:
     print(ds.name)
 ```
 
+## Configuration
+
+The SDK can be configured using parameters or environment variables (recommended for security).
+
+### 1. Using Environment Variables
+Create a `.env` file in your project:
+```bash
+GEOPACK_API_URL=https://your-geoportal.com/api
+GEOPACK_USERNAME=admin
+GEOPACK_PASSWORD=your_secure_password
+```
+
+Then use the SDK without hardcoding:
+```python
+from dotenv import load_dotenv
+from geopack_sdk import GeopackClient
+
+load_dotenv() # Load variables from .env
+
+client = GeopackClient()
+client.auth.login() # Automatically uses ENV variables
+
+datasets = client.datasets.list()
+```
+
+### 2. Using Parameters (Explicit)
+```python
+client = GeopackClient(base_url="https://api.geopack.com")
+client.auth.login(username="my_user", password="my_password")
+```
+
 ## Features
 - Full API coverage for Datasets, DataStores, and Workflows.
 - Async Task management with polling support.

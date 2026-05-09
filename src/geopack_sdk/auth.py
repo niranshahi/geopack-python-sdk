@@ -1,17 +1,44 @@
+import os
+
 class AuthManager:
     def __init__(self, client):
         self.client = client
         self.token = None
 
-    def login(self, username, password):
+    def login(self, username: str = None, password: str = None):
         """
-        Authenticate with the Geopack API using username and password.
+        Authenticate with the Geopack API.
+        Priority: explicit parameters > environment variables (GEOPACK_USERNAME, GEOPACK_PASSWORD)
         """
-        endpoint = "/auth/login" # Adjust based on actual route
-        payload = {"username": username, "password": password}
-        response = self.client.post(endpoint, json=payload)
+        user = username or os.getenv("GEOPACK_USERNAME")
+        pwd = password or os.getenv("GEOPACK_PASSWORD")
+
+        if not user or not pwd:
+            raise ValueError(
+                "Credentials must be provided either as parameters "
+                "or via 'GEOPACK_USERNAME' and 'GEOPACK_PASSWORD' environment variables."
+            )
+
+        endpoint = "/auth/login"
+        # Geopack v2 expects 'userName' or 'email' and 'password'
+        payload = {"userName": user, "password": pwd}
         
-        self.token = response.get("token")
+        try:
+            response = self.client.post(endpoint, json=payload)
+        except Exception as e:
+            # Handle potential 400 errors with more detail if possible
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    print(f"Server Error Detail: {error_detail}")
+                except:
+                    pass
+            raise e
+        
+        # In Geopack v2, login returns { accessToken, refreshToken, user }
+        # We'll use accessToken for the Authorization header
+        self.token = response.get("accessToken") or response.get("token")
+        
         if self.token:
             self.client.session.headers.update({
                 "Authorization": f"Bearer {self.token}"

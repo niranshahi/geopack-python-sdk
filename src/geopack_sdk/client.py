@@ -1,3 +1,4 @@
+import os
 import requests
 from .auth import AuthManager
 from .datasets import DatasetManager
@@ -7,8 +8,16 @@ class GeopackClient:
     """
     The main entry point for the Geopack Python SDK.
     """
-    def __init__(self, base_url: str):
-        self.base_url = base_url.rstrip('/')
+    def __init__(self, base_url: str = None):
+        # Priority: explicit parameter > environment variable
+        self.base_url = (base_url or os.getenv("GEOPACK_API_URL", "")).rstrip('/')
+        
+        if not self.base_url:
+            raise ValueError(
+                "Geopack API URL must be provided either as a parameter 'base_url' "
+                "or via the 'GEOPACK_API_URL' environment variable."
+            )
+
         self.session = requests.Session()
         
         # Initialize managers
