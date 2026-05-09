@@ -7,6 +7,10 @@ A standalone Python library to interact with the Geopack Geoportal API.
 ```bash
 pip install geopack-sdk
 ```
+or
+```bash
+pip install git+https://github.com/niranshahi/geopack-python-sdk.git
+```
 
 ## Quick Start
 
