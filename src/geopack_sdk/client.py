@@ -1,8 +1,10 @@
 import os
 import requests
 from .auth import AuthManager
+from .datastores import DataStoreManager
 from .datasets import DatasetManager
 from .tasks import TaskManager
+from .resources import WorkgroupManager, GroupManager, UserManager, OrganizationManager
 
 class GeopackClient:
     """
@@ -26,13 +28,28 @@ class GeopackClient:
         
         # Initialize managers
         self.auth = AuthManager(self)
+        self.datastores = DataStoreManager(self)
         self.datasets = DatasetManager(self)
         self.tasks = TaskManager(self)
+        self.workgroups = WorkgroupManager(self)
+        self.groups = GroupManager(self)
+        self.users = UserManager(self)
+        self.organizations = OrganizationManager(self)
 
     def _request(self, method, endpoint, **kwargs):
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         response = self.session.request(method, url, **kwargs)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            # Try to extract detailed error from response body
+            try:
+                error_data = response.json()
+                msg = error_data.get("message") or error_data.get("errors") or str(error_data)
+                raise Exception(f"Geopack API Error ({response.status_code}): {msg}") from e
+            except (ValueError, KeyError):
+                # Fallback to original HTTPError
+                raise e
         return response.json()
 
     def get(self, endpoint, params=None, **kwargs):

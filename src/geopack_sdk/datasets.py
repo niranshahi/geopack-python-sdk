@@ -1,3 +1,4 @@
+import os
 import json
 from typing import Any, Dict, List, Optional, Union
 
@@ -116,12 +117,93 @@ class DatasetManager:
         """
         return self.client.get("/datasets/stats/by-geom-type")
 
-    def upload(self, file_path, name, data_store_id, **kwargs):
+    def get_features(
+        self,
+        dataset_id: int,
+        limit: int = 100,
+        offset: int = 0,
+        bbox: Optional[List[float]] = None,
+        out_srid: Optional[int] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Fetch features from a dataset as a GeoJSON FeatureCollection.
+
+        REST API: `GET /api/datasets/:id/features`
+
+        Args:
+            dataset_id: ID of the dataset.
+            limit: Maximum number of features to return.
+            offset: Number of features to skip.
+            bbox: Optional bounding box filter [minx, miny, maxx, maxy].
+            out_srid: Optional output spatial reference ID.
+            filters: Optional structured attribute/spatial filters.
+
+        Returns:
+            GeoJSON FeatureCollection.
         """
-        Upload a geospatial file and create a new dataset.
-        This operation is asynchronous and returns a TaskReference.
+        params: Dict[str, Any] = {
+            "limit": limit,
+            "offset": offset,
+        }
+        if bbox and len(bbox) == 4:
+            params["bbox"] = ",".join(map(str, bbox))
+        if out_srid:
+            params["outSRID"] = out_srid
+        if filters:
+            params["filter"] = json.dumps(filters)
+
+        return self.client.get(f"/datasets/{dataset_id}/features", params=params)
+
+    def to_geodataframe(
+        self,
+        dataset_id: int,
+        limit: int = 1000,
+        **kwargs,
+    ):
+        """Fetch dataset features and convert them to a GeoPandas GeoDataFrame.
+
+        Requires `geopandas` to be installed.
+
+        Args:
+            dataset_id: ID of the dataset.
+            limit: Maximum features to fetch (default 1000).
+            **kwargs: Additional arguments for `get_features` (bbox, filters, etc.)
+
+        Returns:
+            geopandas.GeoDataFrame
         """
-        # Note: Implement actual multipart upload logic here
-        endpoint = "/datasets/upload" 
-        # ... logic to handle file upload ...
-        pass
+        try:
+            import geopandas as gpd
+        except ImportError:
+            raise ImportError(
+                "geopandas is required for to_geodataframe(). "
+                "Install it via 'pip install geopandas'."
+            )
+
+        # 1. Get metadata to find the SRID
+        metadata = self.get(dataset_id)
+        
+        details = metadata.get("details")
+        if isinstance(details, str):
+            try:
+                details = json.loads(details)
+            except json.JSONDecodeError:
+                details = {}
+        
+        # Geopack stores SRID in details.srid or details.projection
+        srid = (details or {}).get("srid") or (details or {}).get("projection") or 4326
+
+        # 2. Fetch features
+        geojson = self.get_features(dataset_id, limit=limit, **kwargs)
+
+        # 3. Convert to GeoDataFrame
+        if not geojson or not geojson.get("features"):
+            # Return empty GDF with appropriate geometry column
+            return gpd.GeoDataFrame(columns=["geometry"], geometry="geometry", crs=f"EPSG:{srid}")
+
+        gdf = gpd.GeoDataFrame.from_features(geojson["features"])
+        
+        # 4. Set CRS
+        gdf.set_crs(epsg=srid, inplace=True)
+        
+        return gdf
