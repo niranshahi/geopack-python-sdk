@@ -13,7 +13,7 @@ def main():
     password = os.getenv("GEOPACK_PASSWORD", "password")
     
     # Check for test file path in env, or use a default
-    test_file_path = os.getenv("TEST_GEOJSON_PATH", r"d:\Works\Data\GeoJSON\Rural_District.shp.geojson")
+    test_file_path = os.getenv("TEST_GEOJSON_PATH", "")
 
     print(f"--- Geopack SDK Upload Test ---")
     print(f"Target API: {api_url}")

@@ -154,56 +154,179 @@ class DatasetManager:
 
         return self.client.get(f"/datasets/{dataset_id}/features", params=params)
 
-    def to_geodataframe(
+    def export(
         self,
         dataset_id: int,
-        limit: int = 1000,
-        **kwargs,
-    ):
-        """Fetch dataset features and convert them to a GeoPandas GeoDataFrame.
-
-        Requires `geopandas` to be installed.
+        workgroup_id: int,
+        format: str,
+        sharing_policy: str = "private",
+        wait: bool = True,
+        polling_interval: int = 2,
+    ) -> Union[Dict[str, Any], Any]:
+        """Request an export of a dataset.
 
         Args:
-            dataset_id: ID of the dataset.
-            limit: Maximum features to fetch (default 1000).
-            **kwargs: Additional arguments for `get_features` (bbox, filters, etc.)
+            dataset_id: ID of the dataset to export.
+            workgroup_id: ID of the workgroup owning the task.
+            format: Target format ('geojson', 'shapefile', 'gpkg', 'geotiff', 'csv', etc.)
+            sharing_policy: 'private' or 'public'.
+            wait: If True, waits for the task to complete.
+            polling_interval: Seconds between polls if wait=True.
+        """
+        payload = {
+            "taskType": "dataset:export",
+            "workgroupId": workgroup_id,
+            "inputParameters": {
+                "datasetId": dataset_id,
+                "format": format,
+                "options": {
+                    "sharingPolicy": sharing_policy
+                }
+            }
+        }
+        
+        # Call the general task creation endpoint
+        task_response = self.client.tasks.create(payload)
+        
+        if not wait:
+            return task_response
+            
+        task_id = task_response.get("taskId")
+        return self.client.tasks.wait(task_id, interval=polling_interval)
+
+    def download(
+        self,
+        task_results: Dict[str, Any],
+        local_path: str,
+        chunk_size: int = 8192
+    ) -> str:
+        """Download the result of an export task.
+
+        Args:
+            task_results: The completed Task object (containing 'results').
+            local_path: Destination directory or file path.
+        """
+        # The task results for dataset:export contain information about the generated file
+        results = task_results.get("results")
+        if not results:
+            raise ValueError("Task is completed but contains no results/output.")
+
+        # In Geopack, exported files often return a download token or a direct path
+        download_token = results.get("downloadToken")
+        artifact_path = results.get("artifactPath")
+        filename = results.get("originalName") or results.get("fileName") or "exported_data"
+
+        # Determine download URL
+        if download_token:
+            # The route is apiRouter.use('/downloads', downloadRoutes) -> router.get('/:token')
+            url = f"{self.client.base_url}/downloads/{download_token}"
+        elif artifact_path:
+            # Fallback to direct path
+            url = f"{self.client.base_url}/download/{artifact_path.lstrip('/')}"
+        else:
+            raise ValueError("No download token or artifact path found in task results.")
+
+        print(f"Downloading exported file...")
+        with self.client.session.get(url, stream=True) as r:
+            r.raise_for_status()
+            
+            # Try to get filename from Content-Disposition header (mimic browser)
+            content_disposition = r.headers.get("Content-Disposition")
+            header_filename = None
+            if content_disposition and "filename=" in content_disposition:
+                # Basic parsing, handling potential quotes
+                header_filename = content_disposition.split("filename=")[1].strip('"')
+            
+            # Final filename resolution logic
+            final_filename = header_filename or filename or "exported_data"
+            
+            if os.path.isdir(local_path):
+                target_file = os.path.join(local_path, final_filename)
+            else:
+                # If local_path was a specific file path, we respect it
+                target_file = local_path
+
+            print(f"Saving to: {target_file}")
+            with open(target_file, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=chunk_size):
+                    f.write(chunk)
+        
+        return os.path.abspath(target_file)
+
+    def upload(
+        self,
+        file_path: str,
+        data_store_id: int,
+        workgroup_id: int,
+        declared_type: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        wait: bool = True,
+        polling_interval: int = 2,
+    ) -> Union[Dict[str, Any], Any]:
+        """Upload a geospatial file and create a new dataset.
+
+        This is a two-step process:
+        1. Upload the file to a temporary session via `POST /api/uploads/temp`.
+        2. Create a `dataset:upload` task via `POST /api/tasks` to process the file.
+
+        Args:
+            file_path: Local path to the file (e.g., .geojson, .gpkg, .shp, .zip).
+            data_store_id: ID of the target DataStore.
+            workgroup_id: ID of the workgroup for ownership.
+            declared_type: Optional type hint ('vector', 'raster', 'table').
+            metadata: Optional additional metadata for the dataset.
+            wait: If True, waits for the background task to complete and returns results.
+                  If False, returns the Task object immediately.
+            polling_interval: Seconds between polls if wait=True.
 
         Returns:
-            geopandas.GeoDataFrame
+            If wait=True: List of created dataset results (from Task output).
+            If wait=False: The Task object with `taskId`.
         """
-        try:
-            import geopandas as gpd
-        except ImportError:
-            raise ImportError(
-                "geopandas is required for to_geodataframe(). "
-                "Install it via 'pip install geopandas'."
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        # 1. Upload file to temp session
+        filename = os.path.basename(file_path)
+        with open(file_path, "rb") as f:
+            files = {"files": (filename, f)}
+            upload_response = self.client._request(
+                "POST", "/uploads/temp", files=files
             )
 
-        # 1. Get metadata to find the SRID
-        metadata = self.get(dataset_id)
-        
-        details = metadata.get("details")
-        if isinstance(details, str):
-            try:
-                details = json.loads(details)
-            except json.JSONDecodeError:
-                details = {}
-        
-        # Geopack stores SRID in details.srid or details.projection
-        srid = (details or {}).get("srid") or (details or {}).get("projection") or 4326
+        session_id = upload_response["uploadSessionId"]
+        uploaded_file = upload_response["files"][0]
+        relative_path = uploaded_file["relativePath"]
 
-        # 2. Fetch features
-        geojson = self.get_features(dataset_id, limit=limit, **kwargs)
+        # 2. Create the dataset:upload task
+        input_params = {
+            "sourceFiles": [
+                {
+                    "type": "tempUpload",
+                    "sessionId": session_id,
+                    "relativePath": relative_path,
+                    "originalName": filename,
+                }
+            ],
+            "dataStoreId": data_store_id,
+        }
 
-        # 3. Convert to GeoDataFrame
-        if not geojson or not geojson.get("features"):
-            # Return empty GDF with appropriate geometry column
-            return gpd.GeoDataFrame(columns=["geometry"], geometry="geometry", crs=f"EPSG:{srid}")
+        if declared_type:
+            input_params["declaredType"] = declared_type
+        if metadata is not None:
+            input_params["metadata"] = metadata
 
-        gdf = gpd.GeoDataFrame.from_features(geojson["features"])
+        task_payload = {
+            "taskType": "dataset:upload",
+            "workgroupId": workgroup_id,
+            "inputParameters": input_params,
+        }
+
+        task_response = self.client.tasks.create(task_payload)
         
-        # 4. Set CRS
-        gdf.set_crs(epsg=srid, inplace=True)
-        
-        return gdf
+        if not wait:
+            return task_response
+
+        # 3. Wait for completion
+        task_id = task_response["taskId"]
+        return self.client.tasks.wait(task_id, interval=polling_interval)
