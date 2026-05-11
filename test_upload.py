@@ -56,27 +56,36 @@ def main():
         
         print(f"✓ Target: DataStore '{ds_name}' (ID: {ds_id}), Workgroup '{wg_name}' (ID: {wg_id})")
 
-        # 4. Upload file
-        print(f"\n[3/4] Uploading file: {test_file_path} ...")
-        # This will upload then wait for the background task to complete
+        # 3. Upload File
+        print(f"[3/4] Uploading file: {test_file_path} ...")
         start_time = time.time()
-        results = client.datasets.upload(
+        
+        # This will upload the file and start a background task
+        # We pass wait=False to manage the 'quiet' waiting ourselves
+        task_response = client.datasets.upload(
             file_path=test_file_path,
-            data_store_id=ds_id,
-            workgroup_id=wg_id,
-            wait=True
+            data_store_id=target_ds['id'],
+            workgroup_id=target_wg['id'],
+            wait=False
         )
+        
+        task_id = task_response.get("taskId")
+        print(f"✓ File uploaded. Processing Task ID: {task_id}")
+        print(f"  Waiting for processing to complete...")
+        
+        # Use quiet=True to avoid interleaving, and show our own progress if needed
+        task_result = client.tasks.wait(task_id, quiet=True)
+        
         duration = time.time() - start_time
-        
         print(f"✓ Upload and processing complete in {duration:.1f}s")
-        
-        # 5. Verify results
+
+        # 4. Verify Results
         print("\n[4/4] Verifying results...")
-        # Task results are stored in the 'results' field (confirmed via debug output)
-        task_results = results.get('results')
-        if isinstance(task_results, list) and len(task_results) > 0:
-            print(f"✓ Successfully created {len(task_results)} dataset(s):")
-            for res in task_results:
+        # The task results for dataset:upload contains a list of created datasets
+        created_datasets = task_result.get("results", [])
+        if isinstance(created_datasets, list) and len(created_datasets) > 0:
+            print(f"✓ Successfully created {len(created_datasets)} dataset(s):")
+            for res in created_datasets:
                 created_ds_id = res.get('createdDatasetId')
                 ds_name = res.get('datasetName', 'N/A')
                 print(f"  - {ds_name} [ID: {created_ds_id}]")

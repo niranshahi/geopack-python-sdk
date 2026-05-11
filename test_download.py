@@ -54,29 +54,35 @@ def main():
 
         # 4. Request Export
         # Match formats with DatasetExportDialog.vue (GTiff/geotiff, GPKG/gpkg)
-        export_format = "geotiff" if dataset_type == "raster" else "gpkg"
-        print(f"\n[2/4] Requesting export to {export_format} (Workgroup: {workgroup_id})...")
-        
-        task_results = client.datasets.export(
+        target_format = "geotiff" if dataset_type == "raster" else "gpkg"
+        wg_id = workgroup_id
+        print(f"\n[2/4] Requesting export to {target_format} (Workgroup: {wg_id})...")
+        export_task = client.datasets.export(
             dataset_id=dataset_id,
-            workgroup_id=workgroup_id,
-            format=export_format,
-            wait=True
+            workgroup_id=wg_id,
+            format=target_format,
+            wait=False # We handle wait ourselves to be quiet
         )
+        
+        task_id = export_task.get("taskId")
+        print(f"✓ Export task started (Task ID: {task_id}). Waiting...")
+        
+        # Wait quietly
+        task_result = client.tasks.wait(task_id, quiet=True)
         print("✓ Export task completed successfully!")
 
-        # 5. Download the Result
-        print(f"\n[3/4] Downloading exported file...")
-        # Create a temp directory for downloads if it doesn't exist
+        # 5. Download Result
+        print("\n[3/4] Downloading exported file...")
         os.makedirs("downloads", exist_ok=True)
         
-        local_file = client.datasets.download(
-            task_results=task_results,
-            local_path="downloads/"
-        )
+        local_file = client.datasets.download(task_result, "downloads/")
+        print(f"✓ File saved to: {local_file}")
         
-        # 6. Verify local file
-        print(f"\n[4/4] Verification:")
+        file_size = os.path.getsize(local_file) / (1024 * 1024)
+        print(f"✓ File size: {file_size:.2f} MB")
+
+        # 6. Verification
+        print("\n[4/4] Verification:")
         if os.path.exists(local_file):
             size_mb = os.path.getsize(local_file) / (1024 * 1024)
             print(f"✓ File downloaded to: {local_file}")

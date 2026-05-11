@@ -25,15 +25,23 @@ def main():
         client.auth.login(username=username, password=password)
         print("✓ Login successful!")
 
-        # 3. Resolve Dataset ID if not provided
+        # 3. Choose a Dataset
+        dataset_id = os.getenv("TEST_DATASET_ID")
         if not dataset_id:
-            datasets = client.datasets.list(page_size=1)
-            if not datasets:
-                print("✖ No datasets found in the portal.")
+            # Server-side filter for vector data
+            datasets = client.datasets.list(page_size=50, active_filters={"dataType": "vector"})
+            
+            # Additional client-side check to be sure
+            vector_datasets = [d for d in datasets if str(d.get('dataType', '')).lower() == 'vector']
+            
+            if not vector_datasets:
+                print("✖ No VECTOR datasets found in the portal. GeoPandas requires vector data.")
                 return
-            dataset_id = datasets[0]['id']
-            dataset_name = datasets[0]['name']
-            print(f"✓ Found latest dataset: {dataset_name} (ID: {dataset_id})")
+            
+            target = vector_datasets[0]
+            dataset_id = target['id']
+            dataset_name = target['name']
+            print(f"✓ Using latest vector dataset: {dataset_name} (ID: {dataset_id})")
         else:
             dataset_id = int(dataset_id)
             print(f"✓ Using Dataset ID: {dataset_id}")

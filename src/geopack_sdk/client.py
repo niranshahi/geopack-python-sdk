@@ -4,6 +4,8 @@ from .auth import AuthManager
 from .datastores import DataStoreManager
 from .datasets import DatasetManager
 from .tasks import TaskManager
+from .workflows import WorkflowManager
+from .workflow_runs import WorkflowRunManager
 from .resources import WorkgroupManager, GroupManager, UserManager, OrganizationManager
 
 class GeopackClient:
@@ -31,6 +33,10 @@ class GeopackClient:
         self.datastores = DataStoreManager(self)
         self.datasets = DatasetManager(self)
         self.tasks = TaskManager(self)
+        self.workflows = WorkflowManager(self)
+        self.workflow_runs = WorkflowRunManager(self)
+        
+        # Identity and Access Management
         self.workgroups = WorkgroupManager(self)
         self.groups = GroupManager(self)
         self.users = UserManager(self)

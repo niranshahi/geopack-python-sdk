@@ -69,7 +69,16 @@ class DatasetManager:
 
         if active_filters:
             for k, v in active_filters.items():
-                params[k] = v
+                # The backend expects these specific filters to be arrays (JSON stringified)
+                # Matches keys in DatasetFilterPanel.vue and DatasetFilters interface
+                array_filters = [
+                    'organizationIds', 'ownerIds', 'workgroupIds', 'dataStoreIds', 
+                    'subType', 'dataType', 'keywords'
+                ]
+                if k in array_filters and not isinstance(v, list):
+                    params[k] = [v]
+                else:
+                    params[k] = v
 
         response = self.client.get("/datasets", params=self._encode_query_params(params))
 
@@ -154,6 +163,38 @@ class DatasetManager:
 
         return self.client.get(f"/datasets/{dataset_id}/features", params=params)
 
+    def to_geodataframe(self, dataset_id: int, limit: int = 1000) -> Any:
+        """Fetch dataset features and convert to a GeoPandas GeoDataFrame.
+        
+        Requires `geopandas` to be installed.
+        """
+        try:
+            import geopandas as gpd
+            from shapely.geometry import shape
+        except ImportError:
+            raise ImportError("geopandas and shapely are required for to_geodataframe()")
+
+        # 1. Fetch metadata to check type and CRS
+        metadata = self.get(dataset_id)
+        if metadata.get('dataType') != 'vector':
+            raise ValueError(f"Dataset {dataset_id} is not a vector dataset (type: {metadata.get('dataType')}). GeoDataFrame only supports vector data.")
+
+        # 2. Fetch features
+        geojson = self.get_features(dataset_id, limit=limit)
+        
+        if not geojson.get('features'):
+            # Return empty GeoDataFrame if no features
+            return gpd.GeoDataFrame()
+
+        # 3. Convert to GeoDataFrame
+        gdf = gpd.GeoDataFrame.from_features(geojson['features'])
+        
+        # 4. Set CRS from metadata if available
+        srid = metadata.get('srid') or 4326
+        gdf.set_crs(epsg=srid, inplace=True)
+        
+        return gdf
+
     def export(
         self,
         dataset_id: int,
@@ -218,15 +259,12 @@ class DatasetManager:
 
         # Determine download URL
         if download_token:
-            # The route is apiRouter.use('/downloads', downloadRoutes) -> router.get('/:token')
             url = f"{self.client.base_url}/downloads/{download_token}"
         elif artifact_path:
-            # Fallback to direct path
             url = f"{self.client.base_url}/download/{artifact_path.lstrip('/')}"
         else:
             raise ValueError("No download token or artifact path found in task results.")
 
-        print(f"Downloading exported file...")
         with self.client.session.get(url, stream=True) as r:
             r.raise_for_status()
             
@@ -243,10 +281,8 @@ class DatasetManager:
             if os.path.isdir(local_path):
                 target_file = os.path.join(local_path, final_filename)
             else:
-                # If local_path was a specific file path, we respect it
                 target_file = local_path
 
-            print(f"Saving to: {target_file}")
             with open(target_file, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=chunk_size):
                     f.write(chunk)
@@ -329,4 +365,4 @@ class DatasetManager:
 
         # 3. Wait for completion
         task_id = task_response["taskId"]
-        return self.client.tasks.wait(task_id, interval=polling_interval)
+        return self.client.tasks.wait(task_id, interval=polling_interval, quiet=True)
