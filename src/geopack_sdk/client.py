@@ -44,6 +44,9 @@ class GeopackClient:
 
     def _request(self, method, endpoint, **kwargs):
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        # Set a default timeout of 30 seconds if not provided
+        if "timeout" not in kwargs:
+            kwargs["timeout"] = 30
         response = self.session.request(method, url, **kwargs)
         try:
             response.raise_for_status()

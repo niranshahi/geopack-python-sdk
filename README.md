@@ -12,10 +12,16 @@ or
 pip install git+https://github.com/niranshahi/geopack-python-sdk.git
 ```
 
-## Quick Start
+## Examples & Notebooks
 
-```python
-from geopack_sdk import GeopackClient
+We provide a collection of Jupyter Notebooks in the `notebooks/` directory to help you get started:
+
+1. `01_Getting_Started.ipynb`: Basic connection and data exploration.
+2. `02_Data_Analysis_GeoPandas.ipynb`: Spatial analysis with GeoPandas.
+3. `03_Raster_Workflows.ipynb`: Server-side processing with GDAL/OGR Workflows.
+4. `04_Data_Management_and_Tasks.ipynb`: Uploading, exporting, and monitoring tasks.
+
+**Note for Developers:** If you are running these notebooks directly from the cloned repository, they are pre-configured to use the local `src/` directory without requiring a global installation.
 
 # Initialize client
 client = GeopackClient(base_url="https://your-geoportal.com/api")
