@@ -87,11 +87,51 @@ class DatasetManager:
             return response["datasets"]
         return response
 
+    def _get_normalized_details(self, dataset: Dict[str, Any]) -> Dict[str, Any]:
+        """Helper to parse and normalize the 'details' field from a dataset object.
+        
+        The 'details' field in the database can be a JSON string that needs parsing.
+        This method mimics the logic in the Vue frontend (datasetStore.ts and DatasetPropertiesPanel.vue).
+        """
+        details = dataset.get('details', {})
+        if isinstance(details, str):
+            try:
+                details = json.loads(details)
+            except json.JSONDecodeError:
+                details = {}
+        
+        if not details:
+            details = {}
+
+        # Normalize common fields (mimic DatasetPropertiesPanel.vue logic)
+        # Spatial Reference
+        srid = details.get('spatialReference', {}).get('srid') or details.get('srid')
+        wkt = details.get('spatialReference', {}).get('wkt') or details.get('wkt')
+        
+        # Extent
+        extent = details.get('extent')
+        
+        # Raster Dimensions
+        raster_dims = details.get('rasterDimensions', {})
+        if not raster_dims.get('width'): raster_dims['width'] = details.get('width')
+        if not raster_dims.get('height'): raster_dims['height'] = details.get('height')
+        
+        return {
+            **details,
+            'spatialReference': {'srid': srid, 'wkt': wkt},
+            'extent': extent,
+            'rasterDimensions': raster_dims
+        }
+
     def get(self, dataset_id):
         """
         Get detailed information about a single dataset.
         """
-        return self.client.get(f"/datasets/{dataset_id}")
+        dataset = self.client.get(f"/datasets/{dataset_id}")
+        # Automatically normalize details if present
+        if isinstance(dataset, dict) and 'details' in dataset:
+            dataset['normalizedDetails'] = self._get_normalized_details(dataset)
+        return dataset
 
     def get_statistics(self):
         """Fetch aggregated dataset statistics for filter controls.
@@ -189,9 +229,42 @@ class DatasetManager:
         # 3. Convert to GeoDataFrame
         gdf = gpd.GeoDataFrame.from_features(geojson['features'])
         
-        # 4. Set CRS from metadata if available
-        srid = metadata.get('srid') or 4326
-        gdf.set_crs(epsg=srid, inplace=True)
+        # 4. Set CRS with a robust hierarchy
+        norm = metadata.get('normalizedDetails', {})
+        sp_ref = norm.get('spatialReference', {})
+        
+        # Priority 1: Check if GeoJSON already has CRS info
+        geojson_crs = geojson.get('crs')
+        
+        # Priority 2: Use SRID if valid (> 0)
+        srid = sp_ref.get('srid')
+        
+        # Priority 3: Use WKT if available (more robust than Proj4)
+        wkt = sp_ref.get('wkt')
+        
+        # Priority 4: Use Proj4 if others are missing
+        proj4 = sp_ref.get('proj4')
+
+        if geojson_crs and isinstance(geojson_crs, dict):
+            # GeoJSON CRS standard often uses 'urn:ogc:def:crs:EPSG::32640'
+            crs_name = geojson_crs.get('properties', {}).get('name', '')
+            if 'EPSG::' in crs_name:
+                try:
+                    epsg_code = int(crs_name.split('EPSG::')[-1])
+                    gdf.set_crs(epsg=epsg_code, inplace=True)
+                except (ValueError, IndexError):
+                    pass # Fallback to metadata if parsing fails
+        
+        # If CRS not set by GeoJSON parsing, follow hierarchy
+        if gdf.crs is None:
+            if srid and srid > 0:
+                gdf.set_crs(epsg=srid, inplace=True)
+            elif wkt:
+                gdf.set_crs(wkt, inplace=True)
+            elif proj4:
+                gdf.set_crs(proj4, inplace=True)
+            else:
+                gdf.set_crs(epsg=4326, inplace=True)
         
         return gdf
 
