@@ -47,7 +47,19 @@ class GeopackClient:
         # Set a default timeout of 30 seconds if not provided
         if "timeout" not in kwargs:
             kwargs["timeout"] = 30
+        
         response = self.session.request(method, url, **kwargs)
+        
+        # Automatic token refresh
+        if response.status_code == 401 and hasattr(self, 'auth') and getattr(self.auth, 'refresh_token', None):
+            try:
+                self.auth.refresh()
+                # Retry the request with the new token
+                response = self.session.request(method, url, **kwargs)
+            except Exception:
+                # If refresh fails, fall through to normal error handling
+                pass
+
         try:
             response.raise_for_status()
         except requests.exceptions.HTTPError as e:
