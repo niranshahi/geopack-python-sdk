@@ -41,8 +41,8 @@ def main():
             return
         
         target_ds = datastores[0]
-        ds_id = target_ds['id']
-        ds_name = target_ds['name']
+        ds_id = target_ds.get('id') if isinstance(target_ds, dict) else target_ds.id
+        ds_name = target_ds.get('name') if isinstance(target_ds, dict) else target_ds.name
         
         # Use the new workgroups manager
         workgroups = client.workgroups.list()
@@ -51,8 +51,8 @@ def main():
             return
         
         target_wg = workgroups[0]
-        wg_id = target_wg['id']
-        wg_name = target_wg['name']
+        wg_id = target_wg.get('id') if isinstance(target_wg, dict) else target_wg.id
+        wg_name = target_wg.get('name') if isinstance(target_wg, dict) else target_wg.name
         
         print(f"✓ Target: DataStore '{ds_name}' (ID: {ds_id}), Workgroup '{wg_name}' (ID: {wg_id})")
 
@@ -64,12 +64,14 @@ def main():
         # We pass wait=False to manage the 'quiet' waiting ourselves
         task_response = client.datasets.upload(
             file_path=test_file_path,
-            data_store_id=target_ds['id'],
-            workgroup_id=target_wg['id'],
+            data_store_id=ds_id,
+            workgroup_id=wg_id,
             wait=False
         )
         
-        task_id = task_response.get("taskId")
+        task_id = task_response.taskId or task_response.id
+        if not task_id:
+            raise ValueError("Task response missing taskId and id")
         print(f"✓ File uploaded. Processing Task ID: {task_id}")
         print(f"  Waiting for processing to complete...")
         
@@ -82,16 +84,16 @@ def main():
         # 4. Verify Results
         print("\n[4/4] Verifying results...")
         # The task results for dataset:upload contains a list of created datasets
-        created_datasets = task_result.get("results", [])
+        created_datasets = task_result.results or []
         if isinstance(created_datasets, list) and len(created_datasets) > 0:
             print(f"✓ Successfully created {len(created_datasets)} dataset(s):")
             for res in created_datasets:
-                created_ds_id = res.get('createdDatasetId')
-                ds_name = res.get('datasetName', 'N/A')
+                created_ds_id = res.get('createdDatasetId') if isinstance(res, dict) else res.createdDatasetId
+                ds_name = res.get('datasetName') if isinstance(res, dict) else (res.datasetName or 'N/A')
                 print(f"  - {ds_name} [ID: {created_ds_id}]")
         else:
             print("! Task finished but results field is empty or missing dataset IDs.")
-            print(f"  Full Task Response: {results}")
+            print(f"  Full Task Response: {task_result}")
 
         print("\n--- Upload Test Completed Successfully ---")
 

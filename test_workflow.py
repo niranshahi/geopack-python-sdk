@@ -27,24 +27,24 @@ def main():
             return
 
         # 2. Select a target workflow (Hillshade or first)
-        target_wf = next((w for w in workflows if w['id'] == 31), workflows[0])
-        wf_id = target_wf['id']
+        target_wf = next((w for w in workflows if w.id == 31), workflows[0])
+        wf_id = target_wf.id
         wf_details = client.workflows.get(wf_id)
-        print(f"✓ Selected Workflow: {wf_details.get('name')} (ID: {wf_id})")
+        print(f"✓ Selected Workflow: {wf_details.name} (ID: {wf_id})")
 
         # 3. Extract parameters
         params = client.workflows.extract_params(wf_details)
-        run_params = {p['key']: p['default'] for p in params if p.get('required') and p.get('default') is not None}
+        run_params = {p.key: p.default for p in params if p.required and p.default is not None}
 
         # 4. Execute and WAIT
-        print(f"✓ Executing workflow '{wf_details.get('name')}'... (waiting for completion)")
+        print(f"✓ Executing workflow '{wf_details.name}'... (waiting for completion)")
         run_result = client.workflow_runs.submit(workflow_id=wf_id, params=run_params, wait=True)
         
         # 5. PRINT FINAL RESULTS
         print("\n" + "="*60)
         print(f"WORKFLOW RUN #{run_result.get('id')} RESULTS")
         print("="*60)
-        print(f"Status: {run_result.get('status').upper()}")
+        print(f"Status: {run_result.get('status', '').upper()}")
         
         # Artifacts & Files (Matching Portal UI)
         artifacts = run_result.get('artifacts', [])
@@ -74,7 +74,7 @@ def main():
         if any(a.get('filePath') for a in artifacts):
             file_art = next(a for a in artifacts if a.get('filePath'))
             print(f"\n💡 To download the file above, use:")
-            print(f"   client.workflow_runs.download_artifact({run_result['id']}, {file_art['id']}, './')")
+            print(f"   client.workflow_runs.download_artifact({run_result.get('id')}, {file_art.get('id')}, './')")
         
         print("="*60)
         print("\n--- Workflow SDK Test Completed Successfully ---")

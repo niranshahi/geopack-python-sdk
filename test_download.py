@@ -11,9 +11,9 @@ def main():
     username = os.getenv("GEOPACK_USERNAME", "admin")
     password = os.getenv("GEOPACK_PASSWORD", "password")
     
-    # Try to find a raster dataset or use a provided ID
-    dataset_id = os.getenv("TEST_RASTER_ID")
-
+    # Try to find a dataset or use a provided ID
+    dataset_id = os.getenv("TEST_DATASET_ID")
+   
     try:
         # 1. Initialize Client
         client = GeopackClient(base_url=api_url)
@@ -29,27 +29,29 @@ def main():
         
         if not dataset_id:
             # Find the latest raster dataset
-            datasets = client.datasets.list(active_filters={"dataType": "raster"}, page_size=1)
+            response = client.datasets.list(active_filters={"dataType": "raster"}, page_size=1)
+            datasets = response.datasets
             if not datasets:
                 print("! No raster datasets found. Falling back to latest any dataset.")
-                datasets = client.datasets.list(page_size=1)
+                response = client.datasets.list(page_size=1)
+                datasets = response.datasets
             
             if not datasets:
                 print("✖ No datasets found in the portal.")
                 return
             
             target_ds = datasets[0]
-            dataset_id = target_ds['id']
-            dataset_name = target_ds['name']
-            dataset_type = target_ds['dataType']
-            workgroup_id = target_ds.get('workgroupId', 1)
+            dataset_id = target_ds.id
+            dataset_name = target_ds.name
+            dataset_type = target_ds.dataType
+            workgroup_id = target_ds.workgroupId or 1
             print(f"✓ Target Dataset: {dataset_name} (ID: {dataset_id}, Type: {dataset_type})")
         else:
             dataset_id = int(dataset_id)
             # Fetch dataset info to get its type and workgroup
             target_ds = client.datasets.get(dataset_id)
-            dataset_type = target_ds.get('dataType', 'vector')
-            workgroup_id = target_ds.get('workgroupId', 1)
+            dataset_type = target_ds.dataType or 'vector'
+            workgroup_id = target_ds.workgroupId or 1
             print(f"✓ Using provided Dataset ID: {dataset_id} (Type: {dataset_type})")
 
         # 4. Request Export
@@ -64,7 +66,9 @@ def main():
             wait=False # We handle wait ourselves to be quiet
         )
         
-        task_id = export_task.get("taskId")
+        task_id = export_task.taskId or export_task.id
+        if not task_id:
+            raise ValueError("Task response missing taskId and id")
         print(f"✓ Export task started (Task ID: {task_id}). Waiting...")
         
         # Wait quietly
@@ -75,7 +79,9 @@ def main():
         print("\n[3/4] Downloading exported file...")
         os.makedirs("downloads", exist_ok=True)
         
-        local_file = client.datasets.download(task_result, "downloads/")
+        # task_result is a TaskResult Pydantic model, convert to dict for download
+        task_result_dict = task_result.model_dump()
+        local_file = client.datasets.download(task_result_dict, "downloads/")
         print(f"✓ File saved to: {local_file}")
         
         file_size = os.path.getsize(local_file) / (1024 * 1024)

@@ -1,6 +1,17 @@
 import os
 import json
 from typing import Any, Dict, List, Optional, Union
+from .models import (
+    Dataset,
+    DatasetsApiResponse,
+    CreateDatasetDto,
+    UpdateDatasetDto,
+    FeatureCollection,
+    FilterStatistics,
+    DatasetTimeSeriesPoint,
+    DatasetStatsByStore,
+    DatasetStatsByGeomType,
+)
 
 class DatasetManager:
     def __init__(self, client):
@@ -37,8 +48,8 @@ class DatasetManager:
         order_by: Optional[str] = None,
         order_direction: Optional[str] = None,
         active_filters: Optional[Dict[str, Any]] = None,
-    ):
-        """List datasets.
+    ) -> DatasetsApiResponse:
+        """List datasets with type-safe response.
 
         REST API: `GET /api/datasets`
 
@@ -51,6 +62,9 @@ class DatasetManager:
         - subType, dataType, keywords
         - startDate, endDate
         - bbox: [xmin, ymin, xmax, ymax]
+
+        Returns:
+            DatasetsApiResponse: Validated response with datasets array and pagination info
         """
 
         params: Dict[str, Any] = {
@@ -80,12 +94,10 @@ class DatasetManager:
                 else:
                     params[k] = v
 
-        response = self.client.get("/datasets", params=self._encode_query_params(params))
+        response_data = self.client.get("/datasets", params=self._encode_query_params(params))
 
-        # Based on DatasetsApiResponse, datasets are in the 'datasets' field
-        if isinstance(response, dict) and "datasets" in response:
-            return response["datasets"]
-        return response
+        # Validate and convert to Pydantic model
+        return DatasetsApiResponse(**response_data)
 
     def _get_normalized_details(self, dataset: Dict[str, Any]) -> Dict[str, Any]:
         """Helper to parse and normalize the 'details' field from a dataset object.
@@ -123,48 +135,91 @@ class DatasetManager:
             'rasterDimensions': raster_dims
         }
 
-    def get(self, dataset_id):
+    def get(self, dataset_id: int) -> Dataset:
         """
-        Get detailed information about a single dataset.
-        """
-        dataset = self.client.get(f"/datasets/{dataset_id}")
-        # Automatically normalize details if present
-        if isinstance(dataset, dict) and 'details' in dataset:
-            dataset['normalizedDetails'] = self._get_normalized_details(dataset)
-        return dataset
+        Get detailed information about a single dataset with type-safe response.
 
-    def get_statistics(self):
-        """Fetch aggregated dataset statistics for filter controls.
+        REST API: `GET /api/datasets/{id}`
+
+        Args:
+            dataset_id: ID of the dataset to fetch
+
+        Returns:
+            Dataset: Validated dataset model with normalized details
+        """
+        dataset_data = self.client.get(f"/datasets/{dataset_id}")
+        
+        # Automatically normalize details if present
+        if isinstance(dataset_data, dict) and 'details' in dataset_data:
+            dataset_data['normalizedDetails'] = self._get_normalized_details(dataset_data)
+        
+        # Validate and convert to Pydantic model
+        return Dataset(**dataset_data)
+
+    def get_statistics(self) -> FilterStatistics:
+        """Fetch aggregated dataset statistics for filter controls with type-safe response.
 
         REST API: `GET /api/datasets/statistics`
-        """
-        return self.client.get("/datasets/statistics")
 
-    def get_time_series_stats(self, days: Optional[int] = None, data_type: Optional[str] = None):
-        """Fetch time-series dataset stats.
+        Returns:
+            FilterStatistics: Validated filter statistics model
+        """
+        response_data = self.client.get("/datasets/statistics")
+        return FilterStatistics(**response_data)
+
+    def get_time_series_stats(self, days: Optional[int] = None, data_type: Optional[str] = None) -> List[DatasetTimeSeriesPoint]:
+        """Fetch time-series dataset stats with type-safe response.
 
         REST API: `GET /api/datasets/stats/time-series`
+
+        Args:
+            days: Number of days to look back
+            data_type: Filter by data type (vector, raster, table)
+
+        Returns:
+            List[DatasetTimeSeriesPoint]: Validated time-series data points
         """
         params: Dict[str, Any] = {}
         if days is not None:
             params["days"] = days
         if data_type is not None:
             params["dataType"] = data_type
-        return self.client.get("/datasets/stats/time-series", params=self._encode_query_params(params))
+        response_data = self.client.get("/datasets/stats/time-series", params=self._encode_query_params(params))
+        
+        # API returns an array, validate each item
+        if isinstance(response_data, list):
+            return [DatasetTimeSeriesPoint(**item) for item in response_data]
+        return []
 
-    def get_stats_by_store(self):
-        """Fetch aggregated stats by datastore type.
+    def get_stats_by_store(self) -> List[DatasetStatsByStore]:
+        """Fetch aggregated stats by datastore type with type-safe response.
 
         REST API: `GET /api/datasets/stats/by-store`
-        """
-        return self.client.get("/datasets/stats/by-store")
 
-    def get_stats_by_geom_type(self):
-        """Fetch aggregated stats by geometry type.
+        Returns:
+            List[DatasetStatsByStore]: Validated stats by datastore type
+        """
+        response_data = self.client.get("/datasets/stats/by-store")
+        
+        # API returns an array, validate each item
+        if isinstance(response_data, list):
+            return [DatasetStatsByStore(**item) for item in response_data]
+        return []
+
+    def get_stats_by_geom_type(self) -> List[DatasetStatsByGeomType]:
+        """Fetch aggregated stats by geometry type with type-safe response.
 
         REST API: `GET /api/datasets/stats/by-geom-type`
+
+        Returns:
+            List[DatasetStatsByGeomType]: Validated stats by geometry type
         """
-        return self.client.get("/datasets/stats/by-geom-type")
+        response_data = self.client.get("/datasets/stats/by-geom-type")
+        
+        # API returns an array, validate each item
+        if isinstance(response_data, list):
+            return [DatasetStatsByGeomType(**item) for item in response_data]
+        return []
 
     def get_features(
         self,
@@ -174,8 +229,8 @@ class DatasetManager:
         bbox: Optional[List[float]] = None,
         out_srid: Optional[int] = None,
         filters: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Fetch features from a dataset as a GeoJSON FeatureCollection.
+    ) -> FeatureCollection:
+        """Fetch features from a dataset as a GeoJSON FeatureCollection with type-safe response.
 
         REST API: `GET /api/datasets/:id/features`
 
@@ -188,7 +243,7 @@ class DatasetManager:
             filters: Optional structured attribute/spatial filters.
 
         Returns:
-            GeoJSON FeatureCollection.
+            FeatureCollection: Validated GeoJSON FeatureCollection model
         """
         params: Dict[str, Any] = {
             "limit": limit,
@@ -201,7 +256,8 @@ class DatasetManager:
         if filters:
             params["filter"] = json.dumps(filters)
 
-        return self.client.get(f"/datasets/{dataset_id}/features", params=params)
+        response_data = self.client.get(f"/datasets/{dataset_id}/features", params=params)
+        return FeatureCollection(**response_data)
 
     def to_geodataframe(self, dataset_id: int, limit: int = 1000) -> Any:
         """Fetch dataset features and convert to a GeoPandas GeoDataFrame.
@@ -216,26 +272,33 @@ class DatasetManager:
 
         # 1. Fetch metadata to check type and CRS
         metadata = self.get(dataset_id)
-        if metadata.get('dataType') != 'vector':
-            raise ValueError(f"Dataset {dataset_id} is not a vector dataset (type: {metadata.get('dataType')}). GeoDataFrame only supports vector data.")
+        if metadata.dataType != 'vector':
+            raise ValueError(f"Dataset {dataset_id} is not a vector dataset (type: {metadata.dataType}). GeoDataFrame only supports vector data.")
 
-        # 2. Fetch features
-        geojson = self.get_features(dataset_id, limit=limit)
+        # 2. Fetch features (now returns FeatureCollection Pydantic model)
+        feature_collection = self.get_features(dataset_id, limit=limit)
         
-        if not geojson.get('features'):
+        if not feature_collection.features:
             # Return empty GeoDataFrame if no features
             return gpd.GeoDataFrame()
 
-        # 3. Convert to GeoDataFrame
-        gdf = gpd.GeoDataFrame.from_features(geojson['features'])
+        # 3. Convert Pydantic model to dict for GeoPandas
+        geojson_dict = feature_collection.model_dump()
         
-        # 4. Set CRS with a robust hierarchy
-        norm = metadata.get('normalizedDetails', {})
+        # 4. Convert to GeoDataFrame
+        gdf = gpd.GeoDataFrame.from_features(geojson_dict['features'])
+        
+        # 5. Set CRS with a robust hierarchy
+        # First check if FeatureCollection has CRS
+        if feature_collection.crs:
+            geojson_crs = feature_collection.crs
+        else:
+            geojson_crs = geojson_dict.get('crs')
+        
+        norm = metadata.model_dump().get('normalizedDetails', {})
         sp_ref = norm.get('spatialReference', {})
         
         # Priority 1: Check if GeoJSON already has CRS info
-        geojson_crs = geojson.get('crs')
-        
         # Priority 2: Use SRID if valid (> 0)
         srid = sp_ref.get('srid')
         
@@ -305,7 +368,9 @@ class DatasetManager:
         if not wait:
             return task_response
             
-        task_id = task_response.get("taskId")
+        task_id = task_response.taskId or task_response.id
+        if not task_id:
+            raise ValueError("Task response missing taskId and id")
         return self.client.tasks.wait(task_id, interval=polling_interval)
 
     def download(
@@ -437,5 +502,7 @@ class DatasetManager:
             return task_response
 
         # 3. Wait for completion
-        task_id = task_response["taskId"]
+        task_id = task_response.taskId or task_response.id
+        if not task_id:
+            raise ValueError("Task response missing taskId and id")
         return self.client.tasks.wait(task_id, interval=polling_interval, quiet=True)

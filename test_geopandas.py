@@ -29,18 +29,21 @@ def main():
         dataset_id = os.getenv("TEST_DATASET_ID")
         if not dataset_id:
             # Server-side filter for vector data
-            datasets = client.datasets.list(page_size=50, active_filters={"dataType": "vector"})
+            response = client.datasets.list(page_size=50, active_filters={"dataType": "vector"})
+            
+            # Access the datasets array from the response
+            datasets_list = response.datasets
             
             # Additional client-side check to be sure
-            vector_datasets = [d for d in datasets if str(d.get('dataType', '')).lower() == 'vector']
+            vector_datasets = [d for d in datasets_list if d.dataType == 'vector']
             
             if not vector_datasets:
                 print("✖ No VECTOR datasets found in the portal. GeoPandas requires vector data.")
                 return
             
             target = vector_datasets[0]
-            dataset_id = target['id']
-            dataset_name = target['name']
+            dataset_id = target.id
+            dataset_name = target.name
             print(f"✓ Using latest vector dataset: {dataset_name} (ID: {dataset_id})")
         else:
             dataset_id = int(dataset_id)

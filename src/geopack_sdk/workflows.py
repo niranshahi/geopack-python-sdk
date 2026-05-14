@@ -1,5 +1,10 @@
 import json
 from typing import Any, Dict, List, Optional, Union
+from .models import (
+    Workflow,
+    WorkflowParameter,
+    WorkflowRun,
+)
 
 class WorkflowManager:
     """Manager for Workflow Definitions and Operations."""
@@ -14,10 +19,13 @@ class WorkflowManager:
         page_size: int = 10,
         search_query: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
-        """List workflow definitions.
-        
+    ) -> List[Workflow]:
+        """List workflow definitions with type-safe response.
+
         REST API: `GET /api/workflows`
+
+        Returns:
+            List[Workflow]: Validated workflow models
         """
         params = {
             "limit": page_size,
@@ -27,22 +35,46 @@ class WorkflowManager:
         if search_query:
             params["q"] = search_query
 
-        response = self.client.get(self.base_url, params=params)
-        return response.get("items", [])
-
-    def get(self, workflow_id: int) -> Dict[str, Any]:
-        """Get a single workflow definition by ID.
+        response_data = self.client.get(self.base_url, params=params)
+        items = response_data.get("items", [])
         
+        # Validate each item as Workflow
+        if isinstance(items, list):
+            return [Workflow(**item) for item in items]
+        return []
+
+    def get(self, workflow_id: int) -> Workflow:
+        """Get a single workflow definition by ID with type-safe response.
+
         REST API: `GET /api/workflows/:id`
-        """
-        return self.client.get(f"{self.base_url}/{workflow_id}")
 
-    def extract_params(self, workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract runtime parameters from the workflow graph definition.
-        
-        This mimics the logic in WorkflowRunParametersForm.vue.
+        Args:
+            workflow_id: ID of the workflow to fetch
+
+        Returns:
+            Workflow: Validated workflow model
         """
-        graph = workflow.get('graphJson', {})
+        response_data = self.client.get(f"{self.base_url}/{workflow_id}")
+        return Workflow(**response_data)
+
+    def extract_params(self, workflow: Union[Workflow, Dict[str, Any]]) -> List[WorkflowParameter]:
+        """Extract runtime parameters from the workflow graph definition with type-safe response.
+
+        This mimics the logic in WorkflowRunParametersForm.vue.
+
+        Args:
+            workflow: Workflow model or dictionary containing graphJson
+
+        Returns:
+            List[WorkflowParameter]: Validated workflow parameter models
+        """
+        # Convert to dict if it's a Pydantic model
+        if isinstance(workflow, Workflow):
+            workflow_dict = workflow.model_dump()
+        else:
+            workflow_dict = workflow
+        
+        graph = workflow_dict.get('graphJson', {})
         if not graph:
             return []
             
@@ -69,7 +101,7 @@ class WorkflowManager:
                 
                 param_type = 'dataset-field' if type_name == 'datasetFieldParamNode' else str(config.get('type', 'string'))
                 
-                items.append({
+                param_dict = {
                     "key": key,
                     "type": param_type,
                     "description": config.get('description'),
@@ -80,7 +112,10 @@ class WorkflowManager:
                     "dataType": config.get('dataType'), # for dataset-selector
                     "geometryType": config.get('geometryType'), # for geom-param
                     "multiple": config.get('multiple', False)
-                })
+                }
+                
+                # Validate as WorkflowParameter
+                items.append(WorkflowParameter(**param_dict))
         
         # Sort by Y position (Top to Bottom) then X (Left to Right) as per frontend layout logic
         items.sort(key=lambda x: (nodes[0].get('position', {}).get('y', 0), nodes[0].get('position', {}).get('x', 0)))
@@ -95,19 +130,34 @@ class WorkflowManager:
         response = self.client.get(f"{self.base_url}/operations")
         return response.get("items", [])
 
-    def create(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a new workflow definition.
-        
-        REST API: `POST /api/workflows`
-        """
-        return self.client.post(self.base_url, json=payload)
+    def create(self, payload: Dict[str, Any]) -> Workflow:
+        """Create a new workflow definition with type-safe response.
 
-    def update(self, workflow_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Update an existing workflow definition.
-        
-        REST API: `PUT /api/workflows/:id`
+        REST API: `POST /api/workflows`
+
+        Args:
+            payload: Workflow definition data
+
+        Returns:
+            Workflow: Validated workflow model
         """
-        return self.client.put(f"{self.base_url}/{workflow_id}", json=payload)
+        response_data = self.client.post(self.base_url, json=payload)
+        return Workflow(**response_data)
+
+    def update(self, workflow_id: int, payload: Dict[str, Any]) -> Workflow:
+        """Update an existing workflow definition with type-safe response.
+
+        REST API: `PUT /api/workflows/:id`
+
+        Args:
+            workflow_id: ID of the workflow to update
+            payload: Updated workflow definition data
+
+        Returns:
+            Workflow: Validated workflow model
+        """
+        response_data = self.client.put(f"{self.base_url}/{workflow_id}", json=payload)
+        return Workflow(**response_data)
 
     def delete(self, workflow_id: int) -> bool:
         """Delete a workflow definition.

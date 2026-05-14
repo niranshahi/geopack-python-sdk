@@ -66,11 +66,19 @@ class GeopackClient:
             # Try to extract detailed error from response body
             try:
                 error_data = response.json()
-                msg = error_data.get("message") or error_data.get("errors") or str(error_data)
+                if isinstance(error_data, dict):
+                    msg = error_data.get("message") or error_data.get("errors") or str(error_data)
+                else:
+                    msg = str(error_data)
                 raise Exception(f"Geopack API Error ({response.status_code}): {msg}") from e
-            except (ValueError, KeyError):
+            except (ValueError, KeyError, AttributeError):
                 # Fallback to original HTTPError
                 raise e
+        except Exception as e:
+            # Catch Pydantic validation errors and other exceptions
+            if "validation error" in str(e).lower():
+                raise Exception(f"SDK Validation Error: {str(e)}") from e
+            raise e
         return response.json()
 
     def get(self, endpoint, params=None, **kwargs):

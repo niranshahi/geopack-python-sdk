@@ -28,15 +28,15 @@ def main():
 
         # 3. List Datasets
         print("\n[2/5] Fetching datasets list...")
-        datasets = client.datasets.list(page_size=5)
+        response = client.datasets.list(page_size=5)
+        datasets = response.datasets
         
         if datasets:
             print(f"✓ Found {len(datasets)} datasets (showing top 5):")
             for ds in datasets:
-                # API returns objects, SDK list() extracts the 'datasets' array
-                name = ds.get('name', 'N/A')
-                ds_id = ds.get('id', 'N/A')
-                data_type = ds.get('dataType', 'unknown')
+                name = ds.name
+                ds_id = ds.id
+                data_type = ds.dataType
                 print(f"  - {name} [ID: {ds_id}, Type: {data_type}]")
         else:
             print("! No datasets found or access restricted.")
@@ -44,12 +44,10 @@ def main():
         # Dataset filter statistics
         print("\n[2.5/5] Fetching dataset filter statistics...")
         stats = client.datasets.get_statistics()
-        if isinstance(stats, dict):
-            org_count = len(stats.get('organizations', []) or [])
-            keyword_count = len(stats.get('keywords', []) or [])
-            print(f"✓ Statistics loaded (organizations={org_count}, keywords={keyword_count})")
-        else:
-            print("! Statistics endpoint returned unexpected format")
+        org_count = len(stats.organizations or [])
+        keyword_count = len(stats.keywords or [])
+        owner_count = len(stats.owners or [])
+        print(f"✓ Statistics loaded (organizations={org_count}, keywords={keyword_count}, owners={owner_count})")
 
         # 4. List DataStores
         print("\n[3/5] Fetching datastores...")
@@ -58,10 +56,10 @@ def main():
             if isinstance(datastores, list):
                 print(f"✓ Found {len(datastores)} datastores:")
                 for ds in datastores[:5]:
-                    ds_name = ds.get('name', 'N/A')
-                    ds_type = ds.get('type', 'unknown')
-                    ds_status = ds.get('status', '?')
-                    caps = ds.get('capabilities', [])
+                    ds_name = ds.name if hasattr(ds, 'name') else ds.get('name', 'N/A')
+                    ds_type = ds.type if hasattr(ds, 'type') else ds.get('type', 'unknown')
+                    ds_status = ds.status if hasattr(ds, 'status') else ds.get('status', '?')
+                    caps = ds.capabilities if hasattr(ds, 'capabilities') else ds.get('capabilities', [])
                     print(f"  - {ds_name} [type={ds_type}, status={ds_status}, caps={len(caps)}]")
             else:
                 print("! DataStores endpoint returned unexpected format")

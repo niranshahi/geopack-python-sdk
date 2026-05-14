@@ -1,5 +1,7 @@
 import time
 import logging
+from typing import Any, Dict, Optional
+from .models import TaskResult
 
 logger = logging.getLogger(__name__)
 
@@ -7,33 +9,60 @@ class TaskManager:
     def __init__(self, client):
         self.client = client
 
-    def get_status(self, task_id):
+    def get_status(self, task_id: str) -> TaskResult:
         """
-        Fetch the current status of a background task.
+        Fetch the current status of a background task with type-safe response.
 
         REST API: `GET /api/tasks/{taskId}`
-        """
-        return self.client.get(f"/tasks/{task_id}")
 
-    def create(self, task_payload):
+        Args:
+            task_id: ID of the task to fetch
+
+        Returns:
+            TaskResult: Validated task result model
         """
-        Create a new background task.
+        response_data = self.client.get(f"/tasks/{task_id}")
+        return TaskResult(**response_data)
+
+    def create(self, task_payload: Dict[str, Any]) -> TaskResult:
+        """
+        Create a new background task with type-safe response.
 
         REST API: `POST /api/tasks`
-        """
-        return self.client.post("/tasks", json=task_payload)
 
-    def wait(self, task_id, timeout=300, interval=2, quiet=False):
+        Args:
+            task_payload: Task creation payload
+
+        Returns:
+            TaskResult: Validated task result model
+        """
+        response_data = self.client.post("/tasks", json=task_payload)
+        return TaskResult(**response_data)
+
+    def wait(self, task_id: str, timeout: int = 300, interval: int = 2, quiet: bool = False) -> TaskResult:
         """
         Alias for wait_for_task.
         """
         return self.wait_for_task(task_id, timeout=timeout, interval=interval, quiet=quiet)
 
-    def wait_for_task(self, task_id, timeout=300, interval=2, quiet=False):
+    def wait_for_task(self, task_id: str, timeout: int = 300, interval: int = 2, quiet: bool = False) -> TaskResult:
         """
-        Poll the task status until it is completed or failed.
+        Poll the task status until it is completed or failed with type-safe response.
 
         REST API: `GET /api/tasks/{taskId}` (polled)
+
+        Args:
+            task_id: ID of the task to wait for
+            timeout: Maximum seconds to wait
+            interval: Seconds between polls
+            quiet: If True, suppress logging output
+
+        Returns:
+            TaskResult: Validated task result model when completed
+
+        Raises:
+            Exception: If task fails or is canceled
+            TimeoutError: If task times out
 
         Expected terminal statuses:
         - completed
@@ -45,8 +74,8 @@ class TaskManager:
         
         start_time = time.time()
         while time.time() - start_time < timeout:
-            status_data = self.get_status(task_id)
-            status = status_data.get("status")
+            status_result = self.get_status(task_id)
+            status = status_result.status
             
             if not quiet:
                 logger.info(f"Task {task_id}: {status}")
@@ -56,8 +85,8 @@ class TaskManager:
                 return self.get_status(task_id)
             if status in ["failed", "canceled"]:
                 if status == "failed" and not quiet:
-                    logger.error(f"Task failed: {status_data.get('message')}")
-                raise Exception(f"Task {task_id} failed or was canceled: {status_data.get('message')}")
+                    logger.error(f"Task failed: {status_result.message}")
+                raise Exception(f"Task {task_id} failed or was canceled: {status_result.message}")
             
             time.sleep(interval)
         
