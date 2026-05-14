@@ -1,4 +1,11 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
+from .models import (
+    DataStoreResponse,
+    DataStoreListResponse,
+    TestConnectionResponse,
+    PredefinedDataStore,
+    DataStoreAclEntry,
+)
 
 
 class DataStoreManager:
@@ -31,21 +38,29 @@ class DataStoreManager:
 
     # ── CRUD ──────────────────────────────────────────────────────────
 
-    def list(self) -> List[Dict[str, Any]]:
-        """List all configured DataStores.
+    def list(self) -> DataStoreListResponse:
+        """List all configured DataStores with type-safe response.
 
         REST API: `GET /api/datastores`
 
         Returns a list of DataStore objects (connection details excluded).
         Each object includes an enriched `capabilities` array derived from
         its adapter type.
+
+        Returns:
+            DataStoreListResponse: Validated response with datastores list
         """
-        return self.client.get("/datastores")
+        response_data = self.client.get("/datastores")
+        # API returns list directly
+        if isinstance(response_data, list):
+            datastores = [DataStoreResponse(**d) for d in response_data]
+            return DataStoreListResponse(datastores=datastores, totalCount=len(datastores))
+        return DataStoreListResponse(**response_data)
 
     def list_by_capabilities(
         self,
-        purpose: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        purpose: Optional[Literal['dataset-creation', 'workflow-output']] = None,
+    ) -> DataStoreListResponse:
         """List DataStores filtered by capabilities / purpose.
 
         REST API: `GET /api/datastores/by-capabilities`
@@ -55,23 +70,42 @@ class DataStoreManager:
                      or ``None`` (returns all).
 
         Returns:
-            ``{ success, data: [...], metadata: { purpose, count, retrievedAt } }``
+            DataStoreListResponse: Validated response with filtered datastores list
         """
         params: Dict[str, Any] = {}
         if purpose:
             params["purpose"] = purpose
-        return self.client.get("/datastores/by-capabilities", params=params or None)
+        response_data = self.client.get("/datastores/by-capabilities", params=params or None)
+        
+        # Handle both formats: direct array or { success, data, metadata }
+        data = response_data
+        if isinstance(response_data, dict):
+            if 'data' in response_data:
+                data = response_data['data']
+            elif 'datastores' in response_data:
+                return DataStoreListResponse(**response_data)
+        
+        if isinstance(data, list):
+            datastores = [DataStoreResponse(**d) for d in data]
+            return DataStoreListResponse(datastores=datastores, totalCount=len(datastores))
+            
+        return DataStoreListResponse(**response_data)
 
-    def get(self, data_store_id: int) -> Dict[str, Any]:
-        """Get a single DataStore by ID.
+    def get(self, data_store_id: int) -> DataStoreResponse:
+        """Get a single DataStore by ID with type-safe response.
 
         REST API: `GET /api/datastores/:id`
 
-        Returns the DataStore object (connection details excluded).
-        """
-        return self.client.get(f"/datastores/{data_store_id}")
+        Args:
+            data_store_id: ID of the DataStore to fetch
 
-    def create(self, data_store_input: Dict[str, Any]) -> Dict[str, Any]:
+        Returns:
+            DataStoreResponse: Validated DataStore model
+        """
+        response_data = self.client.get(f"/datastores/{data_store_id}")
+        return DataStoreResponse(**response_data)
+
+    def create(self, data_store_input: Dict[str, Any]) -> DataStoreResponse:
         """Create a new DataStore configuration.
 
         REST API: `POST /api/datastores`
@@ -87,15 +121,16 @@ class DataStoreManager:
                 - options (dict, optional): Extra options (e.g. autoRegisterDatasets for ESRI)
 
         Returns:
-            The created DataStore object (safe fields only).
+            DataStoreResponse: The created DataStore object.
         """
-        return self.client.post("/datastores", json=data_store_input)
+        response_data = self.client.post("/datastores", json=data_store_input)
+        return DataStoreResponse(**response_data)
 
     def update(
         self,
         data_store_id: int,
         data_store_input: Dict[str, Any],
-    ) -> Dict[str, Any]:
+    ) -> DataStoreResponse:
         """Update an existing DataStore configuration.
 
         REST API: `PUT /api/datastores/:id`
@@ -107,9 +142,10 @@ class DataStoreManager:
                  connectionDetails, predefinedConnectionName).
 
         Returns:
-            The updated DataStore object (safe fields only).
+            DataStoreResponse: The updated DataStore object.
         """
-        return self.client.put(f"/datastores/{data_store_id}", json=data_store_input)
+        response_data = self.client.put(f"/datastores/{data_store_id}", json=data_store_input)
+        return DataStoreResponse(**response_data)
 
     def delete(self, data_store_id: int) -> None:
         """Delete a DataStore configuration.
@@ -123,8 +159,8 @@ class DataStoreManager:
 
     # ── Connection Testing ────────────────────────────────────────────
 
-    def test_connection(self, test_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Test a DataStore connection.
+    def test_connection(self, test_input: Dict[str, Any]) -> TestConnectionResponse:
+        """Test a DataStore connection with type-safe response.
 
         REST API: `POST /api/datastores/test-connection`
 
@@ -135,29 +171,37 @@ class DataStoreManager:
                 - connectionDetails (dict) + type (str): Test raw details
 
         Returns:
-            ``{ success: bool, message: str, capabilities?: object }``
+            TestConnectionResponse: Validated response with success status
         """
-        return self.client.post("/datastores/test-connection", json=test_input)
+        response_data = self.client.post("/datastores/test-connection", json=test_input)
+        return TestConnectionResponse(**response_data)
 
     # ── Predefined Connections ────────────────────────────────────────
 
-    def list_predefined(self) -> List[Dict[str, Any]]:
-        """List predefined DataStore connection names and types from server config.
+    def list_predefined(self) -> List[PredefinedDataStore]:
+        """List predefined DataStore connection names and types from server config with type-safe response.
 
         REST API: `GET /api/config/predefined-datastores`
 
-        Returns a list of ``{ connectionName, type, connectionDetails?: {...} }``.
+        Returns:
+            List[PredefinedDataStore]: Validated list of predefined connections
         """
-        return self.client.get("/config/predefined-datastores")
+        response_data = self.client.get("/config/predefined-datastores")
+        if isinstance(response_data, list):
+            return [PredefinedDataStore(**d) for d in response_data]
+        return []
 
     # ── ACL ───────────────────────────────────────────────────────────
 
-    def get_acls(self, data_store_id: int) -> List[Dict[str, Any]]:
+    def get_acls(self, data_store_id: int) -> List[DataStoreAclEntry]:
         """Get Access Control List entries for a DataStore.
 
         REST API: `GET /api/datastores/:id/acl`
         """
-        return self.client.get(f"/datastores/{data_store_id}/acl")
+        response_data = self.client.get(f"/datastores/{data_store_id}/acl")
+        if isinstance(response_data, list):
+            return [DataStoreAclEntry(**d) for d in response_data]
+        return []
 
     def create_acls(
         self,
@@ -165,7 +209,7 @@ class DataStoreManager:
         principals: List[Dict[str, Any]],
         permissions: List[str],
         effect: str = "Allow",
-    ) -> List[Dict[str, Any]]:
+    ) -> List[DataStoreAclEntry]:
         """Create or update ACL entries for a DataStore.
 
         REST API: `POST /api/datastores/:id/acl`
@@ -184,7 +228,10 @@ class DataStoreManager:
             "permissions": permissions,
             "effect": effect,
         }
-        return self.client.post(f"/datastores/{data_store_id}/acl", json=payload)
+        response_data = self.client.post(f"/datastores/{data_store_id}/acl", json=payload)
+        if isinstance(response_data, list):
+            return [DataStoreAclEntry(**d) for d in response_data]
+        return []
 
     def delete_acl(self, data_store_id: int, acl_id: int) -> None:
         """Delete a specific ACL entry for a DataStore.

@@ -1,4 +1,14 @@
 from typing import Any, Dict, List, Optional
+from .models import (
+    WorkgroupResponse,
+    WorkgroupListResponse,
+    UserResponse,
+    UserListResponse,
+    OrganizationResponse,
+    OrganizationListResponse,
+    GroupResponse,
+    GroupListResponse,
+)
 
 
 class WorkgroupManager:
@@ -12,27 +22,25 @@ class WorkgroupManager:
     def __init__(self, client):
         self.client = client
 
-    def list(self, page: int = 1, page_size: int = 10) -> List[Dict[str, Any]]:
+    def list(self, page: int = 1, page_size: int = 10) -> WorkgroupListResponse:
         """List workgroups the user has access to.
 
         REST API: `GET /api/workgroups`
 
         Returns:
-            List of workgroup objects extracted from the response.
+            WorkgroupListResponse: Validated response with workgroups array and pagination info.
         """
         params = {"page": page, "pageSize": page_size}
-        response = self.client.get("/workgroups", params=params)
-        # Handle wrapping if API returns { workgroups: [...], totalItems: ... }
-        if isinstance(response, dict) and "workgroups" in response:
-            return response["workgroups"]
-        return response
+        response_data = self.client.get("/workgroups", params=params)
+        return WorkgroupListResponse(**response_data)
 
-    def get(self, workgroup_id: int) -> Dict[str, Any]:
-        """Get a single workgroup by ID.
+    def get(self, workgroup_id: int) -> WorkgroupResponse:
+        """Get a single workgroup by ID with type-safe response.
 
         REST API: `GET /api/workgroups/:id`
         """
-        return self.client.get(f"/workgroups/{workgroup_id}")
+        response_data = self.client.get(f"/workgroups/{workgroup_id}")
+        return WorkgroupResponse(**response_data)
 
 
 class GroupManager:
@@ -46,22 +54,21 @@ class GroupManager:
     def __init__(self, client):
         self.client = client
 
-    def list(self) -> List[Dict[str, Any]]:
-        """List all groups.
+    def list(self) -> GroupListResponse:
+        """List all groups with type-safe response.
 
         REST API: `GET /api/groups`
         """
-        response = self.client.get("/groups")
-        if isinstance(response, dict) and "groups" in response:
-            return response["groups"]
-        return response
+        response_data = self.client.get("/groups")
+        return GroupListResponse(**response_data)
 
-    def get(self, group_id: int) -> Dict[str, Any]:
-        """Get a single group by ID.
+    def get(self, group_id: int) -> GroupResponse:
+        """Get a single group by ID with type-safe response.
 
         REST API: `GET /api/groups/{id}`
         """
-        return self.client.get(f"/groups/{group_id}")
+        response_data = self.client.get(f"/groups/{group_id}")
+        return GroupResponse(**response_data)
 
 
 class UserManager:
@@ -76,29 +83,29 @@ class UserManager:
     def __init__(self, client):
         self.client = client
 
-    def list(self) -> List[Dict[str, Any]]:
-        """List users.
+    def list(self) -> UserListResponse:
+        """List users with type-safe response.
 
         REST API: `GET /api/users`
         """
-        response = self.client.get("/users")
-        if isinstance(response, dict) and "users" in response:
-            return response["users"]
-        return response
+        response_data = self.client.get("/users")
+        return UserListResponse(**response_data)
 
-    def get(self, user_id: int) -> Dict[str, Any]:
-        """Get a single user by ID.
+    def get(self, user_id: int) -> UserResponse:
+        """Get a single user by ID with type-safe response.
 
         REST API: `GET /api/users/{id}`
         """
-        return self.client.get(f"/users/{user_id}")
+        response_data = self.client.get(f"/users/{user_id}")
+        return UserResponse(**response_data)
 
-    def me(self) -> Dict[str, Any]:
-        """Get current authenticated user profile.
+    def me(self) -> UserResponse:
+        """Get current authenticated user profile with type-safe response.
 
         REST API: `GET /api/users/me`
         """
-        return self.client.get("/users/me")
+        response_data = self.client.get("/users/me")
+        return UserResponse(**response_data)
 
 
 class OrganizationManager:
@@ -112,19 +119,18 @@ class OrganizationManager:
     def __init__(self, client):
         self.client = client
 
-    def list(self) -> List[Dict[str, Any]]:
-        """List all organizations.
+    def list(self) -> OrganizationListResponse:
+        """List all organizations with type-safe response.
 
         REST API: `GET /api/organizations`
         """
-        response = self.client.get("/organizations")
-        if isinstance(response, dict) and "organizations" in response:
-            return response["organizations"]
-        return response
+        response_data = self.client.get("/organizations")
+        return OrganizationListResponse(**response_data)
 
-    def get(self, org_id: int) -> Dict[str, Any]:
-        """Get a single organization by ID.
+    def get(self, org_id: int) -> OrganizationResponse:
+        """Get a single organization by ID with type-safe response.
 
         REST API: `GET /api/organizations/{id}`
         """
-        return self.client.get(f"/organizations/{org_id}")
+        response_data = self.client.get(f"/organizations/{org_id}")
+        return OrganizationResponse(**response_data)

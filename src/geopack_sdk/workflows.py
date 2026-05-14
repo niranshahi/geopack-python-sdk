@@ -1,10 +1,13 @@
 import json
-from typing import Any, Dict, List, Optional, Union
+import logging
+from typing import Any, Dict, List, Optional, Union, Literal
 from .models import (
     Workflow,
     WorkflowParameter,
     WorkflowRun,
 )
+
+logger = logging.getLogger(__name__)
 
 class WorkflowManager:
     """Manager for Workflow Definitions and Operations."""
@@ -118,7 +121,8 @@ class WorkflowManager:
                 items.append(WorkflowParameter(**param_dict))
         
         # Sort by Y position (Top to Bottom) then X (Left to Right) as per frontend layout logic
-        items.sort(key=lambda x: (nodes[0].get('position', {}).get('y', 0), nodes[0].get('position', {}).get('x', 0)))
+        if items:
+            items.sort(key=lambda x: (nodes[0].get('position', {}).get('y', 0), nodes[0].get('position', {}).get('x', 0)))
         
         return items
 

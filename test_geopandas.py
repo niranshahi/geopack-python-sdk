@@ -23,7 +23,7 @@ def main():
         # 2. Authenticate
         print("\n[1/3] Logging in...")
         client.auth.login(username=username, password=password)
-        print("✓ Login successful!")
+        print("[OK] Login successful!")
 
         # 3. Choose a Dataset
         dataset_id = os.getenv("TEST_DATASET_ID")
@@ -38,16 +38,16 @@ def main():
             vector_datasets = [d for d in datasets_list if d.dataType == 'vector']
             
             if not vector_datasets:
-                print("✖ No VECTOR datasets found in the portal. GeoPandas requires vector data.")
+                print("[ERROR] No VECTOR datasets found in the portal. GeoPandas requires vector data.")
                 return
             
             target = vector_datasets[0]
             dataset_id = target.id
             dataset_name = target.name
-            print(f"✓ Using latest vector dataset: {dataset_name} (ID: {dataset_id})")
+            print(f"[OK] Using latest vector dataset: {dataset_name} (ID: {dataset_id})")
         else:
             dataset_id = int(dataset_id)
-            print(f"✓ Using Dataset ID: {dataset_id}")
+            print(f"[OK] Using Dataset ID: {dataset_id}")
 
         # 4. Fetch as GeoDataFrame
         print(f"\n[2/3] Fetching dataset {dataset_id} as GeoDataFrame...")
@@ -55,10 +55,10 @@ def main():
             gdf = client.datasets.to_geodataframe(dataset_id, limit=50)
             
             print("\n[3/3] Verification Results:")
-            print(f"✓ Type: {type(gdf)}")
-            print(f"✓ Row Count: {len(gdf)}")
-            print(f"✓ Columns: {gdf.columns.tolist()}")
-            print(f"✓ CRS: {gdf.crs}")
+            print(f"[OK] Type: {type(gdf)}")
+            print(f"[OK] Row Count: {len(gdf)}")
+            print(f"[OK] Columns: {gdf.columns.tolist()}")
+            print(f"[OK] CRS: {gdf.crs}")
             
             if len(gdf) > 0:
                 print("\n--- First 5 rows head ---")
@@ -68,13 +68,13 @@ def main():
             print("\n--- GeoPandas Integration Successful ---")
 
         except ImportError:
-            print("\n✖ GeoPandas is not installed in your environment.")
+            print("\n[ERROR] GeoPandas is not installed in your environment.")
             print("  Please run: pip install geopandas")
         except Exception as e:
-            print(f"\n✖ Failed to fetch features: {str(e)}")
+            print(f"\n[ERROR] Failed to fetch features: {str(e)}")
 
     except Exception as e:
-        print(f"\n✖ SDK Error: {str(e)}")
+        print(f"\n[ERROR] SDK Error: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":

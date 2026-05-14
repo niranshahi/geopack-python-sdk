@@ -1,6 +1,11 @@
 import os
-import time
 from typing import Any, Dict, List, Optional, Union
+from .models import (
+    WorkflowRun,
+    WorkflowRunArtifact,
+    WorkflowRunListResponse,
+    TaskResult,
+)
 
 class WorkflowRunManager:
     """Manager for Workflow Executions (Runs)."""
@@ -14,7 +19,7 @@ class WorkflowRunManager:
         page: int = 1,
         page_size: int = 10,
         filters: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> WorkflowRunListResponse:
         """List workflow runs.
         
         REST API: `GET /api/workflow-runs`
@@ -24,24 +29,46 @@ class WorkflowRunManager:
             "offset": (page - 1) * page_size,
             **(filters or {})
         }
-        response = self.client.get(self.base_url, params=params)
-        return response.get("items", [])
+        response_data = self.client.get(self.base_url, params=params)
+        return WorkflowRunListResponse(**response_data)
 
-    def get(self, run_id: int) -> Dict[str, Any]:
+    def get(self, run_id: int) -> WorkflowRun:
         """Get detailed status of a workflow run, including node-level progress.
         
         REST API: `GET /api/workflow-runs/:id`
         """
-        return self.client.get(f"{self.base_url}/{run_id}")
+        response_data = self.client.get(f"{self.base_url}/{run_id}")
+        
+        # Proactively fetch artifacts if not in response
+        if "artifacts" not in response_data or not response_data["artifacts"]:
+            try:
+                # Use raw fetch to avoid recursion or model overhead
+                art_resp = self.client.get(f"{self.base_url}/{run_id}/artifacts")
+                items = art_resp.get("items", [])
+                if items:
+                    response_data["artifacts"] = items
+            except Exception:
+                pass 
+                
+        return WorkflowRun(**response_data)
 
-    def get_artifacts(self, run_id: int) -> List[Dict[str, Any]]:
+    def get_artifacts(self, run_id: int) -> List[WorkflowRunArtifact]:
         """Get the list of artifacts produced by a workflow run."""
         response = self.client.get(f"{self.base_url}/{run_id}/artifacts")
         items = response.get("items", [])
         
+        results = []
         for item in items:
             # Frontend and API results may store path in data object or root
             data = item.get("data") or {}
+            
+            # Safely parse JSON if data is a string
+            if isinstance(data, str):
+                import json
+                try:
+                    data = json.loads(data)
+                except Exception:
+                    data = {}
             
             # Priority: pathOrUri (from terminal logs), path, or filePath
             file_path = item.get("pathOrUri") or data.get("pathOrUri") or \
@@ -49,47 +76,49 @@ class WorkflowRunManager:
             
             dataset_id = data.get("datasetId") or item.get("datasetId")
             
+            artifact_dict = {**item}
             if dataset_id:
-                item["datasetId"] = dataset_id
-                item["display_name"] = f"Dataset #{dataset_id}"
+                artifact_dict["datasetId"] = dataset_id
+                artifact_dict["display_name"] = f"Dataset #{dataset_id}"
             elif file_path:
-                item["filePath"] = file_path
-                item["display_name"] = os.path.basename(file_path)
+                artifact_dict["filePath"] = file_path
+                artifact_dict["display_name"] = os.path.basename(file_path)
             else:
-                item["display_name"] = f"Artifact {item.get('id')}"
+                artifact_dict["display_name"] = f"Artifact {item.get('id')}"
+            
+            results.append(WorkflowRunArtifact(**artifact_dict))
                 
-        return items
+        return results
 
     def get_logs(self, run_id: int) -> Dict[str, Any]:
-        """Get execution logs, errors, and node-level statuses.
+        """Get execution logs, errors, and node-level statuses."""
+        # Use raw fetch to avoid recursion
+        run_data = self.client.get(f"{self.base_url}/{run_id}")
         
-        This mimics the log construction logic in WorkflowRunViewerCore.vue.
-        """
-        run = self.get(run_id)
         logs = {
-            "workflowId": run.get("workflowId"),
-            "status": run.get("status"),
-            "startedAt": run.get("createdAt"),
-            "finishedAt": run.get("updatedAt"),
+            "workflowId": run_data.get("workflowId"),
+            "status": run_data.get("status"),
+            "startedAt": run_data.get("createdAt"),
+            "finishedAt": run_data.get("updatedAt"),
         }
 
         # Add error info if failed
-        if run.get("status") == "failed" and run.get("error"):
-            logs["error"] = run.get("error")
+        if run_data.get("status") == "failed" and run_data.get("error"):
+            logs["error"] = run_data.get("error")
 
         # Add stats if available
-        if run.get("stats"):
-            logs["stats"] = run.get("stats")
+        if run_data.get("stats"):
+            logs["stats"] = run_data.get("stats")
 
         # Add node statuses from graphSnapshot
-        snapshot = run.get("graphSnapshot") or {}
+        snapshot = run_data.get("graphSnapshot") or {}
         node_statuses = snapshot.get("nodeStatuses")
         if node_statuses:
             logs["nodeStatuses"] = node_statuses
 
-        # Add execution results (this contains the file paths shown in your screenshot)
-        if run.get("results"):
-            logs["results"] = run.get("results")
+        # Add execution results
+        if run_data.get("results"):
+            logs["results"] = run_data.get("results")
 
         return logs
 
@@ -100,7 +129,7 @@ class WorkflowRunManager:
         override_datastore_id: Optional[int] = None,
         wait: bool = True,
         polling_interval: int = 2
-    ) -> Dict[str, Any]:
+    ) -> Union[WorkflowRun, TaskResult]:
         """Submit a workflow for execution.
         
         REST API: `POST /api/workflow-runs`
@@ -119,25 +148,22 @@ class WorkflowRunManager:
         if override_datastore_id:
             payload["overrideDataStoreId"] = override_datastore_id
 
-        response = self.client.post(self.base_url, json=payload)
+        response_data = self.client.post(self.base_url, json=payload)
         
         if not wait:
-            return response
+            # Returns a TaskResult-like object or similar
+            return TaskResult(**response_data)
 
         # If waiting, use the taskId returned in the response
-        task_id = response.get("taskId")
+        task_id = response_data.get("taskId")
         if not task_id:
-            return response
+             return TaskResult(**response_data)
             
         self.client.tasks.wait(task_id, interval=polling_interval, quiet=True)
         
-        # Fetch final run state, artifacts, and logs
-        run_id = response.get("workflowRunId")
-        final_state = self.get(run_id)
-        final_state["artifacts"] = self.get_artifacts(run_id)
-        final_state["logs"] = self.get_logs(run_id)
-        
-        return final_state
+        # Fetch final run state
+        run_id = response_data.get("workflowRunId")
+        return self.get(run_id)
 
     def cancel(self, run_id: int) -> bool:
         """Cancel a running workflow.

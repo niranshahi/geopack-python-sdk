@@ -16,9 +16,11 @@ Usage:
         print(dataset.name)  # IDE knows 'name' is str
 """
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from typing import Optional, Dict, Any, Literal, List, Union
+import os
+import json
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Union, Literal
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 
 # ============================================================================
@@ -30,6 +32,10 @@ class Principal(BaseModel):
     id: int
     userName: Optional[str] = None
     name: Optional[str] = None
+    email: Optional[str] = None
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
+    isActive: bool = True
     
     model_config = ConfigDict(extra='allow')  # Forward compatibility
 
@@ -244,22 +250,34 @@ class FeatureCollection(BaseModel):
 # ============================================================================
 
 class TaskResult(BaseModel):
-    """Result of a background task execution"""
-    id: Optional[str] = None  # API may return taskId instead
-    taskId: Optional[str] = None  # Alternative field name used by API
+    """Result of a background task execution or detailed Task object"""
+    taskId: str  # UUID
+    taskType: Optional[str] = None
     status: Literal['pending', 'processing', 'completed', 'failed', 'canceled', 'partial_success']
-    message: Optional[str] = None
-    output: Optional[Dict[str, Any]] = None
-    results: Optional[Any] = None  # Can be list of IDs, FeatureCollection, etc.
+    priority: int = 10
+    progress: Optional[Any] = None
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    inputParameters: Dict[str, Any] = Field(default_factory=list)
+    results: Optional[Any] = None
+    startTime: Optional[datetime] = None
+    endTime: Optional[datetime] = None
+    userId: Optional[int] = None
+    workgroupId: Optional[int] = None
+    owner: Optional[Principal] = None
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
+    
+    # Compatibility aliases
+    id: Optional[str] = None
+    message: Optional[str] = None
+    output: Optional[Dict[str, Any]] = None
     
     model_config = ConfigDict(extra='allow')
     
     @property
-    def task_id(self) -> Optional[str]:
-        """Helper to get task ID from either field"""
-        return self.taskId or self.id
+    def task_id(self) -> str:
+        """Helper to get task ID"""
+        return self.taskId
 
 
 # ============================================================================
@@ -291,17 +309,6 @@ class Workflow(BaseModel):
     model_config = ConfigDict(extra='allow')
 
 
-class WorkflowRun(BaseModel):
-    """Workflow execution run"""
-    id: int
-    workflowId: int
-    status: Literal['pending', 'processing', 'completed', 'failed', 'canceled']
-    input: Optional[Dict[str, Any]] = None
-    output: Optional[Dict[str, Any]] = None
-    createdAt: datetime
-    updatedAt: datetime
-    
-    model_config = ConfigDict(extra='allow')
 
 
 # ============================================================================
@@ -332,6 +339,241 @@ class DatasetAcl(BaseModel):
     permissionName: Optional[str] = None
     
     model_config = ConfigDict(extra='allow')
+
+
+# ============================================================================
+# --- DATASTORE MODELS ---
+# ============================================================================
+
+class DataStoreResponse(BaseModel):
+    """Complete DataStore entity with all associated data"""
+    id: int
+    name: str
+    type: Literal[
+        'postgresql', 'mssql', 'sqlserver', 'filesystem', 'gpkg', 
+        'mbtiles', 'esri', 'postgres', 'esri-geodatabase-mssql', 
+        'esri-geodatabase-postgres', 'file_tiles', 'cog_storage'
+    ]
+    description: Optional[str] = None
+    status: Literal['active', 'inactive', 'error', 'maintenance'] = 'active'
+    capabilities: List[str] = Field(default_factory=list)
+    organizationId: Optional[int] = None
+    creatorUserId: Optional[int] = None
+    predefinedConnectionName: Optional[str] = None
+    connectionDetails: Optional[Dict[str, Any]] = None
+    createdAt: datetime
+    updatedAt: datetime
+    
+    model_config = ConfigDict(extra='allow')
+
+
+class DataStoreListResponse(BaseModel):
+    """Response from GET /api/datastores"""
+    datastores: List[DataStoreResponse] = Field(default_factory=list)
+    totalCount: int = 0
+
+
+class TestConnectionResponse(BaseModel):
+    """Response from POST /api/datastores/test-connection"""
+    success: bool
+    message: str
+    capabilities: Optional[Dict[str, Any]] = None
+
+
+class PredefinedDataStore(BaseModel):
+    """Predefined datastore connection from server config"""
+    connectionName: str
+    type: str
+    connectionDetails: Optional[Dict[str, Any]] = None
+    
+    model_config = ConfigDict(extra='allow')
+
+
+class DataStoreAclEntry(BaseModel):
+    """ACL entry for a datastore"""
+    id: int
+    resourceType: Literal['DATASTORE']
+    resourceId: int
+    principalType: Literal['USER', 'GROUP']
+    principalId: int
+    permissionId: int
+    effect: Literal['Allow', 'Deny']
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
+    
+    # Joined data for display
+    principalName: Optional[str] = None
+    permissionName: Optional[str] = None
+    
+    model_config = ConfigDict(extra='allow')
+
+
+# ============================================================================
+# --- RESOURCE MODELS (WORKGROUP, USER, ORGANIZATION) ---
+# ============================================================================
+
+class WorkgroupResponse(BaseModel):
+    """Complete Workgroup entity"""
+    id: int
+    name: str
+    description: Optional[str] = None
+    organizationId: Optional[int] = None
+    ownerUserId: Optional[int] = None
+    status: str = 'active'
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
+    
+    # Optional associations
+    organization: Optional[Organization] = None
+    owner: Optional[Principal] = None
+    
+    model_config = ConfigDict(extra='allow')
+
+
+class WorkgroupListResponse(BaseModel):
+    """Response from GET /api/workgroups"""
+    workgroups: List[WorkgroupResponse] = Field(default_factory=list)
+    totalItems: int = 0
+    currentPage: int = 1
+    totalPages: int = 1
+
+
+class UserResponse(BaseModel):
+    """Complete User entity"""
+    id: int
+    userName: str
+    email: Optional[str] = None
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
+    organizationId: Optional[int] = None
+    status: str = 'active'
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
+    
+    # Optional associations
+    organization: Optional[Organization] = None
+    
+    model_config = ConfigDict(extra='allow')
+
+
+class UserListResponse(BaseModel):
+    """Response from GET /api/users"""
+    users: List[UserResponse] = Field(default_factory=list)
+    totalItems: int = 0
+
+
+class OrganizationResponse(BaseModel):
+    """Complete Organization entity"""
+    id: int
+    name: str
+    description: Optional[str] = None
+    status: str = 'active'
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
+    
+    model_config = ConfigDict(extra='allow')
+
+
+class OrganizationListResponse(BaseModel):
+    """Response from GET /api/organizations"""
+    organizations: List[OrganizationResponse] = Field(default_factory=list)
+    totalItems: int = 0
+
+
+class GroupResponse(BaseModel):
+    """Complete Group entity"""
+    id: int
+    name: str
+    description: Optional[str] = None
+    organizationId: Optional[int] = None
+    status: str = 'active'
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
+    
+    model_config = ConfigDict(extra='allow')
+
+
+class GroupListResponse(BaseModel):
+    """Response from GET /api/groups"""
+    groups: List[GroupResponse] = Field(default_factory=list)
+    totalItems: int = 0
+
+
+# ============================================================================
+# --- WORKFLOW RUN MODELS ---
+# ============================================================================
+
+class WorkflowRunArtifact(BaseModel):
+    """Artifact produced by a workflow run"""
+    id: int
+    nodeId: Optional[str] = None
+    nodeType: Optional[str] = None
+    dataType: Optional[str] = None
+    filePath: Optional[str] = None
+    pathOrUri: Optional[str] = None
+    datasetId: Optional[int] = None
+    createdAt: Optional[datetime] = None
+    
+    # Populated helper
+    display_name: Optional[str] = None
+    
+    @model_validator(mode='before')
+    @classmethod
+    def resolve_paths(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            inner_data = data.get("data") or {}
+            
+            # Safely parse JSON if inner_data is a string
+            if isinstance(inner_data, str):
+                try:
+                    inner_data = json.loads(inner_data)
+                except Exception:
+                    inner_data = {}
+
+            # Resolve filePath
+            if not data.get("filePath"):
+                data["filePath"] = data.get("pathOrUri") or inner_data.get("pathOrUri") or \
+                                 inner_data.get("path") or inner_data.get("filePath")
+            
+            # Resolve datasetId
+            if not data.get("datasetId"):
+                data["datasetId"] = data.get("datasetId") or inner_data.get("datasetId")
+                
+            # Resolve display_name
+            if not data.get("display_name"):
+                if data.get("datasetId"):
+                    data["display_name"] = f"Dataset #{data['datasetId']}"
+                elif data.get("filePath"):
+                    data["display_name"] = os.path.basename(data["filePath"])
+                else:
+                    data["display_name"] = f"Artifact {data.get('id')}"
+                    
+        return data
+
+    model_config = ConfigDict(extra='allow')
+
+
+class WorkflowRun(BaseModel):
+    """Workflow execution run"""
+    id: int
+    workflowId: int
+    status: Literal['pending', 'processing', 'completed', 'failed', 'canceled', 'succeeded', 'running', 'error', 'waiting']
+    input: Optional[Dict[str, Any]] = None
+    output: Optional[Dict[str, Any]] = None
+    artifacts: List[WorkflowRunArtifact] = Field(default_factory=list)
+    logs: Optional[Dict[str, Any]] = None
+    createdAt: datetime
+    updatedAt: datetime
+    
+    model_config = ConfigDict(extra='allow')
+
+
+class WorkflowRunListResponse(BaseModel):
+    """Response from GET /api/workflow-runs"""
+    items: List[WorkflowRun] = Field(default_factory=list)
+    totalItems: int = 0
+    currentPage: int = 1
+    totalPages: int = 1
 
 
 # ============================================================================
@@ -390,6 +632,10 @@ def get_schemas_for_mcp() -> Dict[str, Dict[str, Any]]:
         'TaskResult': get_schema(TaskResult),
         'Workflow': get_schema(Workflow),
         'WorkflowRun': get_schema(WorkflowRun),
+        'DataStoreResponse': get_schema(DataStoreResponse),
+        'WorkgroupResponse': get_schema(WorkgroupResponse),
+        'UserResponse': get_schema(UserResponse),
+        'OrganizationResponse': get_schema(OrganizationResponse),
     }
 
 

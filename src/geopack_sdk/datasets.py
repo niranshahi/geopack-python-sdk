@@ -11,6 +11,7 @@ from .models import (
     DatasetTimeSeriesPoint,
     DatasetStatsByStore,
     DatasetStatsByGeomType,
+    TaskResult,
 )
 
 class DatasetManager:
@@ -135,6 +136,60 @@ class DatasetManager:
             'rasterDimensions': raster_dims
         }
 
+    def download(
+        self,
+        task_results: Union[TaskResult, Dict[str, Any]],
+        local_path: str,
+        chunk_size: int = 8192
+    ) -> str:
+        """Download the result of an export task.
+
+        Args:
+            task_results: The completed TaskResult object or dict (containing 'results').
+            local_path: Destination directory or file path.
+        """
+        # The task results for dataset:export contain information about the generated file
+        results = task_results.results if isinstance(task_results, TaskResult) else task_results.get("results")
+        if not results:
+            raise ValueError("Task is completed but contains no results/output.")
+
+        # In Geopack, exported files often return a download token or a direct path
+        download_token = results.get("downloadToken")
+        artifact_path = results.get("artifactPath")
+        filename = results.get("originalName") or results.get("fileName") or "exported_data"
+
+        # Determine download URL
+        if download_token:
+            url = f"{self.client.base_url}/downloads/{download_token}"
+        elif artifact_path:
+            url = f"{self.client.base_url}/download/{artifact_path.lstrip('/')}"
+        else:
+            raise ValueError("No download token or artifact path found in task results.")
+
+        with self.client.session.get(url, stream=True) as r:
+            r.raise_for_status()
+            
+            # Try to get filename from Content-Disposition header (mimic browser)
+            content_disposition = r.headers.get("Content-Disposition")
+            header_filename = None
+            if content_disposition and "filename=" in content_disposition:
+                # Basic parsing, handling potential quotes
+                header_filename = content_disposition.split("filename=")[1].strip('"')
+            
+            # Final filename resolution logic
+            final_filename = header_filename or filename or "exported_data"
+            
+            if os.path.isdir(local_path):
+                target_file = os.path.join(local_path, final_filename)
+            else:
+                target_file = local_path
+
+            with open(target_file, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=chunk_size):
+                    f.write(chunk)
+        
+        return os.path.abspath(target_file)
+
     def get(self, dataset_id: int) -> Dataset:
         """
         Get detailed information about a single dataset with type-safe response.
@@ -145,13 +200,9 @@ class DatasetManager:
             dataset_id: ID of the dataset to fetch
 
         Returns:
-            Dataset: Validated dataset model with normalized details
+            Dataset: Validated dataset model
         """
         dataset_data = self.client.get(f"/datasets/{dataset_id}")
-        
-        # Automatically normalize details if present
-        if isinstance(dataset_data, dict) and 'details' in dataset_data:
-            dataset_data['normalizedDetails'] = self._get_normalized_details(dataset_data)
         
         # Validate and convert to Pydantic model
         return Dataset(**dataset_data)
@@ -331,6 +382,37 @@ class DatasetManager:
         
         return gdf
 
+    def create(self, dataset_data: CreateDatasetDto) -> Dataset:
+        """Create a new dataset.
+
+        REST API: `POST /api/datasets`
+
+        Args:
+            dataset_data: Validated CreateDatasetDto model or dict
+
+        Returns:
+            Dataset: The created dataset model
+        """
+        payload = dataset_data.model_dump() if isinstance(dataset_data, CreateDatasetDto) else dataset_data
+        response_data = self.client.post("/datasets", json=payload)
+        return Dataset(**response_data)
+
+    def update(self, dataset_id: int, dataset_data: UpdateDatasetDto) -> Dataset:
+        """Update an existing dataset.
+
+        REST API: `PUT /api/datasets/{id}`
+
+        Args:
+            dataset_id: ID of the dataset to update
+            dataset_data: Validated UpdateDatasetDto model or dict
+
+        Returns:
+            Dataset: The updated dataset model
+        """
+        payload = dataset_data.model_dump(exclude_unset=True) if isinstance(dataset_data, UpdateDatasetDto) else dataset_data
+        response_data = self.client.put(f"/datasets/{dataset_id}", json=payload)
+        return Dataset(**response_data)
+
     def export(
         self,
         dataset_id: int,
@@ -339,7 +421,7 @@ class DatasetManager:
         sharing_policy: str = "private",
         wait: bool = True,
         polling_interval: int = 2,
-    ) -> Union[Dict[str, Any], Any]:
+    ) -> TaskResult:
         """Request an export of a dataset.
 
         Args:
@@ -368,64 +450,8 @@ class DatasetManager:
         if not wait:
             return task_response
             
-        task_id = task_response.taskId or task_response.id
-        if not task_id:
-            raise ValueError("Task response missing taskId and id")
+        task_id = task_response.task_id
         return self.client.tasks.wait(task_id, interval=polling_interval)
-
-    def download(
-        self,
-        task_results: Dict[str, Any],
-        local_path: str,
-        chunk_size: int = 8192
-    ) -> str:
-        """Download the result of an export task.
-
-        Args:
-            task_results: The completed Task object (containing 'results').
-            local_path: Destination directory or file path.
-        """
-        # The task results for dataset:export contain information about the generated file
-        results = task_results.get("results")
-        if not results:
-            raise ValueError("Task is completed but contains no results/output.")
-
-        # In Geopack, exported files often return a download token or a direct path
-        download_token = results.get("downloadToken")
-        artifact_path = results.get("artifactPath")
-        filename = results.get("originalName") or results.get("fileName") or "exported_data"
-
-        # Determine download URL
-        if download_token:
-            url = f"{self.client.base_url}/downloads/{download_token}"
-        elif artifact_path:
-            url = f"{self.client.base_url}/download/{artifact_path.lstrip('/')}"
-        else:
-            raise ValueError("No download token or artifact path found in task results.")
-
-        with self.client.session.get(url, stream=True) as r:
-            r.raise_for_status()
-            
-            # Try to get filename from Content-Disposition header (mimic browser)
-            content_disposition = r.headers.get("Content-Disposition")
-            header_filename = None
-            if content_disposition and "filename=" in content_disposition:
-                # Basic parsing, handling potential quotes
-                header_filename = content_disposition.split("filename=")[1].strip('"')
-            
-            # Final filename resolution logic
-            final_filename = header_filename or filename or "exported_data"
-            
-            if os.path.isdir(local_path):
-                target_file = os.path.join(local_path, final_filename)
-            else:
-                target_file = local_path
-
-            with open(target_file, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=chunk_size):
-                    f.write(chunk)
-        
-        return os.path.abspath(target_file)
 
     def upload(
         self,
@@ -436,26 +462,11 @@ class DatasetManager:
         metadata: Optional[Dict[str, Any]] = None,
         wait: bool = True,
         polling_interval: int = 2,
-    ) -> Union[Dict[str, Any], Any]:
+    ) -> TaskResult:
         """Upload a geospatial file and create a new dataset.
 
-        This is a two-step process:
-        1. Upload the file to a temporary session via `POST /api/uploads/temp`.
-        2. Create a `dataset:upload` task via `POST /api/tasks` to process the file.
-
-        Args:
-            file_path: Local path to the file (e.g., .geojson, .gpkg, .shp, .zip).
-            data_store_id: ID of the target DataStore.
-            workgroup_id: ID of the workgroup for ownership.
-            declared_type: Optional type hint ('vector', 'raster', 'table').
-            metadata: Optional additional metadata for the dataset.
-            wait: If True, waits for the background task to complete and returns results.
-                  If False, returns the Task object immediately.
-            polling_interval: Seconds between polls if wait=True.
-
         Returns:
-            If wait=True: List of created dataset results (from Task output).
-            If wait=False: The Task object with `taskId`.
+            TaskResult: The resulting task object or completion result.
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -502,7 +513,5 @@ class DatasetManager:
             return task_response
 
         # 3. Wait for completion
-        task_id = task_response.taskId or task_response.id
-        if not task_id:
-            raise ValueError("Task response missing taskId and id")
+        task_id = task_response.taskId
         return self.client.tasks.wait(task_id, interval=polling_interval, quiet=True)
