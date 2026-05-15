@@ -1,5 +1,6 @@
 import os
 import requests
+
 from .auth import AuthManager
 from .datastores import DataStoreManager
 from .datasets import DatasetManager
@@ -7,6 +8,7 @@ from .tasks import TaskManager
 from .workflows import WorkflowManager
 from .workflow_runs import WorkflowRunManager
 from .resources import WorkgroupManager, GroupManager, UserManager, OrganizationManager
+from .exceptions import GeopackAPIError, GeopackAuthError, GeopackError, GeopackTimeoutError
 
 class GeopackClient:
     """
@@ -44,42 +46,41 @@ class GeopackClient:
 
     def _request(self, method, endpoint, **kwargs):
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        # Set a default timeout of 30 seconds if not provided
         if "timeout" not in kwargs:
             kwargs["timeout"] = 30
-        
-        response = self.session.request(method, url, **kwargs)
-        
-        # Automatic token refresh
-        if response.status_code == 401 and hasattr(self, 'auth') and getattr(self.auth, 'refresh_token', None):
-            try:
-                self.auth.refresh()
-                # Retry the request with the new token
-                response = self.session.request(method, url, **kwargs)
-            except Exception:
-                # If refresh fails, fall through to normal error handling
-                pass
 
         try:
-            response.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            # Try to extract detailed error from response body
+            response = self.session.request(method, url, **kwargs)
+        except requests.Timeout as e:
+            timeout = kwargs.get("timeout")
+            raise GeopackTimeoutError(
+                f"Request to {endpoint} timed out after {timeout}s",
+                timeout=float(timeout) if isinstance(timeout, (int, float)) else None,
+            ) from e
+        except requests.RequestException as e:
+            raise GeopackError(f"Network error calling {endpoint}: {e}") from e
+
+        # Automatic token refresh
+        if (
+            response.status_code == 401
+            and hasattr(self, "auth")
+            and getattr(self.auth, "refresh_token", None)
+        ):
             try:
-                error_data = response.json()
-                if isinstance(error_data, dict):
-                    msg = error_data.get("message") or error_data.get("errors") or str(error_data)
-                else:
-                    msg = str(error_data)
-                raise Exception(f"Geopack API Error ({response.status_code}): {msg}") from e
-            except (ValueError, KeyError, AttributeError):
-                # Fallback to original HTTPError
-                raise e
-        except Exception as e:
-            # Catch Pydantic validation errors and other exceptions
-            if "validation error" in str(e).lower():
-                raise Exception(f"SDK Validation Error: {str(e)}") from e
-            raise e
-        return response.json()
+                self.auth.refresh()
+                response = self.session.request(method, url, **kwargs)
+            except (GeopackAuthError, GeopackAPIError):
+                raise
+            except Exception:
+                pass
+
+        if not response.ok:
+            raise GeopackAPIError.from_response(response)
+
+        try:
+            return response.json()
+        except ValueError as e:
+            raise GeopackError(f"Invalid JSON in response from {endpoint}") from e
 
     def get(self, endpoint, params=None, **kwargs):
         return self._request("GET", endpoint, params=params, **kwargs)

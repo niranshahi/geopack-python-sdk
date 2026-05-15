@@ -2,6 +2,7 @@ import time
 import logging
 from typing import Any, Dict, Optional
 from .models import TaskResult
+from .exceptions import GeopackTaskError, GeopackTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,8 @@ class TaskManager:
             TaskResult: Validated task result model when completed
 
         Raises:
-            Exception: If task fails or is canceled
-            TimeoutError: If task times out
+            GeopackTaskError: If task fails or is canceled
+            GeopackTimeoutError: If task times out
 
         Expected terminal statuses:
         - completed
@@ -86,8 +87,15 @@ class TaskManager:
             if status in ["failed", "canceled"]:
                 if status == "failed" and not quiet:
                     logger.error(f"Task failed: {status_result.message}")
-                raise Exception(f"Task {task_id} failed or was canceled: {status_result.message}")
-            
+                raise GeopackTaskError(
+                    task_id,
+                    status,
+                    status_result.message,
+                )
+
             time.sleep(interval)
-        
-        raise TimeoutError(f"Task {task_id} timed out after {timeout} seconds")
+
+        raise GeopackTimeoutError(
+            f"Task {task_id} timed out after {timeout} seconds",
+            timeout=float(timeout),
+        )

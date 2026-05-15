@@ -1,5 +1,8 @@
 import os
 
+from .exceptions import GeopackAPIError
+
+
 class AuthManager:
     def __init__(self, client):
         self.client = client
@@ -29,15 +32,10 @@ class AuthManager:
         
         try:
             response = self.client.post(endpoint, json=payload)
-        except Exception as e:
-            # Handle potential 400 errors with more detail if possible
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    print(f"Server Error Detail: {error_detail}")
-                except:
-                    pass
-            raise e
+        except GeopackAPIError as e:
+            if e.details:
+                print(f"Server Error Detail: {e.details}")
+            raise
         
         # In Geopack v2, login returns { accessToken, refreshToken, user }
         # We'll use accessToken for the Authorization header
@@ -70,8 +68,9 @@ class AuthManager:
         # We use a direct request to avoid interceptors
         url = f"{self.client.base_url}/{endpoint.lstrip('/')}"
         response = self.client.session.post(url, json=payload, timeout=30)
-        
-        response.raise_for_status()
+
+        if not response.ok:
+            raise GeopackAPIError.from_response(response)
         data = response.json()
         
         self.token = data.get("accessToken") or data.get("token")
