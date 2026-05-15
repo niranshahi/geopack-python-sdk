@@ -2,6 +2,19 @@
 
 A standalone Python library to interact with the Geopack Geoportal API.
 
+## Naming
+
+| What | Name |
+|------|------|
+| This folder (monorepo) | `python-sdk/` |
+| GitHub repository | [geopack-python-sdk](https://github.com/niranshahi/geopack-python-sdk) |
+| `pip install` | `geopack-sdk` |
+| Python import | `geopack_sdk` |
+
+```python
+from geopack_sdk import GeopackClient
+```
+
 ## Installation
 
 ```bash
