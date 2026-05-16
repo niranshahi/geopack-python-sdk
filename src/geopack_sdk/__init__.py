@@ -14,6 +14,7 @@ from .tasks import (
     task_message_badge_severity,
     task_message_info,
 )
+from .workflow_runs import inspect_workflow_run_outcome
 
 __version__ = "0.1.0"
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "GeopackTimeoutError",
     "GeopackTaskError",
     "TaskMessageInfo",
+    "inspect_workflow_run_outcome",
     "task_log_entries_needing_review",
     "task_may_have_hidden_issues",
     "task_message_badge_severity",

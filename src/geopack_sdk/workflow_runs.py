@@ -1,11 +1,96 @@
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+
 from .models import (
     WorkflowRun,
     WorkflowRunArtifact,
     WorkflowRunListResponse,
     WorkflowRunSubmitResponse,
 )
+from .tasks import (
+    task_log_entries_needing_review,
+    task_message_badge_severity,
+    task_message_info,
+)
+
+if TYPE_CHECKING:
+    from .client import GeopackClient
+
+
+def inspect_workflow_run_outcome(
+    client: "GeopackClient",
+    task_id: str,
+    run_id: Optional[int] = None,
+) -> Optional[int]:
+    """Inspect a workflow run via task log and workflow-run record (portal parity).
+
+    Two layers:
+    1. Background task ``workflow:run`` — messages, ``task.status``, ``task.results``
+    2. :class:`WorkflowRun` — run status, node statuses, artifacts
+
+    A run may show ``succeeded`` while the task log still has warn/error lines;
+    always check both.
+
+    Args:
+        client: Authenticated :class:`GeopackClient`.
+        task_id: BullMQ task id from ``workflow_runs.submit`` (``taskId``).
+        run_id: Optional ``workflowRunId``; resolved from task input/results if omitted.
+
+    Returns:
+        Resolved workflow run id, or ``None`` if it could not be determined.
+    """
+    task = client.tasks.get_status(task_id)
+    info = task_message_info(task)
+    severity = task_message_badge_severity(task)
+
+    print(
+        f"Task {task_id} ({task.taskType}): status={task.status}, "
+        f"badge={severity}, messages={info.count}"
+    )
+
+    if severity in ("error", "warn"):
+        print(
+            "  Task log has warn/error lines "
+            "(may appear even when run status is succeeded):"
+        )
+        for line in task_log_entries_needing_review(task):
+            print(
+                f"    [{line.get('level')}] {line.get('timestamp')} "
+                f"{line.get('message')}"
+            )
+
+    if task.results:
+        print(f"  task.results: {task.results}")
+
+    wr_id = run_id
+    if wr_id is None and task.inputParameters:
+        wr_id = task.inputParameters.get("workflowRunId")
+    if wr_id is None and isinstance(task.results, dict):
+        wr_id = task.results.get("workflowRunId")
+
+    if wr_id is None:
+        print("  (No workflowRunId — pass run_id from submit response)")
+        return None
+
+    run = client.workflow_runs.get(wr_id)
+    logs = client.workflow_runs.get_logs(wr_id)
+    print(f"\nWorkflowRun #{wr_id}: status={run.status}")
+
+    if logs.get("error"):
+        print(f"  run error: {logs['error']}")
+    node_statuses = logs.get("nodeStatuses") or {}
+    failed_nodes = {
+        k: v
+        for k, v in node_statuses.items()
+        if str(v).lower() in ("failed", "error")
+    }
+    if failed_nodes:
+        print(f"  failed nodes: {failed_nodes}")
+
+    if run.artifacts:
+        print(f"  artifacts: {len(run.artifacts)}")
+
+    return wr_id
 
 class WorkflowRunManager:
     """Manager for Workflow Executions (Runs)."""

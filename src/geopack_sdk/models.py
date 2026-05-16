@@ -430,6 +430,185 @@ class DataStoreAclEntry(BaseModel):
 
 
 # ============================================================================
+# --- ESRI GEODATABASE MODELS ---
+# ============================================================================
+
+class EsriSpatialReference(BaseModel):
+    """Spatial reference entry from ESRI geodatabase info."""
+
+    wkid: int
+    name: str
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriDatasetDiscovered(BaseModel):
+    """Single dataset row from ``GET /datastores/{id}/esri/datasets`` (adapter discovery)."""
+
+    name: str
+    aliasName: Optional[str] = None
+    type: Literal["FeatureClass", "Table"]
+    physicalName: str
+    featureDataset: Optional[str] = None
+    description: Optional[str] = None
+    geometryType: Optional[str] = None
+    registered: Optional[bool] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriApiMetadata(BaseModel):
+    """Common ``metadata`` block on ESRI admin API responses."""
+
+    count: Optional[int] = None
+    totalProcessed: Optional[int] = None
+    datastoreId: Optional[int] = None
+    retrievedAt: Optional[datetime] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriDiscoverResponse(BaseModel):
+    """``GET /api/datastores/{id}/esri/datasets``"""
+
+    success: bool = True
+    data: List[EsriDatasetDiscovered] = Field(default_factory=list)
+    metadata: Optional[EsriApiMetadata] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriRegistrationResultItem(BaseModel):
+    """One row in register / update / delete result lists."""
+
+    datasetName: str
+    datasetId: Optional[int] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+    changes: Optional[List[str]] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriRegistrationResults(BaseModel):
+    """``data`` payload for ``POST …/esri/datasets/register``."""
+
+    registered: List[EsriRegistrationResultItem] = Field(default_factory=list)
+    updated: List[EsriRegistrationResultItem] = Field(default_factory=list)
+    skipped: List[EsriRegistrationResultItem] = Field(default_factory=list)
+    errors: List[EsriRegistrationResultItem] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriRegisterResponse(BaseModel):
+    """``POST /api/datastores/{id}/esri/datasets/register``"""
+
+    success: bool = True
+    data: EsriRegistrationResults = Field(default_factory=EsriRegistrationResults)
+    metadata: Optional[EsriApiMetadata] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriSchemaUpdateResults(BaseModel):
+    """``data`` payload for ``PUT …/esri/datasets/schemas``."""
+
+    updated: List[EsriRegistrationResultItem] = Field(default_factory=list)
+    unchanged: List[EsriRegistrationResultItem] = Field(default_factory=list)
+    failed: List[EsriRegistrationResultItem] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriSchemaUpdateResponse(BaseModel):
+    """``PUT /api/datastores/{id}/esri/datasets/schemas``"""
+
+    success: bool = True
+    data: EsriSchemaUpdateResults = Field(default_factory=EsriSchemaUpdateResults)
+    metadata: Optional[EsriApiMetadata] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriBulkDeleteResults(BaseModel):
+    """``data`` payload for ``DELETE …/esri/datasets``."""
+
+    deleted: List[EsriRegistrationResultItem] = Field(default_factory=list)
+    failed: List[EsriRegistrationResultItem] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriBulkDeleteResponse(BaseModel):
+    """``DELETE /api/datastores/{id}/esri/datasets`` (requires ``confirm=true``)."""
+
+    success: bool = True
+    data: EsriBulkDeleteResults = Field(default_factory=EsriBulkDeleteResults)
+    metadata: Optional[EsriApiMetadata] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriDatastoreSummary(BaseModel):
+    """Datastore slice inside ``GET …/esri/info``."""
+
+    id: int
+    name: str
+    description: Optional[str] = None
+    type: str
+    status: Optional[str] = None
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriGeodatabaseStats(BaseModel):
+    """Geodatabase statistics from ``adapter.getGeodatabaseInfo()``."""
+
+    version: Optional[str] = None
+    isVersioned: Optional[bool] = None
+    hasArchive: Optional[bool] = None
+    datasetCount: Optional[int] = None
+    featureClassCount: Optional[int] = None
+    tableCount: Optional[int] = None
+    versionedTableCount: Optional[int] = None
+    archivedTableCount: Optional[int] = None
+    supportedGeometryTypes: List[str] = Field(default_factory=list)
+    spatialReferences: List[EsriSpatialReference] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriGeodatabaseInfoPayload(BaseModel):
+    """``data`` object for ``GET /api/datastores/{id}/esri/info``."""
+
+    datastore: EsriDatastoreSummary
+    geodatabase: EsriGeodatabaseStats
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriGeodatabaseInfoResponse(BaseModel):
+    """``GET /api/datastores/{id}/esri/info``"""
+
+    success: bool = True
+    data: EsriGeodatabaseInfoPayload
+    metadata: Optional[EsriApiMetadata] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EsriRegisterOptions(BaseModel):
+    """Options for ``POST …/esri/datasets/register``."""
+
+    updateExisting: bool = False
+
+    model_config = ConfigDict(extra="allow")
+
+
+# ============================================================================
 # --- RESOURCE MODELS (WORKGROUP, USER, ORGANIZATION) ---
 # ============================================================================
 
@@ -794,6 +973,10 @@ def get_schemas_for_mcp() -> Dict[str, Dict[str, Any]]:
         'QuotaSummary': get_schema(QuotaSummary),
         'DatasetDiscoverResponse': get_schema(DatasetDiscoverResponse),
         'DataStoreResponse': get_schema(DataStoreResponse),
+        'EsriDatasetDiscovered': get_schema(EsriDatasetDiscovered),
+        'EsriDiscoverResponse': get_schema(EsriDiscoverResponse),
+        'EsriRegisterResponse': get_schema(EsriRegisterResponse),
+        'EsriGeodatabaseInfoResponse': get_schema(EsriGeodatabaseInfoResponse),
         'WorkgroupResponse': get_schema(WorkgroupResponse),
         'UserResponse': get_schema(UserResponse),
         'OrganizationResponse': get_schema(OrganizationResponse),

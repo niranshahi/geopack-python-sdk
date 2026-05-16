@@ -1,10 +1,16 @@
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal, Union
 from .models import (
     DataStoreResponse,
     DataStoreListResponse,
     TestConnectionResponse,
     PredefinedDataStore,
     DataStoreAclEntry,
+    EsriDiscoverResponse,
+    EsriRegisterResponse,
+    EsriRegisterOptions,
+    EsriSchemaUpdateResponse,
+    EsriBulkDeleteResponse,
+    EsriGeodatabaseInfoResponse,
 )
 
 
@@ -247,7 +253,7 @@ class DataStoreManager:
         data_store_id: int,
         include_hidden: bool = False,
         dataset_type: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> EsriDiscoverResponse:
         """Discover available datasets in an ESRI Geodatabase DataStore.
 
         REST API: `GET /api/datastores/:id/esri/datasets`
@@ -258,25 +264,27 @@ class DataStoreManager:
             dataset_type: Filter by type (``'FeatureClass'`` or ``'Table'``).
 
         Returns:
-            ``{ success, data: [...EsriDataset], metadata: { count, datastoreId } }``
+            :class:`EsriDiscoverResponse` with ``data`` as discovered datasets
+            (``name``, ``type``, ``physicalName``, ``geometryType``, etc.).
         """
         params: Dict[str, Any] = {}
         if include_hidden:
             params["includeHidden"] = "true"
         if dataset_type:
             params["type"] = dataset_type
-        return self.client.get(
+        raw = self.client.get(
             f"/datastores/{data_store_id}/esri/datasets",
             params=params or None,
         )
+        return EsriDiscoverResponse(**raw)
 
     def register_esri_datasets(
         self,
         data_store_id: int,
         workgroup_id: int,
         dataset_names: Optional[List[str]] = None,
-        options: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        options: Optional[Union[EsriRegisterOptions, Dict[str, Any]]] = None,
+    ) -> EsriRegisterResponse:
         """Register ESRI datasets from a geodatabase.
 
         REST API: `POST /api/datastores/:id/esri/datasets/register`
@@ -285,26 +293,31 @@ class DataStoreManager:
             data_store_id: ID of the ESRI Geodatabase DataStore.
             workgroup_id: Workgroup to assign datasets to.
             dataset_names: Specific dataset names to register (None = register all).
-            options: Extra options, e.g. ``{ updateExisting: True }``.
+            options: Registration options (``updateExisting``, etc.).
 
         Returns:
-            ``{ success, data: { registered, updated, errors }, metadata }``
+            :class:`EsriRegisterResponse` with ``data.registered``, ``updated``,
+            ``skipped``, and ``errors`` lists.
         """
         payload: Dict[str, Any] = {"workgroupId": workgroup_id}
         if dataset_names is not None:
             payload["datasetNames"] = dataset_names
         if options is not None:
-            payload["options"] = options
-        return self.client.post(
+            if isinstance(options, EsriRegisterOptions):
+                payload["options"] = options.model_dump(exclude_none=True)
+            else:
+                payload["options"] = options
+        raw = self.client.post(
             f"/datastores/{data_store_id}/esri/datasets/register",
             json=payload,
         )
+        return EsriRegisterResponse(**raw)
 
     def update_esri_dataset_schemas(
         self,
         data_store_id: int,
         force_update: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> EsriSchemaUpdateResponse:
         """Update all ESRI dataset schemas from the geodatabase.
 
         REST API: `PUT /api/datastores/:id/esri/datasets/schemas`
@@ -314,18 +327,20 @@ class DataStoreManager:
             force_update: Force schema update even if unchanged.
 
         Returns:
-            ``{ success, data: { updated, unchanged, failed }, metadata }``
+            :class:`EsriSchemaUpdateResponse` with ``updated``, ``unchanged``,
+            and ``failed`` lists.
         """
-        return self.client.put(
+        raw = self.client.put(
             f"/datastores/{data_store_id}/esri/datasets/schemas",
             json={"forceUpdate": force_update},
         )
+        return EsriSchemaUpdateResponse(**raw)
 
     def delete_all_esri_datasets(
         self,
         data_store_id: int,
         confirm: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> EsriBulkDeleteResponse:
         """Delete all ESRI datasets from a DataStore.
 
         REST API: `DELETE /api/datastores/:id/esri/datasets`
@@ -335,23 +350,26 @@ class DataStoreManager:
             confirm: Must be ``True`` to execute the bulk delete.
 
         Returns:
-            ``{ success, data: { deleted, failed }, metadata }``
+            :class:`EsriBulkDeleteResponse` with ``deleted`` and ``failed`` lists.
         """
         params = {"confirm": "true"} if confirm else {}
-        return self.client.delete(
+        raw = self.client.delete(
             f"/datastores/{data_store_id}/esri/datasets",
             params=params or None,
         )
+        return EsriBulkDeleteResponse(**raw)
 
     def get_esri_geodatabase_info(
         self,
         data_store_id: int,
-    ) -> Dict[str, Any]:
+    ) -> EsriGeodatabaseInfoResponse:
         """Get ESRI geodatabase information (real-time).
 
         REST API: `GET /api/datastores/:id/esri/info`
 
         Returns:
-            ``{ success, data: { datastore, geodatabase }, metadata }``
+            :class:`EsriGeodatabaseInfoResponse` with portal ``datastore`` summary
+            and adapter ``geodatabase`` statistics.
         """
-        return self.client.get(f"/datastores/{data_store_id}/esri/info")
+        raw = self.client.get(f"/datastores/{data_store_id}/esri/info")
+        return EsriGeodatabaseInfoResponse(**raw)
