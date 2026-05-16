@@ -1,14 +1,142 @@
 import time
 import logging
-from typing import Any, Dict, Optional
-from .models import TaskResult
+from typing import Any, Dict, List, Literal, NamedTuple, Optional
+
+from .models import ActiveTasksSummary, TaskListResponse, TaskResult
 from .exceptions import GeopackTaskError, GeopackTimeoutError
 
 logger = logging.getLogger(__name__)
 
+
+class TaskMessageInfo(NamedTuple):
+    """
+    Mirrors ``getMessageInfo`` in ``frontend-ui/src/features/tasks/views/TasksListView.vue``:
+    message count, presence of error / warn levels (``warn``, not ``warning``).
+    """
+
+    count: int
+    has_errors: bool
+    has_warnings: bool
+
+
+def task_message_info(task: TaskResult) -> TaskMessageInfo:
+    """
+    Same logic as the Task History table **Messages** column (badge / button color).
+
+    - ``has_errors``: any ``level == "error"`` (red in UI)
+    - ``has_warnings``: any ``level == "warn"`` (orange if no errors; blue if neither)
+    """
+    messages = task.messages or []
+    count = len(messages)
+    has_errors = any(
+        isinstance(m, dict) and str(m.get("level", "")).lower() == "error"
+        for m in messages
+    )
+    has_warnings = any(
+        isinstance(m, dict) and str(m.get("level", "")).lower() == "warn"
+        for m in messages
+    )
+    return TaskMessageInfo(count, has_errors, has_warnings)
+
+
+def task_message_badge_severity(task: TaskResult) -> Literal["error", "warn", "info"]:
+    """
+    Matches Vuetify badge/button colors on the task list: **error** >
+    **warn** > **info** (see ``TasksListView.vue`` template).
+    """
+    info = task_message_info(task)
+    if info.has_errors:
+        return "error"
+    if info.has_warnings:
+        return "warn"
+    return "info"
+
+
+def task_log_entries_needing_review(task: TaskResult) -> List[Dict[str, Any]]:
+    """
+    Log lines with ``level`` ``error`` or ``warn`` (and ``warning`` alias).
+
+    Excludes ``info`` and ``debug`` so this aligns with list **severity** highlights;
+    read ``task.messages`` directly for every line including debug when permitted.
+    """
+    out: List[Dict[str, Any]] = []
+    for m in task.messages or []:
+        if not isinstance(m, dict):
+            continue
+        level = str(m.get("level", "info")).lower()
+        if level in ("error", "warn", "warning"):
+            out.append(m)
+    return out
+
+
+def task_may_have_hidden_issues(task: TaskResult) -> bool:
+    """
+    True when ``status`` is ``completed`` or ``partial_success`` but the message
+    log would show a **non-info** badge in the portal (error or warn lines), i.e.
+    :func:`task_message_badge_severity` is not ``"info"``.
+    """
+    if task.status not in ("completed", "partial_success"):
+        return False
+    return task_message_badge_severity(task) != "info"
+
+
 class TaskManager:
     def __init__(self, client):
         self.client = client
+
+    def summary(self) -> ActiveTasksSummary:
+        """
+        Active task counts for the current user (pending + processing).
+
+        REST API: `GET /api/tasks/summary`
+        """
+        response_data = self.client.get("/tasks/summary")
+        return ActiveTasksSummary(**response_data)
+
+    def list(
+        self,
+        page: int = 1,
+        page_size: int = 10,
+        status: Optional[
+            Literal[
+                "pending",
+                "processing",
+                "completed",
+                "failed",
+                "partial_success",
+                "canceled",
+            ]
+        ] = None,
+        task_type: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_direction: Optional[Literal["ASC", "DESC"]] = None,
+    ) -> TaskListResponse:
+        """
+        Paginated list of tasks for the current user.
+
+        REST API: `GET /api/tasks`
+
+        Requires permission ``task:list`` (normal users typically have this).
+
+        Note:
+            List items may omit large fields (e.g. some payloads). For full
+            ``messages`` / results, call :meth:`get_status` for a specific ``taskId``.
+        """
+        params: Dict[str, Any] = {
+            "page": page,
+            "pageSize": page_size,
+        }
+        if status:
+            params["status"] = status
+        if task_type:
+            params["taskType"] = task_type
+        if order_by:
+            params["orderBy"] = order_by
+        if order_direction:
+            params["orderDirection"] = order_direction
+
+        response_data = self.client.get("/tasks", params=params)
+        return TaskListResponse(**response_data)
 
     def get_status(self, task_id: str) -> TaskResult:
         """

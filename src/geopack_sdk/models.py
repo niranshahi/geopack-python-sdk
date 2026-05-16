@@ -257,7 +257,7 @@ class TaskResult(BaseModel):
     priority: int = 10
     progress: Optional[Any] = None
     messages: List[Dict[str, Any]] = Field(default_factory=list)
-    inputParameters: Dict[str, Any] = Field(default_factory=list)
+    inputParameters: Dict[str, Any] = Field(default_factory=dict)
     results: Optional[Any] = None
     startTime: Optional[datetime] = None
     endTime: Optional[datetime] = None
@@ -278,6 +278,27 @@ class TaskResult(BaseModel):
     def task_id(self) -> str:
         """Helper to get task ID"""
         return self.taskId
+
+
+class TaskListResponse(BaseModel):
+    """Response from GET /api/tasks (paginated list for the current user)."""
+
+    totalItems: int
+    totalPages: int
+    currentPage: int
+    pageSize: int
+    tasks: List[TaskResult] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ActiveTasksSummary(BaseModel):
+    """Response from GET /api/tasks/summary (pending + processing counts)."""
+
+    pending: int = 0
+    processing: int = 0
+
+    model_config = ConfigDict(extra="allow")
 
 
 # ============================================================================
@@ -553,11 +574,41 @@ class WorkflowRunArtifact(BaseModel):
     model_config = ConfigDict(extra='allow')
 
 
+class WorkflowRunSubmitResponse(BaseModel):
+    """202 response from POST /api/workflow-runs (run queued, not a full Task object)."""
+
+    workflowRunId: int
+    taskId: str
+    status: Literal[
+        "queued",
+        "running",
+        "canceling",
+        "succeeded",
+        "failed",
+        "canceled",
+    ]
+
+    model_config = ConfigDict(extra="allow")
+
+
 class WorkflowRun(BaseModel):
     """Workflow execution run"""
     id: int
     workflowId: int
-    status: Literal['pending', 'processing', 'completed', 'failed', 'canceled', 'succeeded', 'running', 'error', 'waiting']
+    status: Literal[
+        "queued",
+        "running",
+        "canceling",
+        "succeeded",
+        "failed",
+        "canceled",
+        # legacy / alternate values seen in API snapshots
+        "pending",
+        "processing",
+        "completed",
+        "error",
+        "waiting",
+    ]
     input: Optional[Dict[str, Any]] = None
     output: Optional[Dict[str, Any]] = None
     artifacts: List[WorkflowRunArtifact] = Field(default_factory=list)
@@ -632,6 +683,7 @@ def get_schemas_for_mcp() -> Dict[str, Dict[str, Any]]:
         'TaskResult': get_schema(TaskResult),
         'Workflow': get_schema(Workflow),
         'WorkflowRun': get_schema(WorkflowRun),
+        'WorkflowRunSubmitResponse': get_schema(WorkflowRunSubmitResponse),
         'DataStoreResponse': get_schema(DataStoreResponse),
         'WorkgroupResponse': get_schema(WorkgroupResponse),
         'UserResponse': get_schema(UserResponse),

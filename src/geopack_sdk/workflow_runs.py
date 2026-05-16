@@ -4,7 +4,7 @@ from .models import (
     WorkflowRun,
     WorkflowRunArtifact,
     WorkflowRunListResponse,
-    TaskResult,
+    WorkflowRunSubmitResponse,
 )
 
 class WorkflowRunManager:
@@ -129,7 +129,7 @@ class WorkflowRunManager:
         override_datastore_id: Optional[int] = None,
         wait: bool = True,
         polling_interval: int = 2
-    ) -> Union[WorkflowRun, TaskResult]:
+    ) -> Union[WorkflowRun, WorkflowRunSubmitResponse]:
         """Submit a workflow for execution.
         
         REST API: `POST /api/workflow-runs`
@@ -138,7 +138,10 @@ class WorkflowRunManager:
             workflow_id: ID of the workflow model to run.
             params: Dictionary of runtime parameters.
             override_datastore_id: Optional ID to override default storage.
-            wait: If True, waits for the background task to complete.
+            wait: If True, waits for the background task to complete and returns
+                the final :class:`WorkflowRun`. If False, returns
+                :class:`WorkflowRunSubmitResponse` (``workflowRunId``, ``taskId``,
+                run ``status`` e.g. ``queued`` — not a :class:`TaskResult`).
             polling_interval: Seconds between status checks.
         """
         payload = {
@@ -151,13 +154,12 @@ class WorkflowRunManager:
         response_data = self.client.post(self.base_url, json=payload)
         
         if not wait:
-            # Returns a TaskResult-like object or similar
-            return TaskResult(**response_data)
+            return WorkflowRunSubmitResponse(**response_data)
 
         # If waiting, use the taskId returned in the response
         task_id = response_data.get("taskId")
         if not task_id:
-             return TaskResult(**response_data)
+            return WorkflowRunSubmitResponse(**response_data)
             
         self.client.tasks.wait(task_id, interval=polling_interval, quiet=True)
         
