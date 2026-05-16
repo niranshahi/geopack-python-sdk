@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from typing import TYPE_CHECKING, Callable, Optional as TypingOptional
+
 import requests
+
+if TYPE_CHECKING:
+    import httpx
 
 
 class GeopackError(Exception):
@@ -35,36 +40,69 @@ class GeopackAPIError(GeopackError):
         super().__init__(message, details)
 
     @classmethod
-    def from_response(cls, response: requests.Response) -> GeopackAPIError:
-        """Build an API or auth error from an HTTP response."""
-        status_code = response.status_code
+    def from_http_status(
+        cls,
+        status_code: int,
+        *,
+        reason: TypingOptional[str] = None,
+        text: TypingOptional[str] = None,
+        json_loader: TypingOptional[Callable[[], Any]] = None,
+        response: TypingOptional[Any] = None,
+    ) -> GeopackAPIError:
+        """Build an API or auth error from HTTP status and optional body."""
         details: Dict[str, Any] = {}
-        message = response.reason or f"HTTP {status_code}"
+        message = reason or f"HTTP {status_code}"
 
-        try:
-            error_data = response.json()
-            if isinstance(error_data, dict):
-                details = error_data
-                raw = (
-                    error_data.get("message")
-                    or error_data.get("error")
-                    or error_data.get("errors")
-                )
-                if raw is None:
-                    message = str(error_data)
-                elif isinstance(raw, str):
-                    message = raw
+        if json_loader is not None:
+            try:
+                error_data = json_loader()
+                if isinstance(error_data, dict):
+                    details = error_data
+                    raw = (
+                        error_data.get("message")
+                        or error_data.get("error")
+                        or error_data.get("errors")
+                    )
+                    if raw is None:
+                        message = str(error_data)
+                    elif isinstance(raw, str):
+                        message = raw
+                    else:
+                        message = str(raw)
                 else:
-                    message = str(raw)
-            else:
-                message = str(error_data)
-        except ValueError:
-            text = (response.text or "").strip()
-            if text:
-                message = text[:500]
+                    message = str(error_data)
+            except ValueError:
+                pass
+
+        if message == (reason or f"HTTP {status_code}") and text:
+            stripped = text.strip()
+            if stripped:
+                message = stripped[:500]
 
         exc_type = GeopackAuthError if status_code in (401, 403) else cls
         return exc_type(status_code, message, details, response=response)
+
+    @classmethod
+    def from_response(cls, response: requests.Response) -> GeopackAPIError:
+        """Build an API or auth error from a ``requests`` response."""
+        return cls.from_http_status(
+            response.status_code,
+            reason=response.reason,
+            text=response.text,
+            json_loader=response.json,
+            response=response,
+        )
+
+    @classmethod
+    def from_httpx_response(cls, response: "httpx.Response") -> GeopackAPIError:
+        """Build an API or auth error from an ``httpx`` response."""
+        return cls.from_http_status(
+            response.status_code,
+            reason=response.reason_phrase,
+            text=response.text,
+            json_loader=response.json,
+            response=response,
+        )
 
 
 class GeopackAuthError(GeopackAPIError):

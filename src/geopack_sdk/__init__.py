@@ -16,8 +16,9 @@ from .tasks import (
 )
 from .workflow_runs import inspect_workflow_run_outcome
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
+    "AsyncGeopackClient",
     "GeopackClient",
     "GeopackError",
     "GeopackAPIError",
@@ -32,3 +33,11 @@ __all__ = [
     "task_message_badge_severity",
     "task_message_info",
 ]
+
+
+def __getattr__(name: str):
+    if name == "AsyncGeopackClient":
+        from .async_client import AsyncGeopackClient
+
+        return AsyncGeopackClient
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

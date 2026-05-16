@@ -70,32 +70,36 @@ def normalize_feature_query_dsl(query: Dict[str, Any]) -> Dict[str, Any]:
     return dsl
 
 
+def encode_query_params(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Encode query params for the Geopack REST API (shared by sync and async clients).
+
+    - Arrays must be JSON-stringified.
+    - Null/empty values are omitted.
+    """
+    encoded: Dict[str, Any] = {}
+
+    for key, value in (params or {}).items():
+        if value is None:
+            continue
+        if value == "":
+            continue
+        if isinstance(value, list):
+            if len(value) == 0:
+                continue
+            encoded[key] = json.dumps(value)
+            continue
+
+        encoded[key] = value
+
+    return encoded
+
+
 class DatasetManager:
     def __init__(self, client):
         self.client = client
 
     def _encode_query_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Encode query params for the Geopack REST API.
-
-        - Arrays must be JSON-stringified.
-        - Null/empty values are omitted.
-        """
-        encoded: Dict[str, Any] = {}
-
-        for key, value in (params or {}).items():
-            if value is None:
-                continue
-            if value == "":
-                continue
-            if isinstance(value, list):
-                if len(value) == 0:
-                    continue
-                encoded[key] = json.dumps(value)
-                continue
-
-            encoded[key] = value
-
-        return encoded
+        return encode_query_params(params)
 
     def list(
         self,

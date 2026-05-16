@@ -12,7 +12,7 @@ A standalone Python library to interact with the Geopack Geoportal API.
 | Python import | `geopack_sdk` |
 
 ```python
-from geopack_sdk import GeopackClient
+from geopack_sdk import GeopackClient, AsyncGeopackClient
 ```
 
 ## Installation
@@ -20,9 +20,18 @@ from geopack_sdk import GeopackClient
 ```bash
 pip install geopack-sdk
 ```
-or
+
+Async client (parallel task polling, non-blocking REST):
+
+```bash
+pip install geopack-sdk[async]
+```
+
+Or from Git:
+
 ```bash
 pip install git+https://github.com/niranshahi/geopack-python-sdk.git
+pip install "geopack-sdk[async]"
 ```
 
 ## Examples & Notebooks
@@ -35,6 +44,7 @@ We provide a collection of Jupyter Notebooks in the `notebooks/` directory to he
 4. `04_Data_Management_and_Tasks.ipynb` — upload, export, task log severity.
 5. `05_Advanced_API_Coverage.ipynb` — quotas, generated files, dataset query / ACL.
 6. `06_ESRI_Geodatabase_Manager.ipynb` — ESRI geodatabase discover / register / schemas (portal manager parity).
+7. `07_Async_Client.ipynb` — `AsyncGeopackClient`, `asyncio.gather`, parallel task polling.
 
 **Note for Developers:** Notebooks use the local `src/` directory when cloned from the repo (no `pip install` required).
 
@@ -54,6 +64,7 @@ Require a running API and `.env` (`GEOPACK_API_URL`, `GEOPACK_USERNAME`, `GEOPAC
 | `test_dataset_query.py` | Structured dataset query |
 | `test_dataset_acl.py` | Dataset ACL (read-only by default) |
 | `test_esri_datastore.py` | ESRI geodatabase discover/info (mutations via env flags) |
+| `test_async_sdk.py` | Async login, `asyncio.gather`, optional `TEST_TASK_ID` / `TEST_TASK_IDS` |
 
 **Unit tests** (no server): `PYTHONPATH=src python -m unittest discover -s tests`
 
@@ -105,6 +116,22 @@ client.auth.login(username="my_user", password="my_password")
 ## Features
 - Datasets, DataStores, Workflows, Tasks, **Generated Files**, **Quotas (self)**.
 - Dataset **delete**, **ACL**, structured **query** (`build_simple_query`), **discover**.
-- Async tasks with polling; task message helpers aligned with the portal UI.
+- Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks`.
+- Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
 - GeoPandas integration; MCP server planned.
+
+### Async example
+
+```python
+import asyncio
+from geopack_sdk import AsyncGeopackClient
+
+async def main():
+    async with AsyncGeopackClient() as client:
+        await client.auth.login()
+        pending = await client.tasks.summary()
+        print(pending)
+
+asyncio.run(main())
+```

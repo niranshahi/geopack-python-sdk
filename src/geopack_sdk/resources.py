@@ -1,14 +1,34 @@
 from typing import Any, Dict, List, Optional
+
 from .models import (
-    WorkgroupResponse,
-    WorkgroupListResponse,
-    UserResponse,
-    UserListResponse,
-    OrganizationResponse,
-    OrganizationListResponse,
-    GroupResponse,
     GroupListResponse,
+    GroupResponse,
+    OrganizationListResponse,
+    OrganizationResponse,
+    UserListResponse,
+    UserResponse,
+    WorkgroupListResponse,
+    WorkgroupResponse,
 )
+
+
+def parse_group_list_response(response_data: Any) -> GroupListResponse:
+    """Normalize GET /groups — API returns a bare JSON array."""
+    if isinstance(response_data, list):
+        groups = [GroupResponse(**item) for item in response_data]
+        return GroupListResponse(groups=groups, totalItems=len(groups))
+    return GroupListResponse(**response_data)
+
+
+def parse_organization_list_response(response_data: Any) -> OrganizationListResponse:
+    """Normalize GET /organizations — API returns a bare JSON array."""
+    if isinstance(response_data, list):
+        organizations = [OrganizationResponse(**item) for item in response_data]
+        return OrganizationListResponse(
+            organizations=organizations,
+            totalItems=len(organizations),
+        )
+    return OrganizationListResponse(**response_data)
 
 
 class WorkgroupManager:
@@ -60,7 +80,7 @@ class GroupManager:
         REST API: `GET /api/groups`
         """
         response_data = self.client.get("/groups")
-        return GroupListResponse(**response_data)
+        return parse_group_list_response(response_data)
 
     def get(self, group_id: int) -> GroupResponse:
         """Get a single group by ID with type-safe response.
@@ -125,7 +145,7 @@ class OrganizationManager:
         REST API: `GET /api/organizations`
         """
         response_data = self.client.get("/organizations")
-        return OrganizationListResponse(**response_data)
+        return parse_organization_list_response(response_data)
 
     def get(self, org_id: int) -> OrganizationResponse:
         """Get a single organization by ID with type-safe response.

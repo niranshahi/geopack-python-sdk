@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Literal, Union
+
 from .models import (
     DataStoreResponse,
     DataStoreListResponse,
@@ -12,6 +13,17 @@ from .models import (
     EsriBulkDeleteResponse,
     EsriGeodatabaseInfoResponse,
 )
+
+
+def parse_datastore_list_response(response_data: Any) -> DataStoreListResponse:
+    """Normalize GET /datastores (and similar) payloads into DataStoreListResponse.
+
+    The API may return a bare JSON array or an object with a ``datastores`` field.
+    """
+    if isinstance(response_data, list):
+        datastores = [DataStoreResponse(**d) for d in response_data]
+        return DataStoreListResponse(datastores=datastores, totalCount=len(datastores))
+    return DataStoreListResponse(**response_data)
 
 
 class DataStoreManager:
@@ -57,11 +69,7 @@ class DataStoreManager:
             DataStoreListResponse: Validated response with datastores list
         """
         response_data = self.client.get("/datastores")
-        # API returns list directly
-        if isinstance(response_data, list):
-            datastores = [DataStoreResponse(**d) for d in response_data]
-            return DataStoreListResponse(datastores=datastores, totalCount=len(datastores))
-        return DataStoreListResponse(**response_data)
+        return parse_datastore_list_response(response_data)
 
     def list_by_capabilities(
         self,
