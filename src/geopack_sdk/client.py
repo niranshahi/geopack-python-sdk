@@ -1,5 +1,8 @@
 import os
+
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from .auth import AuthManager
 from .datastores import DataStoreManager
@@ -10,6 +13,39 @@ from .workflow_runs import WorkflowRunManager
 from .resources import WorkgroupManager, GroupManager, UserManager, OrganizationManager
 from .exceptions import GeopackAPIError, GeopackAuthError, GeopackError, GeopackTimeoutError
 
+# Default transport retries for transient gateway / overload responses
+_DEFAULT_RETRY_TOTAL = 3
+_DEFAULT_RETRY_BACKOFF_FACTOR = 0.5
+_DEFAULT_RETRY_STATUS_CODES = (502, 503, 504)
+_RETRY_ALLOWED_METHODS = frozenset(
+    ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+)
+
+
+def _attach_retry_adapter(
+    session: requests.Session,
+    *,
+    total: int,
+    backoff_factor: float,
+    status_forcelist: tuple,
+) -> None:
+    """Mount urllib3 Retry on a requests session for transient HTTP failures."""
+    retry = Retry(
+        total=total,
+        connect=total,
+        read=total,
+        status=total,
+        backoff_factor=backoff_factor,
+        status_forcelist=status_forcelist,
+        allowed_methods=_RETRY_ALLOWED_METHODS,
+        respect_retry_after_header=True,
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+
 class GeopackClient:
     """
     The main entry point for the Geopack Python SDK.
@@ -17,8 +53,20 @@ class GeopackClient:
     `base_url` should typically point to the REST API base, e.g.:
     - http://localhost:3000/api
     - https://your-domain.com/api
+
+    HTTP transport retries (urllib3) are enabled by default for connection errors
+    and responses with status 502, 503, or 504. Application-level 401 refresh
+    is handled separately in :meth:`_request`. Disable with ``enable_http_retries=False``.
     """
-    def __init__(self, base_url: str = None):
+    def __init__(
+        self,
+        base_url: str = None,
+        *,
+        enable_http_retries: bool = True,
+        retry_total: int = _DEFAULT_RETRY_TOTAL,
+        retry_backoff_factor: float = _DEFAULT_RETRY_BACKOFF_FACTOR,
+        retry_status_codes: tuple = _DEFAULT_RETRY_STATUS_CODES,
+    ):
         # Priority: explicit parameter > environment variable
         self.base_url = (base_url or os.getenv("GEOPACK_API_URL", "")).rstrip('/')
         
@@ -29,6 +77,13 @@ class GeopackClient:
             )
 
         self.session = requests.Session()
+        if enable_http_retries:
+            _attach_retry_adapter(
+                self.session,
+                total=retry_total,
+                backoff_factor=retry_backoff_factor,
+                status_forcelist=retry_status_codes,
+            )
         
         # Initialize managers
         self.auth = AuthManager(self)
