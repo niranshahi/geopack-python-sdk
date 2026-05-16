@@ -10,6 +10,8 @@ from .datasets import DatasetManager
 from .tasks import TaskManager
 from .workflows import WorkflowManager
 from .workflow_runs import WorkflowRunManager
+from .generated_files import GeneratedFileManager
+from .quotas import QuotaManager
 from .resources import WorkgroupManager, GroupManager, UserManager, OrganizationManager
 from .exceptions import GeopackAPIError, GeopackAuthError, GeopackError, GeopackTimeoutError
 
@@ -92,6 +94,8 @@ class GeopackClient:
         self.tasks = TaskManager(self)
         self.workflows = WorkflowManager(self)
         self.workflow_runs = WorkflowRunManager(self)
+        self.generated_files = GeneratedFileManager(self)
+        self.quotas = QuotaManager(self)
         
         # Identity and Access Management
         self.workgroups = WorkgroupManager(self)
@@ -131,6 +135,9 @@ class GeopackClient:
 
         if not response.ok:
             raise GeopackAPIError.from_response(response)
+
+        if response.status_code == 204 or not response.content:
+            return None
 
         try:
             return response.json()

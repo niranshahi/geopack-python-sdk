@@ -29,12 +29,31 @@ pip install git+https://github.com/niranshahi/geopack-python-sdk.git
 
 We provide a collection of Jupyter Notebooks in the `notebooks/` directory to help you get started:
 
-1. `01_Getting_Started.ipynb`: Basic connection and data exploration.
-2. `02_Data_Analysis_GeoPandas.ipynb`: Spatial analysis with GeoPandas.
-3. `03_Raster_Workflows.ipynb`: Server-side processing with GDAL/OGR Workflows.
-4. `04_Data_Management_and_Tasks.ipynb`: Uploading, exporting, and monitoring tasks.
+1. `01_Getting_Started.ipynb` — connection and data exploration.
+2. `02_Data_Analysis_GeoPandas.ipynb` — GeoPandas analysis.
+3. `03_Raster_Workflows.ipynb` — workflows, task + run inspection.
+4. `04_Data_Management_and_Tasks.ipynb` — upload, export, task log severity.
+5. `05_Advanced_API_Coverage.ipynb` — quotas, generated files, dataset query / ACL.
 
-**Note for Developers:** If you are running these notebooks directly from the cloned repository, they are pre-configured to use the local `src/` directory without requiring a global installation.
+**Note for Developers:** Notebooks use the local `src/` directory when cloned from the repo (no `pip install` required).
+
+### Live integration tests (`test_*.py`)
+
+Require a running API and `.env` (`GEOPACK_API_URL`, `GEOPACK_USERNAME`, `GEOPACK_PASSWORD`):
+
+| Script | Purpose |
+|--------|---------|
+| `test_sdk.py` | Login, list datasets/datastores |
+| `test_upload.py` | Upload (`TEST_GEOJSON_PATH`) |
+| `test_download.py` | Export + download |
+| `test_workflow.py` | Workflow run |
+| `test_geopandas.py` | GeoDataFrame |
+| `test_quotas.py` | `GET /quotas/me/summary` |
+| `test_generated_files.py` | Generated files list/download |
+| `test_dataset_query.py` | Structured dataset query |
+| `test_dataset_acl.py` | Dataset ACL (read-only by default) |
+
+**Unit tests** (no server): `PYTHONPATH=src python -m unittest discover -s tests`
 
 # Initialize client
 client = GeopackClient(base_url="https://your-geoportal.com/api")
@@ -82,7 +101,8 @@ client.auth.login(username="my_user", password="my_password")
 ```
 
 ## Features
-- Full API coverage for Datasets, DataStores, and Workflows.
-- Async Task management with polling support.
-- Native integration with GeoPandas and Rasterio.
-- AI-ready with upcoming MCP support.
+- Datasets, DataStores, Workflows, Tasks, **Generated Files**, **Quotas (self)**.
+- Dataset **delete**, **ACL**, structured **query** (`build_simple_query`), **discover**.
+- Async tasks with polling; task message helpers aligned with the portal UI.
+- HTTP retries on 502/503/504; typed exceptions.
+- GeoPandas integration; MCP server planned.

@@ -628,6 +628,112 @@ class WorkflowRunListResponse(BaseModel):
 
 
 # ============================================================================
+# --- GENERATED FILES ---
+# ============================================================================
+
+class GeneratedFile(BaseModel):
+    """File produced by a background task (exports, workflow outputs, etc.)."""
+
+    id: int
+    fileName: str
+    fileSize: int
+    downloadToken: Optional[str] = None
+    sharingPolicy: Literal["public", "private"] = "private"
+    expiresAt: Optional[datetime] = None
+    createdAt: Optional[datetime] = None
+    taskId: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class GeneratedFileListResponse(BaseModel):
+    """Response from GET /api/generated-files"""
+
+    items: List[GeneratedFile] = Field(default_factory=list)
+    totalItems: int = 0
+    totalPages: int = 1
+    currentPage: int = 1
+    pageSize: int = 10
+
+    model_config = ConfigDict(extra="allow")
+
+
+# ============================================================================
+# --- QUOTAS (SELF) ---
+# ============================================================================
+
+class UsagePlanSummary(BaseModel):
+    """Plan summary embedded in quota responses (matches UsagePlan in API/DB)."""
+
+    id: int
+    code: str
+    displayName: str
+    description: Optional[str] = None
+    status: Optional[str] = None
+    tier: Optional[int] = None
+    isDefaultForSelfRegistered: Optional[bool] = None
+    isDefaultForTempAccounts: Optional[bool] = None
+    isDefaultForOrgId: Optional[int] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class QuotaSummaryLimit(BaseModel):
+    """Single limit row in GET /api/quotas/me/summary."""
+
+    limitId: int
+    dimensionKey: str
+    limitType: str
+    limitValue: float
+    warnThresholdPercent: Optional[float] = None
+    window: str
+    windowDays: Optional[int] = None
+    windowStart: Optional[datetime] = None
+    windowEnd: Optional[datetime] = None
+    currentValue: float = 0
+    remaining: Optional[float] = None
+    percentageUsed: Optional[float] = None
+    dimension: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class QuotaSummary(BaseModel):
+    """Response from GET /api/quotas/me/summary."""
+
+    enabled: bool
+    reason: Optional[str] = None
+    plan: Optional[UsagePlanSummary] = None
+    limits: List[QuotaSummaryLimit] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+# ============================================================================
+# --- DATASET DISCOVER ---
+# ============================================================================
+
+class DatasetDiscoverResponse(BaseModel):
+    """Response from POST /api/datasets/discover (200 or 202)."""
+
+    success: bool = True
+    datasets: List[Dict[str, Any]] = Field(default_factory=list)
+    taskId: Optional[str] = None
+    message: Optional[str] = None
+    estimatedTime: Optional[float] = None
+    discoverySessionId: Optional[str] = None
+    count: Optional[int] = None
+    status: Optional[str] = None
+
+    model_config = ConfigDict(extra="allow")
+
+    @property
+    def is_background_task(self) -> bool:
+        return bool(self.taskId)
+
+
+# ============================================================================
 # --- API RESPONSE WRAPPERS ---
 # ============================================================================
 
@@ -684,6 +790,9 @@ def get_schemas_for_mcp() -> Dict[str, Dict[str, Any]]:
         'Workflow': get_schema(Workflow),
         'WorkflowRun': get_schema(WorkflowRun),
         'WorkflowRunSubmitResponse': get_schema(WorkflowRunSubmitResponse),
+        'GeneratedFile': get_schema(GeneratedFile),
+        'QuotaSummary': get_schema(QuotaSummary),
+        'DatasetDiscoverResponse': get_schema(DatasetDiscoverResponse),
         'DataStoreResponse': get_schema(DataStoreResponse),
         'WorkgroupResponse': get_schema(WorkgroupResponse),
         'UserResponse': get_schema(UserResponse),

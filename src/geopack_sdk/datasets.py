@@ -3,6 +3,7 @@ import json
 from typing import Any, Dict, List, Optional, Union
 from .models import (
     Dataset,
+    DatasetAcl,
     DatasetsApiResponse,
     CreateDatasetDto,
     UpdateDatasetDto,
@@ -11,8 +12,63 @@ from .models import (
     DatasetTimeSeriesPoint,
     DatasetStatsByStore,
     DatasetStatsByGeomType,
+    DatasetDiscoverResponse,
     TaskResult,
 )
+
+def build_simple_query(
+    *,
+    limit: int = 100,
+    offset: int = 0,
+    return_geometry: bool = True,
+    out_srid: Optional[int] = None,
+    where_filter: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build a minimal FeatureQuery DSL for ``POST /api/datasets/{id}/query``.
+
+    Matches ``src/utils/queryBuilder.js`` (``pagination``, ``projection``, optional ``filter``).
+    """
+    dsl: Dict[str, Any] = {
+        "pagination": {"limit": limit, "offset": offset},
+        "projection": {"returnGeometry": return_geometry},
+    }
+    if out_srid is not None:
+        dsl["projection"]["outSRID"] = out_srid
+    if where_filter:
+        dsl["filter"] = where_filter
+    return dsl
+
+
+def normalize_feature_query_dsl(query: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert shorthand query bodies to the API FeatureQuery shape.
+
+    Accepts legacy/top-level keys:
+
+    - ``limit`` / ``offset`` -> ``pagination``
+    - ``returnGeometry``, ``outSrid``, ``outSRID``, ``out_srid`` -> ``projection``
+    """
+    dsl = dict(query or {})
+
+    pagination = dict(dsl.get("pagination") or {})
+    if "limit" in dsl:
+        pagination["limit"] = dsl.pop("limit")
+    if "offset" in dsl:
+        pagination["offset"] = dsl.pop("offset")
+    if pagination:
+        dsl["pagination"] = pagination
+
+    projection = dict(dsl.get("projection") or {})
+    for out_key in ("outSrid", "outSRID", "out_srid"):
+        if out_key in dsl:
+            projection["outSRID"] = dsl.pop(out_key)
+            break
+    if "returnGeometry" in dsl:
+        projection["returnGeometry"] = dsl.pop("returnGeometry")
+    if projection:
+        dsl["projection"] = {**dsl.get("projection", {}), **projection}
+
+    return dsl
+
 
 class DatasetManager:
     def __init__(self, client):
@@ -515,3 +571,154 @@ class DatasetManager:
         # 3. Wait for completion
         task_id = task_response.taskId
         return self.client.tasks.wait(task_id, interval=polling_interval, quiet=True)
+
+    def delete(self, dataset_id: int) -> None:
+        """Delete a dataset by ID (204 No Content).
+
+        REST API: `DELETE /api/datasets/{id}`
+        """
+        self.client.delete(f"/datasets/{dataset_id}")
+
+    def query(
+        self,
+        dataset_id: int,
+        query: Optional[Dict[str, Any]] = None,
+        *,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        return_geometry: bool = True,
+        out_srid: Optional[int] = None,
+    ) -> FeatureCollection:
+        """Run a structured attribute/spatial query on a dataset.
+
+        REST API: `POST /api/datasets/{datasetId}/query`
+
+        Args:
+            dataset_id: Target dataset ID.
+            query: FeatureQuery DSL (``pagination``, ``projection``, ``filter``,
+                ``spatialFilter``, ``orderBy``, …). Shorthand keys ``limit``,
+                ``offset``, and ``returnGeometry`` at the top level are normalized
+                automatically (see :func:`normalize_feature_query_dsl`).
+            limit: If ``query`` is omitted, build a simple DSL with this page size.
+            offset: Row offset when using ``limit`` shorthand.
+            return_geometry: Include geometry in results (default True).
+            out_srid: Optional output SRID in ``projection.outSRID``.
+
+        Example::
+
+            fc = client.datasets.query(
+                ds_id,
+                build_simple_query(limit=5, offset=0),
+            )
+        """
+        if query is None:
+            if limit is None:
+                raise ValueError("Provide query dict or limit= for a simple query.")
+            query = build_simple_query(
+                limit=limit,
+                offset=offset,
+                return_geometry=return_geometry,
+                out_srid=out_srid,
+            )
+        else:
+            query = normalize_feature_query_dsl(query)
+
+        response_data = self.client.post(
+            f"/datasets/{dataset_id}/query",
+            json=query,
+        )
+        return FeatureCollection(**response_data)
+
+    def discover(
+        self,
+        source_files: List[Dict[str, Any]],
+        data_store_id: int,
+        workgroup_id: int,
+        declared_type: Optional[str] = None,
+        wait: bool = True,
+        polling_interval: int = 2,
+    ) -> Union[DatasetDiscoverResponse, TaskResult]:
+        """Discover datasets from uploaded temp files.
+
+        REST API: `POST /api/datasets/discover`
+
+        Args:
+            source_files: Upload metadata (sessionId, relativePath, originalName, …).
+            data_store_id: Target datastore ID.
+            workgroup_id: Owning workgroup ID.
+            declared_type: Optional ``vector``, ``raster``, or ``table``.
+            wait: If True and API returns a background task, poll until complete.
+            polling_interval: Seconds between polls when waiting on a task.
+
+        Returns:
+            DatasetDiscoverResponse for immediate discovery, or TaskResult when
+            ``wait=True`` and the API queued ``dataset:discovery``.
+        """
+        payload: Dict[str, Any] = {
+            "sourceFiles": source_files,
+            "dataStoreId": data_store_id,
+            "workgroupId": workgroup_id,
+        }
+        if declared_type:
+            payload["declaredType"] = declared_type
+
+        response_data = self.client.post("/datasets/discover", json=payload)
+        result = DatasetDiscoverResponse(**response_data)
+
+        if not wait or not result.is_background_task:
+            return result
+
+        task_id = result.taskId
+        if not task_id:
+            return result
+
+        task = self.client.tasks.wait_for_task(
+            task_id, interval=polling_interval, quiet=True
+        )
+        return task
+
+    def get_acls(self, dataset_id: int) -> List[DatasetAcl]:
+        """Get ACL entries for a dataset.
+
+        REST API: `GET /api/datasets/{id}/acl`
+        """
+        response_data = self.client.get(f"/datasets/{dataset_id}/acl")
+        if isinstance(response_data, list):
+            return [DatasetAcl(**entry) for entry in response_data]
+        return []
+
+    def create_acls(
+        self,
+        dataset_id: int,
+        principals: List[Dict[str, Any]],
+        permissions: List[str],
+        effect: str = "Allow",
+    ) -> List[DatasetAcl]:
+        """Create ACL entries for a dataset.
+
+        REST API: `POST /api/datasets/{id}/acl`
+
+        Args:
+            principals: ``{ principalType: 'USER'|'GROUP', principalId: int }``.
+            permissions: Permission name strings (e.g. ``dataset:read``).
+            effect: ``Allow`` or ``Deny``.
+        """
+        payload = {
+            "principals": principals,
+            "permissions": permissions,
+            "effect": effect,
+        }
+        response_data = self.client.post(
+            f"/datasets/{dataset_id}/acl",
+            json=payload,
+        )
+        if isinstance(response_data, list):
+            return [DatasetAcl(**entry) for entry in response_data]
+        return []
+
+    def delete_acl(self, dataset_id: int, acl_id: int) -> None:
+        """Delete one ACL entry for a dataset (204 No Content).
+
+        REST API: `DELETE /api/datasets/{id}/acl/{aclId}`
+        """
+        self.client.delete(f"/datasets/{dataset_id}/acl/{acl_id}")
