@@ -34,6 +34,7 @@ We provide a collection of Jupyter Notebooks in the `notebooks/` directory to he
 3. `03_Raster_Workflows.ipynb` — workflows, task + run inspection.
 4. `04_Data_Management_and_Tasks.ipynb` — upload, export, task log severity.
 5. `05_Advanced_API_Coverage.ipynb` — quotas, generated files, dataset query / ACL.
+6. `06_ESRI_Geodatabase_Manager.ipynb` — ESRI geodatabase discover / register / schemas (portal manager parity).
 
 **Note for Developers:** Notebooks use the local `src/` directory when cloned from the repo (no `pip install` required).
 
@@ -52,6 +53,7 @@ Require a running API and `.env` (`GEOPACK_API_URL`, `GEOPACK_USERNAME`, `GEOPAC
 | `test_generated_files.py` | Generated files list/download |
 | `test_dataset_query.py` | Structured dataset query |
 | `test_dataset_acl.py` | Dataset ACL (read-only by default) |
+| `test_esri_datastore.py` | ESRI geodatabase discover/info (mutations via env flags) |
 
 **Unit tests** (no server): `PYTHONPATH=src python -m unittest discover -s tests`
 
