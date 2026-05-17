@@ -36,6 +36,7 @@ class TestMcpToolHandlers(unittest.TestCase):
 
         self.assertIn("datasets", result)
         self.assertEqual(result["datasets"][0]["name"], "demo")
+        self.assertNotIn("thumbnail", result["datasets"][0])
         self.client.datasets.list.assert_called_once()
 
     def test_get_task_returns_task_result(self):
@@ -90,11 +91,14 @@ class TestMcpToolHandlers(unittest.TestCase):
             dataStoreId=1,
             createdAt="2024-01-01T00:00:00",
             updatedAt="2024-01-01T00:00:00",
+            hasThumbnail=True,
         )
 
         result = get_dataset(self.client, 2)
 
         self.assertEqual(result["name"], "roads")
+        self.assertEqual(result["thumbnailApiPath"], "/datasets/2/thumbnail")
+        self.assertNotIn("thumbnail", result)
 
 
 if __name__ == "__main__":

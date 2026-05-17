@@ -22,6 +22,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union, Literal
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
+from .dataset_payload import normalize_dataset_dict
+
 
 # ============================================================================
 # --- NESTED / SHARED MODELS ---
@@ -97,13 +99,24 @@ class Dataset(BaseModel):
     workgroup: Optional[Workgroup] = None
     dataStore: Optional[DataStore] = None
     
-    # UI helper (thumbnail can be base64 string or Buffer object)
-    thumbnail: Optional[Union[str, Dict[str, Any]]] = None
-    
+    # Thumbnail metadata (BLOB never included in list/get JSON)
+    hasThumbnail: Optional[bool] = None
+    thumbnailApiPath: Optional[str] = Field(
+        default=None,
+        description="Relative API path, e.g. /datasets/42/thumbnail — append auth for browser/MCP host fetch",
+    )
+
     model_config = ConfigDict(
         extra='allow',  # Allow additional fields for forward compatibility
         from_attributes=True  # Allow population from ORM models
     )
+
+    @model_validator(mode='before')
+    @classmethod
+    def strip_thumbnail_blob(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return normalize_dataset_dict(data)
+        return data
     
     @property
     def keywords_array(self) -> List[str]:

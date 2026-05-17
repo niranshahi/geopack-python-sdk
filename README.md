@@ -169,6 +169,8 @@ Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of us
 
 **v0 tools:** `geopack_sdk_list_datasets`, `geopack_sdk_get_dataset`, `geopack_sdk_get_task`, `geopack_sdk_list_workflows`, `geopack_sdk_get_workflow_run`.
 
+**Dataset thumbnails:** Tool results include `hasThumbnail` and `thumbnailApiPath` only (no image bytes). **Cursor does not auto-build image URLs from these fields** — use a notebook (see [pydantic_models_guide.md § Dataset thumbnails](../docs/04_development/sdk/pydantic_models_guide.md)), the Geoportal UI, or future MCP Resources (v1.5). Details: [geopack_sdk_mcp_design.md §11](../docs/04_development/sdk/geopack_sdk_mcp_design.md).
+
 Design: [docs/04_development/sdk/geopack_sdk_mcp_design.md](../docs/04_development/sdk/geopack_sdk_mcp_design.md) (in the monorepo).
 
 ### Async example
