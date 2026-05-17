@@ -65,6 +65,8 @@ Require a running API and `.env` (`GEOPACK_API_URL`, `GEOPACK_USERNAME`, `GEOPAC
 | `test_dataset_acl.py` | Dataset ACL (read-only by default) |
 | `test_esri_datastore.py` | ESRI geodatabase discover/info (mutations via env flags) |
 | `test_async_sdk.py` | Async login, `asyncio.gather`, optional `TEST_TASK_ID` / `TEST_TASK_IDS` |
+| `test_mcp_sdk.py` | MCP tool **handlers** + API (same logic as tools; **not** stdio MCP) |
+| `test_mcp_stdio_client.py` | **Full E2E**: spawns MCP server, `call_tool` over stdio (like Cursor) |
 
 **Unit tests** (no server): `PYTHONPATH=src python -m unittest discover -s tests`
 
@@ -119,7 +121,55 @@ client.auth.login(username="my_user", password="my_password")
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks`.
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; MCP server planned.
+- GeoPandas integration; **Geopack SDK MCP** server (v0 read-only tools).
+
+## Geopack SDK MCP (Cursor / Claude Desktop)
+
+Typed REST proxy via MCP — not the in-portal assistant. Credentials stay in the MCP server **environment**, never in tool arguments.
+
+**Use the project venv** (recommended — same as notebooks):
+
+```powershell
+cd python-sdk
+.\venv\Scripts\activate
+pip install -e ".[mcp]"
+```
+
+`mcp` is an **optional** dependency in `pyproject.toml` (`[project.optional-dependencies] mcp`) so `pip install geopack-sdk` alone does not pull it in. Install `geopack-sdk[mcp]` or `geopack-sdk[all]` when you need the MCP server.
+
+**Testing (API must be running, `.env` in `python-sdk/`):**
+
+| Command | What it verifies |
+|---------|------------------|
+| `python test_mcp_sdk.py` | MCP tool handlers + REST (not stdio protocol) |
+| `$env:MCP_CHECK_SERVER="1"; python test_mcp_sdk.py` | Above + tools register on FastMCP |
+| `python test_mcp_stdio_client.py` | **Full E2E:** spawns server, `call_tool` over stdio (like Cursor) |
+| `python -m geopack_sdk_mcp` | Server only; waits for MCP host (Ctrl+C to stop) |
+
+Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
+
+**Cursor** (`mcp.json` — use venv executable):
+
+```json
+{
+  "mcpServers": {
+    "geopack-sdk-mcp": {
+      "command": "D:\\Works\\geopack-geoportal\\geopack-geoportal-v2\\python-sdk\\venv\\Scripts\\geopack-sdk-mcp.exe",
+      "env": {
+        "GEOPACK_API_URL": "http://localhost:3000/api",
+        "GEOPACK_USERNAME": "your_user",
+        "GEOPACK_PASSWORD": "your_password"
+      }
+    }
+  }
+}
+```
+
+Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of username/password.
+
+**v0 tools:** `geopack_sdk_list_datasets`, `geopack_sdk_get_dataset`, `geopack_sdk_get_task`, `geopack_sdk_list_workflows`, `geopack_sdk_get_workflow_run`.
+
+Design: [docs/04_development/sdk/geopack_sdk_mcp_design.md](../docs/04_development/sdk/geopack_sdk_mcp_design.md) (in the monorepo).
 
 ### Async example
 

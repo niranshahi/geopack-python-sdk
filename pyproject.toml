@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geopack-sdk"
-version = "0.2.0"
+version = "0.3.0"
 authors = [
   { name="Geopack Team", email="info@geopack.com" },
 ]
@@ -27,7 +27,12 @@ dependencies = [
 
 [project.optional-dependencies]
 async = ["httpx>=0.27.0"]
-dev = ["pytest>=7.0.0"]
+mcp = ["mcp>=1.6.0,<2"]
+dev = ["pytest>=7.0.0", "mcp>=1.6.0,<2"]
+all = ["httpx>=0.27.0", "mcp>=1.6.0,<2"]
+
+[project.scripts]
+geopack-sdk-mcp = "geopack_sdk_mcp.__main__:main"
 
 [project.urls]
 "Homepage" = "https://github.com/niranshahi/geopack-python-sdk"
