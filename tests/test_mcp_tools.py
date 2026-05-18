@@ -1,8 +1,15 @@
 import unittest
 from unittest.mock import MagicMock
 
-from geopack_sdk.models import Dataset, DatasetsApiResponse, TaskResult, Workflow, WorkflowRun
-from geopack_sdk_mcp.tool_handlers.datasets import get_dataset, list_datasets
+from geopack_sdk.models import (
+    Dataset,
+    DatasetsApiResponse,
+    FeatureCollection,
+    TaskResult,
+    Workflow,
+    WorkflowRun,
+)
+from geopack_sdk_mcp.tool_handlers.datasets import get_dataset, list_datasets, query_dataset
 from geopack_sdk_mcp.tool_handlers.tasks import get_task
 from geopack_sdk_mcp.tool_handlers.workflow_runs import get_workflow_run
 from geopack_sdk_mcp.tool_handlers.workflows import list_workflows
@@ -99,6 +106,19 @@ class TestMcpToolHandlers(unittest.TestCase):
         self.assertEqual(result["name"], "roads")
         self.assertEqual(result["thumbnailApiPath"], "/datasets/2/thumbnail")
         self.assertNotIn("thumbnail", result)
+
+    def test_query_dataset_applies_limit(self):
+        self.client.datasets.query.return_value = FeatureCollection(
+            type="FeatureCollection",
+            features=[],
+        )
+
+        result = query_dataset(self.client, 10, limit=50)
+
+        self.assertEqual(result["queryLimitApplied"], 50)
+        self.client.datasets.query.assert_called_once()
+        call_kwargs = self.client.datasets.query.call_args.kwargs
+        self.assertEqual(call_kwargs["limit"], 50)
 
 
 if __name__ == "__main__":

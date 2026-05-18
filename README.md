@@ -121,7 +121,7 @@ client.auth.login(username="my_user", password="my_password")
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks`.
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (8 tools + 2 resource templates, v0.4.2).
+- GeoPandas integration; **Geopack SDK MCP** server (10 tools + 2 resource templates, v0.5.0).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
@@ -167,12 +167,14 @@ Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
 
 Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of username/password.
 
-**Tools (8, v0.4.2):**
+**Tools (10, v0.5.0):**
 
 | Tool | Purpose |
 |------|---------|
-| `geopack_sdk_list_datasets` | Paginated dataset list (trimmed `details`) |
-| `geopack_sdk_get_dataset` | Dataset metadata + `thumbnailResourceUri` when applicable |
+| `geopack_sdk_list_datasets` | Paginated list; `details_level` default `lite` |
+| `geopack_sdk_get_dataset` | One dataset; `details_level` default `full` |
+| `geopack_sdk_query_dataset` | Feature query (max 500 features in JSON) |
+| `geopack_sdk_get_dataset_thumbnail` | Save preview PNG on MCP host (`save_path` optional) |
 | `geopack_sdk_get_task` | Task status (sanitized) |
 | `geopack_sdk_wait_for_task` | Poll until export/job completes |
 | `geopack_sdk_export_dataset` | Start `dataset:export` (returns `taskId`) |

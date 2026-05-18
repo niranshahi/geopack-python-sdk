@@ -2,6 +2,7 @@ import json
 import unittest
 
 from geopack_sdk_mcp.sanitize.dataset_details import (
+    normalize_details_level,
     trim_dataset_for_mcp,
     trim_details,
     trim_datasets_list_payload,
@@ -29,14 +30,21 @@ class TestMcpDatasetDetails(unittest.TestCase):
             },
         }
 
-    def test_list_profile_drops_tilejson_and_fields(self):
-        out = trim_details(self._sample_vector_details(), "list")
+    def test_lite_drops_tilejson_and_fields(self):
+        out = trim_details(self._sample_vector_details(), "lite")
         self.assertNotIn("tilejson", out)
         self.assertEqual(out["fieldsCount"], 2)
         self.assertNotIn("fields", out)
 
-    def test_get_profile_keeps_tilejson_strips_values(self):
-        out = trim_details(self._sample_vector_details(), "get")
+    def test_standard_includes_slim_fields(self):
+        out = trim_details(self._sample_vector_details(), "standard")
+        self.assertNotIn("tilejson", out)
+        self.assertEqual(len(out["fields"]), 2)
+        self.assertIn("fields", out)
+        self.assertNotIn("tilejson", out)
+
+    def test_full_profile_keeps_tilejson_strips_values(self):
+        out = trim_details(self._sample_vector_details(), "full")
         self.assertIn("tilejson", out)
         attr = out["tilejson"]["tilestats"]["layers"][0]["attributes"][0]
         self.assertNotIn("values", attr)
@@ -67,10 +75,22 @@ class TestMcpDatasetDetails(unittest.TestCase):
         self.assertIn("_omitted", out["metadata_4326"])
         self.assertEqual(out["metadata_4326"].get("srid"), 4326)
 
-    def test_trim_dataset_for_mcp_list(self):
+    def test_trim_dataset_for_mcp_lite(self):
         ds = {"id": 5, "name": "r", "details": self._sample_vector_details()}
-        out = trim_dataset_for_mcp(ds, "list")
+        out = trim_dataset_for_mcp(ds, "lite")
         self.assertNotIn("tilejson", out["details"])
+
+    def test_lite_strips_wkt_from_spatial_reference(self):
+        raw = {
+            "type": "vector",
+            "spatialReference": {"srid": 4326, "wkt": "GEOGCRS[...very long...]"},
+        }
+        out = trim_details(raw, "lite")
+        self.assertEqual(out["spatialReference"], {"srid": 4326})
+
+    def test_normalize_details_level_legacy_aliases(self):
+        self.assertEqual(normalize_details_level("list", default="lite"), "lite")
+        self.assertEqual(normalize_details_level("get", default="full"), "full")
 
 
 if __name__ == "__main__":

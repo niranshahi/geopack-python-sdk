@@ -10,7 +10,13 @@ from mcp.server.session import ServerSession
 from ..auth_bootstrap import AppContext
 from ..context import get_client
 from ..errors import tool_error_payload
-from ..tool_handlers.datasets import export_dataset, get_dataset, list_datasets
+from ..tool_handlers.datasets import (
+    export_dataset,
+    get_dataset,
+    get_dataset_thumbnail,
+    list_datasets,
+    query_dataset,
+)
 
 
 def register(mcp: Any) -> None:
@@ -20,14 +26,20 @@ def register(mcp: Any) -> None:
         page: int = 1,
         page_size: int = 20,
         search_query: Optional[str] = None,
+        details_level: str = "lite",
     ) -> Dict[str, Any]:
-        """List datasets visible to the authenticated user (paginated)."""
+        """
+        List datasets visible to the authenticated user (paginated).
+
+        details_level: lite (default) | standard | full — controls size of ``details`` JSON.
+        """
         try:
             return list_datasets(
                 get_client(ctx),
                 page=page,
                 page_size=page_size,
                 search_query=search_query,
+                details_level=details_level,
             )
         except Exception as exc:
             return tool_error_payload(exc)
@@ -36,10 +48,69 @@ def register(mcp: Any) -> None:
     def geopack_sdk_get_dataset(
         ctx: Context[ServerSession, AppContext],
         dataset_id: int,
+        details_level: str = "full",
     ) -> Dict[str, Any]:
-        """Get one dataset by numeric id."""
+        """
+        Get one dataset by numeric id.
+
+        details_level: full (default) | standard | lite — trims heavy ``details`` (tilejson, WKT).
+        """
         try:
-            return get_dataset(get_client(ctx), dataset_id)
+            return get_dataset(
+                get_client(ctx),
+                dataset_id,
+                details_level=details_level,
+            )
+        except Exception as exc:
+            return tool_error_payload(exc)
+
+    @mcp.tool()
+    def geopack_sdk_query_dataset(
+        ctx: Context[ServerSession, AppContext],
+        dataset_id: int,
+        query: Optional[Dict[str, Any]] = None,
+        limit: Optional[int] = 100,
+        offset: int = 0,
+        return_geometry: bool = True,
+        out_srid: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Query dataset features (POST /datasets/{id}/query).
+
+        Pass a FeatureQuery DSL in ``query``, or omit it and use limit/offset/return_geometry.
+        Response is capped at 500 features for MCP context safety.
+        """
+        try:
+            return query_dataset(
+                get_client(ctx),
+                dataset_id,
+                query,
+                limit=limit,
+                offset=offset,
+                return_geometry=return_geometry,
+                out_srid=out_srid,
+            )
+        except Exception as exc:
+            return tool_error_payload(exc)
+
+    @mcp.tool()
+    def geopack_sdk_get_dataset_thumbnail(
+        ctx: Context[ServerSession, AppContext],
+        dataset_id: int,
+        save_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Download dataset preview PNG to a local path on the MCP host.
+
+        Use when the chat host cannot render MCP resources. Default path:
+        downloads/dataset_{id}_thumbnail.png (relative to MCP process cwd).
+        """
+        try:
+            return get_dataset_thumbnail(
+                get_client(ctx),
+                dataset_id,
+                save_path=save_path,
+            )
         except Exception as exc:
             return tool_error_payload(exc)
 
