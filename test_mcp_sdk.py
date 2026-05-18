@@ -12,6 +12,8 @@ Optional:
   TEST_TASK_ID=<uuid>
   TEST_WORKFLOW_RUN_ID=10
   MCP_CHECK_SERVER=1   — import server and list registered tool names
+  TEST_EXPORT_DATASET_ID=1  TEST_EXPORT_FORMAT=geojson  TEST_EXPORT_SAVE_DIR=./tmp
+      — optional full export → wait → download (requires permissions)
 """
 from __future__ import annotations
 
@@ -65,8 +67,9 @@ def main() -> None:
         _check_server_tools()
 
     from geopack_sdk_mcp.auth_bootstrap import bootstrap_geopack_client
-    from geopack_sdk_mcp.tool_handlers.datasets import get_dataset, list_datasets
-    from geopack_sdk_mcp.tool_handlers.tasks import get_task
+    from geopack_sdk_mcp.tool_handlers.datasets import export_dataset, get_dataset, list_datasets
+    from geopack_sdk_mcp.tool_handlers.generated_files import download_generated_file
+    from geopack_sdk_mcp.tool_handlers.tasks import get_task, wait_for_task
     from geopack_sdk_mcp.tool_handlers.workflow_runs import get_workflow_run
     from geopack_sdk_mcp.tool_handlers.workflows import list_workflows
 
@@ -106,6 +109,32 @@ def main() -> None:
         print(f"\n[6] geopack_sdk_get_workflow_run id={run_id}...")
         run = get_workflow_run(client, int(run_id))
         print(f"[OK] status={run.get('status')} workflowId={run.get('workflowId')}")
+
+    export_dataset_id = os.getenv("TEST_EXPORT_DATASET_ID")
+    export_format = os.getenv("TEST_EXPORT_FORMAT", "geojson")
+    export_save_dir = os.getenv("TEST_EXPORT_SAVE_DIR", "./tmp")
+    if export_dataset_id:
+        print(
+            f"\n[7] export → wait → download dataset={export_dataset_id} format={export_format}..."
+        )
+        started = export_dataset(client, int(export_dataset_id), export_format)
+        task_id = started.get("taskId")
+        if not task_id:
+            print(f"[SKIP] export did not return taskId: {started}")
+        else:
+            print(f"  taskId={task_id}")
+            finished = wait_for_task(client, task_id, timeout=600, interval=3)
+            print(f"  status={finished.get('status')}")
+            results = finished.get("results") or {}
+            file_id = results.get("generatedFileId")
+            if finished.get("status") == "completed" and file_id:
+                os.makedirs(export_save_dir, exist_ok=True)
+                saved = download_generated_file(
+                    client, int(file_id), export_save_dir
+                )
+                print(f"[OK] saved: {saved.get('savedPath')}")
+            else:
+                print(f"[SKIP] no generatedFileId in results: {results}")
 
     print("\nDone. For Cursor, run: geopack-sdk-mcp (stdio; keep process alive).")
 

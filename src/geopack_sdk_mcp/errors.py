@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from geopack_sdk.exceptions import GeopackAPIError, GeopackError
+from geopack_sdk.exceptions import (
+    GeopackAPIError,
+    GeopackError,
+    GeopackTaskError,
+    GeopackTimeoutError,
+)
 
 
 def tool_error_payload(exc: BaseException) -> Dict[str, Any]:
@@ -15,6 +20,21 @@ def tool_error_payload(exc: BaseException) -> Dict[str, Any]:
             "type": "GeopackAPIError",
             "status_code": exc.status_code,
             "message": exc.message,
+        }
+    if isinstance(exc, GeopackTaskError):
+        return {
+            "error": True,
+            "type": "GeopackTaskError",
+            "task_id": exc.task_id,
+            "status": exc.status,
+            "message": exc.message,
+        }
+    if isinstance(exc, GeopackTimeoutError):
+        return {
+            "error": True,
+            "type": "GeopackTimeoutError",
+            "message": exc.message,
+            "timeout": exc.timeout,
         }
     if isinstance(exc, GeopackError):
         return {
