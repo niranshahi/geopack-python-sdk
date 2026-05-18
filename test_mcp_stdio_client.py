@@ -122,6 +122,25 @@ async def _run() -> None:
                     raise SystemExit(1)
                 print(f"[OK] {payload2.get('name')} type={payload2.get('dataType')}")
 
+                resource_uri = payload2.get("thumbnailResourceUri")
+                if resource_uri:
+                    print("\n[4] list_resource_templates ...")
+                    templates = await session.list_resource_templates()
+                    uris = [t.uriTemplate for t in templates.resourceTemplates]
+                    print(f"[OK] {len(uris)} resource template(s)")
+                    for uri in uris[:5]:
+                        print(f"  - {uri}")
+
+                    print(f"\n[5] read_resource {resource_uri} ...")
+                    read = await session.read_resource(resource_uri)
+                    blob_len = 0
+                    for block in read.contents:
+                        if hasattr(block, "blob") and block.blob:
+                            blob_len = len(block.blob)
+                        elif hasattr(block, "text") and block.text:
+                            blob_len = len(block.text)
+                    print(f"[OK] thumbnail payload size ~{blob_len}")
+
     print("\n--- MCP stdio E2E test passed ---")
 
 

@@ -105,6 +105,10 @@ class Dataset(BaseModel):
         default=None,
         description="Relative API path, e.g. /datasets/42/thumbnail — append auth for browser/MCP host fetch",
     )
+    thumbnailResourceUri: Optional[str] = Field(
+        default=None,
+        description="MCP resource URI, e.g. dataset://42/thumbnail — use resources/read in MCP hosts",
+    )
 
     model_config = ConfigDict(
         extra='allow',  # Allow additional fields for forward compatibility

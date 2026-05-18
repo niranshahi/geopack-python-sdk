@@ -10,6 +10,16 @@ def dataset_thumbnail_api_path(dataset_id: int) -> str:
     return f"/datasets/{dataset_id}/thumbnail"
 
 
+def dataset_thumbnail_resource_uri(dataset_id: int) -> str:
+    """MCP resource URI for thumbnail binary (resources/read, not tool JSON)."""
+    return f"dataset://{dataset_id}/thumbnail"
+
+
+def generated_file_resource_uri(generated_file_id: int) -> str:
+    """MCP resource URI for generated file binary download."""
+    return f"generated-file://{generated_file_id}/download"
+
+
 def normalize_dataset_dict(data: Dict[str, Any]) -> Dict[str, Any]:
     """Remove ``thumbnail`` from dict payloads; set ``hasThumbnail`` / ``thumbnailApiPath``."""
     if not isinstance(data, dict):
@@ -22,6 +32,8 @@ def normalize_dataset_dict(data: Dict[str, Any]) -> Dict[str, Any]:
         out["hasThumbnail"] = True
 
     if out.get("hasThumbnail") and "id" in out:
-        out.setdefault("thumbnailApiPath", dataset_thumbnail_api_path(int(out["id"])))
+        ds_id = int(out["id"])
+        out.setdefault("thumbnailApiPath", dataset_thumbnail_api_path(ds_id))
+        out.setdefault("thumbnailResourceUri", dataset_thumbnail_resource_uri(ds_id))
 
     return out

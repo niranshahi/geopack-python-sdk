@@ -121,7 +121,7 @@ client.auth.login(username="my_user", password="my_password")
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks`.
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (v0 read-only tools).
+- GeoPandas integration; **Geopack SDK MCP** server (8 tools + 2 resource templates, v0.4.2).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
@@ -143,7 +143,7 @@ pip install -e ".[mcp]"
 |---------|------------------|
 | `python test_mcp_sdk.py` | MCP tool handlers + REST (not stdio protocol) |
 | `$env:MCP_CHECK_SERVER="1"; python test_mcp_sdk.py` | Above + tools register on FastMCP |
-| `python test_mcp_stdio_client.py` | **Full E2E:** spawns server, `call_tool` over stdio (like Cursor) |
+| `python test_mcp_stdio_client.py` | **Full E2E:** tools + `list_resource_templates` + `read_resource` (like Cursor + resources) |
 | `python -m geopack_sdk_mcp` | Server only; waits for MCP host (Ctrl+C to stop) |
 
 Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
@@ -167,12 +167,12 @@ Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
 
 Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of username/password.
 
-**Tools (v0.4.0):**
+**Tools (8, v0.4.2):**
 
 | Tool | Purpose |
 |------|---------|
-| `geopack_sdk_list_datasets` | Paginated dataset list |
-| `geopack_sdk_get_dataset` | Dataset metadata |
+| `geopack_sdk_list_datasets` | Paginated dataset list (trimmed `details`) |
+| `geopack_sdk_get_dataset` | Dataset metadata + `thumbnailResourceUri` when applicable |
 | `geopack_sdk_get_task` | Task status (sanitized) |
 | `geopack_sdk_wait_for_task` | Poll until export/job completes |
 | `geopack_sdk_export_dataset` | Start `dataset:export` (returns `taskId`) |
@@ -180,9 +180,16 @@ Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of us
 | `geopack_sdk_list_workflows` | List workflows |
 | `geopack_sdk_get_workflow_run` | Workflow run status |
 
+**Resource templates (not listed as tools in Cursor UI):**
+
+| URI template | Purpose |
+|--------------|---------|
+| `dataset://{dataset_id}/thumbnail` | PNG preview (`resources/read`) |
+| `generated-file://{file_id}/download` | Export file bytes (prefer download tool for large files) |
+
 **Export flow:** `export_dataset` → `wait_for_task` → `download_generated_file` (see MCP design doc §12).
 
-**Dataset thumbnails:** Tool results include `hasThumbnail` and `thumbnailApiPath` only (no image bytes). **Cursor does not auto-build image URLs from these fields** — use a notebook (see [pydantic_models_guide.md § Dataset thumbnails](../docs/04_development/sdk/pydantic_models_guide.md)), the Geoportal UI, or future MCP Resources (v1.5). Details: [geopack_sdk_mcp_design.md §11](../docs/04_development/sdk/geopack_sdk_mcp_design.md).
+**Dataset thumbnails:** Tool JSON has `hasThumbnail`, `thumbnailApiPath`, `thumbnailResourceUri` (no BLOB). `test_mcp_stdio_client.py` verifies `read_resource` on `dataset://{id}/thumbnail`. **Cursor Agent chat** may not show images from resources alone — see [geopack_sdk_mcp_design.md §11.4](../docs/04_development/sdk/geopack_sdk_mcp_design.md). Geoportal UI and notebooks fetch via REST as usual.
 
 Design: [docs/04_development/sdk/geopack_sdk_mcp_design.md](../docs/04_development/sdk/geopack_sdk_mcp_design.md) (in the monorepo).
 

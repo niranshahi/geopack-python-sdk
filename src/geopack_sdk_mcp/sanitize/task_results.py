@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
+
+from geopack_sdk.dataset_payload import generated_file_resource_uri
 
 _MAX_TASK_MESSAGES = 100
 
@@ -29,6 +31,7 @@ def sanitize_task_results(results: Any) -> Any:
             file_id = None
         if file_id is not None:
             out["downloadApiPath"] = generated_file_download_path(file_id)
+            out["downloadResourceUri"] = generated_file_resource_uri(file_id)
 
     # Avoid leaking download tokens into LLM context when generated file id exists
     if generated_file_id is not None:

@@ -16,6 +16,7 @@ class TestMcpTaskSanitize(unittest.TestCase):
         }
         out = sanitize_task_results(raw)
         self.assertEqual(out["downloadApiPath"], "/generated-files/42/download")
+        self.assertEqual(out["downloadResourceUri"], "generated-file://42/download")
         self.assertNotIn("downloadToken", out)
         self.assertNotIn("downloadPath", out)
 
