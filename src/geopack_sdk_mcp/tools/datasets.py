@@ -27,11 +27,17 @@ def register(mcp: Any) -> None:
         page_size: int = 20,
         search_query: Optional[str] = None,
         details_level: str = "lite",
+        data_type: Optional[str] = None,
+        bbox: Optional[list] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         List datasets visible to the authenticated user (paginated).
 
-        details_level: lite (default) | standard | full — controls size of ``details`` JSON.
+        details_level: lite (default) | standard | full.
+        For spatial search use bbox from geopack_sdk_geocode_place: [west, south, east, north] WGS84.
+        data_type: vector | raster. start_date/end_date: ISO YYYY-MM-DD.
         """
         try:
             return list_datasets(
@@ -40,6 +46,10 @@ def register(mcp: Any) -> None:
                 page_size=page_size,
                 search_query=search_query,
                 details_level=details_level,
+                data_type=data_type,
+                bbox=bbox,
+                start_date=start_date,
+                end_date=end_date,
             )
         except Exception as exc:
             return tool_error_payload(exc)

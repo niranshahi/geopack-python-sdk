@@ -143,7 +143,10 @@ pip install -e ".[mcp]"
 |---------|------------------|
 | `python test_mcp_sdk.py` | MCP tool handlers + REST (not stdio protocol) |
 | `$env:MCP_CHECK_SERVER="1"; python test_mcp_sdk.py` | Above + tools register on FastMCP |
-| `python test_mcp_stdio_client.py` | **Full E2E:** tools + `list_resource_templates` + `read_resource` (like Cursor + resources) |
+| `python test_mcp_stdio_client.py` | **Full E2E:** tools + geocode + bbox list + resources |
+| `python test_mcp_llm_prompt.py --staged "…"` | LLM intent → MCP geocode → list (no Jupyter) |
+| `python test_mcp_llm_prompt.py --loop "…"` | OpenAI tool loop over real MCP tools |
+| `python -m pytest tests/test_geocoding.py` | Unit test: Nominatim bbox parsing (mocked HTTP) |
 | `python -m geopack_sdk_mcp` | Server only; waits for MCP host (Ctrl+C to stop) |
 
 Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
@@ -167,11 +170,12 @@ Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
 
 Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of username/password.
 
-**Tools (10, v0.5.0):**
+**Tools (11, v0.5.3):**
 
 | Tool | Purpose |
 |------|---------|
-| `geopack_sdk_list_datasets` | Paginated list; `details_level` default `lite` |
+| `geopack_sdk_geocode_place` | Place name → WGS84 bbox (Nominatim; use before spatial list) |
+| `geopack_sdk_list_datasets` | Paginated list; `bbox`, `data_type`, dates; `details_level` default `lite` |
 | `geopack_sdk_get_dataset` | One dataset; `details_level` default `full` |
 | `geopack_sdk_query_dataset` | Feature query (max 500 features in JSON) |
 | `geopack_sdk_get_dataset_thumbnail` | Save preview PNG on MCP host (`save_path` optional) |
@@ -194,6 +198,8 @@ Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of us
 **Dataset thumbnails:** Tool JSON has `hasThumbnail`, `thumbnailApiPath`, `thumbnailResourceUri` (no BLOB). `test_mcp_stdio_client.py` verifies `read_resource` on `dataset://{id}/thumbnail`. **Cursor Agent chat** may not show images from resources alone — see [geopack_sdk_mcp_design.md §11.4](../docs/04_development/sdk/geopack_sdk_mcp_design.md). Geoportal UI and notebooks fetch via REST as usual.
 
 Design: [docs/04_development/sdk/geopack_sdk_mcp_design.md](../docs/04_development/sdk/geopack_sdk_mcp_design.md) (in the monorepo).
+
+**LLM + MCP:** [08_LLM_MCP_Dataset_Discovery.ipynb](notebooks/08_LLM_MCP_Dataset_Discovery.ipynb) — natural-language prompts via real MCP tools (`pip install -e ".[mcp,llm]"`). Cursor uses the same tools; see [llm_geoportal_use_cases.md](../docs/04_development/sdk/llm_geoportal_use_cases.md).
 
 ### Async example
 

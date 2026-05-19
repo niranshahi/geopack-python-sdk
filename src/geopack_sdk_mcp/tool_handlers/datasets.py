@@ -40,12 +40,27 @@ def list_datasets(
     page_size: int = 20,
     search_query: Optional[str] = None,
     details_level: Optional[str] = "lite",
+    data_type: Optional[str] = None,
+    bbox: Optional[list] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     level: DetailsLevel = normalize_details_level(details_level, default="lite")
+    active_filters: Dict[str, Any] = {}
+    if data_type:
+        active_filters["dataType"] = data_type
+    if bbox and len(bbox) == 4:
+        active_filters["bbox"] = bbox
+    if start_date:
+        active_filters["startDate"] = start_date
+    if end_date:
+        active_filters["endDate"] = end_date
+
     result = client.datasets.list(
         page=page,
         page_size=page_size,
         search_query=search_query,
+        active_filters=active_filters or None,
     )
     return trim_datasets_list_payload(to_jsonable(result), details_level=level)
 

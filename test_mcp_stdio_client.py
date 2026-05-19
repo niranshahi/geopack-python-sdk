@@ -91,11 +91,35 @@ async def _run() -> None:
             for name in names:
                 print(f"  - {name}")
 
-            print("\n[2] call_tool geopack_sdk_list_datasets ...")
-            result = await session.call_tool(
-                "geopack_sdk_list_datasets",
-                {"page": 1, "page_size": 3},
-            )
+            if "geopack_sdk_geocode_place" in names:
+                print("\n[2] geopack_sdk_geocode_place Tehran ...")
+                geo_res = await session.call_tool(
+                    "geopack_sdk_geocode_place",
+                    {"query": "Tehran, Iran"},
+                )
+                geo = _tool_result_payload(geo_res)
+                if isinstance(geo, dict) and geo.get("error"):
+                    print("[FAIL]", geo)
+                    raise SystemExit(1)
+                else:
+                    print(f"[OK] bbox={geo.get('bbox')}")
+                    print("\n[3] list_datasets with bbox + raster filter ...")
+                    result = await session.call_tool(
+                        "geopack_sdk_list_datasets",
+                        {
+                            "page": 1,
+                            "page_size": 3,
+                            "data_type": "raster",
+                            "bbox": geo.get("bbox"),
+                            "start_date": "2024-01-01",
+                        },
+                    )
+            else:
+                print("\n[2] call_tool geopack_sdk_list_datasets (no geocode tool) ...")
+                result = await session.call_tool(
+                    "geopack_sdk_list_datasets",
+                    {"page": 1, "page_size": 3},
+                )
             payload = _tool_result_payload(result)
             if isinstance(payload, dict) and payload.get("error"):
                 print("[FAIL]", payload)
@@ -111,7 +135,7 @@ async def _run() -> None:
             if not dataset_id and isinstance(datasets, list) and datasets:
                 dataset_id = str(datasets[0].get("id"))
             if dataset_id:
-                print(f"\n[3] call_tool geopack_sdk_get_dataset id={dataset_id} ...")
+                print(f"\n[4] call_tool geopack_sdk_get_dataset id={dataset_id} ...")
                 result2 = await session.call_tool(
                     "geopack_sdk_get_dataset",
                     {"dataset_id": int(dataset_id)},
@@ -124,14 +148,14 @@ async def _run() -> None:
 
                 resource_uri = payload2.get("thumbnailResourceUri")
                 if resource_uri:
-                    print("\n[4] list_resource_templates ...")
+                    print("\n[5] list_resource_templates ...")
                     templates = await session.list_resource_templates()
                     uris = [t.uriTemplate for t in templates.resourceTemplates]
                     print(f"[OK] {len(uris)} resource template(s)")
                     for uri in uris[:5]:
                         print(f"  - {uri}")
 
-                    print(f"\n[5] read_resource {resource_uri} ...")
+                    print(f"\n[6] read_resource {resource_uri} ...")
                     read = await session.read_resource(resource_uri)
                     blob_len = 0
                     for block in read.contents:

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from geopack_sdk_mcp.tool_handlers.datasets import get_dataset_thumbnail
+from geopack_sdk_mcp.tool_handlers.datasets import get_dataset_thumbnail  # noqa: F401
 
 
 class TestMcpDatasetThumbnail(unittest.TestCase):

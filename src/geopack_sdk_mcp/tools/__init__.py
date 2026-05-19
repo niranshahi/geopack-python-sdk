@@ -6,8 +6,9 @@ from typing import Any
 
 
 def register_all_tools(mcp: Any) -> None:
-    from . import datasets, generated_files, tasks, workflow_runs, workflows
+    from . import datasets, generated_files, geocoding, tasks, workflow_runs, workflows
 
+    geocoding.register(mcp)
     datasets.register(mcp)
     tasks.register(mcp)
     workflows.register(mcp)
