@@ -146,6 +146,8 @@ pip install -e ".[mcp]"
 | `python test_mcp_stdio_client.py` | **Full E2E:** tools + geocode + bbox list + resources |
 | `python test_mcp_llm_prompt.py --staged "…"` | LLM intent → MCP geocode → list (no Jupyter) |
 | `python test_mcp_llm_prompt.py --loop "…"` | OpenAI tool loop over real MCP tools |
+| `python examples/langchain_geopack_agent.py` | **LangChain agent** — MCP tools via langchain-mcp-adapters |
+| `python examples/langchain_geopack_geocode_workflow.py` | LangChain agent — geocode then list (system prompt) |
 | `python -m pytest tests/test_geocoding.py` | Unit test: Nominatim bbox parsing (mocked HTTP) |
 | `python -m geopack_sdk_mcp` | Server only; waits for MCP host (Ctrl+C to stop) |
 
@@ -199,7 +201,9 @@ Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of us
 
 Design: [docs/04_development/sdk/geopack_sdk_mcp_design.md](../docs/04_development/sdk/geopack_sdk_mcp_design.md) (in the monorepo).
 
-**LLM + MCP:** [08_LLM_MCP_Dataset_Discovery.ipynb](notebooks/08_LLM_MCP_Dataset_Discovery.ipynb) — natural-language prompts via real MCP tools (`pip install -e ".[mcp,llm]"`). Cursor uses the same tools; see [llm_geoportal_use_cases.md](../docs/04_development/sdk/llm_geoportal_use_cases.md).
+**Build a Python LLM agent (LangChain):** Start with [`examples/README.md`](examples/README.md) and [`examples/langchain_geopack_agent.py`](examples/langchain_geopack_agent.py) — discovers `geopack_sdk_*` tools from the MCP server via **langchain-mcp-adapters** (`pip install -e ".[langchain]"`). See [langchain_mcp_agents_design.md](../docs/04_development/sdk/langchain_mcp_agents_design.md).
+
+**Other LLM demos:** [08_LLM_MCP_Dataset_Discovery.ipynb](notebooks/08_LLM_MCP_Dataset_Discovery.ipynb) (OpenAI + MCP, no LangChain); [llm_geoportal_use_cases.md](../docs/04_development/sdk/llm_geoportal_use_cases.md).
 
 ### Async example
 

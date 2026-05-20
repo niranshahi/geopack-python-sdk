@@ -34,7 +34,11 @@ When the user mentions a place or area, call geopack_sdk_geocode_place first, th
 Use details_level=lite for list unless the user needs full metadata.
 Do not invent dataset ids."""
 
-DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+from llm_env import (  # noqa: E402
+    DEFAULT_OPENAI_MODEL,
+    create_openai_sdk_client,
+    get_openai_settings,
+)
 
 
 def sdk_root() -> Path:
@@ -64,34 +68,13 @@ def tool_result_payload(result: Any) -> Any:
     return [c.model_dump() for c in result.content]
 
 
-def get_openai_settings() -> Dict[str, Optional[str]]:
-    return {
-        "api_key": os.getenv("OPENAI_API_KEY"),
-        "base_url": os.getenv("OPENAI_BASE_URL") or None,
-        "model": os.getenv("OPENAI_MODEL") or DEFAULT_OPENAI_MODEL,
-    }
-
-
 def create_openai_client(
     *,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
 ):
-    try:
-        from openai import OpenAI
-    except ImportError as exc:
-        raise ImportError('pip install openai (or pip install -e "../.[llm]")') from exc
-
-    settings = get_openai_settings()
-    key = api_key or settings["api_key"]
-    if not key:
-        raise ValueError("Missing OPENAI_API_KEY in environment or notebooks/.env")
-
-    url = base_url if base_url is not None else settings["base_url"]
-    kwargs: Dict[str, Any] = {"api_key": key}
-    if url:
-        kwargs["base_url"] = url.rstrip("/")
-    return OpenAI(**kwargs)
+    """OpenAI SDK client (see llm_env.create_openai_sdk_client)."""
+    return create_openai_sdk_client(api_key=api_key, base_url=base_url)
 
 
 def mcp_tools_to_openai(listed_tools: Any) -> List[Dict[str, Any]]:
