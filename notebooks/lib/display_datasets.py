@@ -54,8 +54,8 @@ def datasets_to_html_table(
     <style>
     .gp-ds-table { border-collapse: collapse; font-family: system-ui, sans-serif; font-size: 14px; }
     .gp-ds-table th, .gp-ds-table td { border: 1px solid #ccc; padding: 8px 12px; vertical-align: middle; }
-    .gp-ds-table th { background: #f0f4f8; text-align: left; }
-    .gp-ds-table tr:nth-child(even) { background: #fafafa; }
+    .gp-ds-table th { background: #5C5CFF; text-align: left; }
+    .gp-ds-table tr:nth-child(even) { background: #fafafa;color:black; }
     .gp-ds-thumb { max-width: 140px; max-height: 100px; border-radius: 4px; }
     .gp-ds-none { color: #888; font-size: 12px; }
     </style>

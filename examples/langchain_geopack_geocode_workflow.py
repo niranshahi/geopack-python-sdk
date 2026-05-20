@@ -40,7 +40,14 @@ When the user mentions a city, region, or address:
 
 Use data_type "raster" or "vector" when the user specifies. Use start_date/end_date as
 ISO YYYY-MM-DD when the user mentions time. Use details_level=lite for lists unless
-the user needs full metadata. Do not invent dataset ids."""
+the user needs full metadata. Do not invent dataset ids.
+
+IMPORTANT:
+- ALWAYS use details_level=lite when calling list_datasets
+- ALWAYS limit to maximum 5 items unless explicitly asked for more
+- Use page_size=5 when listing datasets
+- Keep all responses extremely concise
+- Only include essential information in your answers"""
 
 
 def _mcp_server_command() -> tuple[str, list[str]]:
@@ -84,25 +91,11 @@ async def main(user_prompt: str) -> None:
     tools = await mcp_client.get_tools()
     print(f"Discovered {len(tools)} tools (including geopack_sdk_geocode_place)")
 
-    from langchain.agents.middleware import AgentMiddleware
-
-    # Custom middleware to trim tool outputs to prevent 413 errors
-    class TrimToolOutputsMiddleware(AgentMiddleware):
-        async def awrap_model_call(self, request, next_fn):
-            messages = request.get("messages", [])
-            for msg in messages:
-                if hasattr(msg, "content") and isinstance(msg.content, str):
-                    # Trim large tool outputs to prevent token overflow
-                    if len(msg.content) > 2000:
-                        msg.content = msg.content[:2000] + "... [truncated]"
-            return await next_fn(request)
-
     llm = _chat_model()
     agent = create_agent(
         llm,
         tools,
         system_prompt=GEOCODE_SYSTEM_PROMPT,
-        middleware=[TrimToolOutputsMiddleware()],
     )
 
     print("\n--- User ---")
