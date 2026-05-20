@@ -41,16 +41,28 @@ def list_datasets(
     search_query: Optional[str] = None,
     details_level: Optional[str] = "lite",
     data_type: Optional[str] = None,
-    bbox: Optional[list] = None,
+    bbox: Optional[list | str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     level: DetailsLevel = normalize_details_level(details_level, default="lite")
     active_filters: Dict[str, Any] = {}
+    
+    parsed_bbox = None
+    if bbox is not None:
+        if isinstance(bbox, str):
+            import json
+            try:
+                parsed_bbox = json.loads(bbox)
+            except (json.JSONDecodeError, TypeError):
+                parsed_bbox = None
+        elif isinstance(bbox, list):
+            parsed_bbox = bbox
+    
     if data_type:
         active_filters["dataType"] = data_type
-    if bbox and len(bbox) == 4:
-        active_filters["bbox"] = bbox
+    if parsed_bbox and len(parsed_bbox) == 4:
+        active_filters["bbox"] = parsed_bbox
     if start_date:
         active_filters["startDate"] = start_date
     if end_date:

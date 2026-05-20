@@ -34,20 +34,32 @@ if load_dotenv:
 
 GEOCODE_SYSTEM_PROMPT = """You are a Geoportal GIS assistant with Geopack MCP tools.
 
-When the user mentions a city, region, or address:
-  1. Call geopack_sdk_geocode_place with a Nominatim-friendly query (e.g. "Tehran, Iran").
-  2. Pass the returned bbox [west, south, east, north] to geopack_sdk_list_datasets.
+CRITICAL INSTRUCTIONS:
+When the user mentions ANY place name (city, province, country, address):
+  1. YOU MUST FIRST CALL: geopack_sdk_geocode_place(query="Place Name, Country")
+  2. YOU MUST THEN CALL: geopack_sdk_list_datasets(bbox=[west, south, east, north], ...)
+     - YOU MUST PASS THE EXACT bbox FROM geopack_sdk_geocode_place TO geopack_sdk_list_datasets
+     - DO NOT OMIT THE bbox PARAMETER
 
-Use data_type "raster" or "vector" when the user specifies. Use start_date/end_date as
-ISO YYYY-MM-DD when the user mentions time. Use details_level=lite for lists unless
-the user needs full metadata. Do not invent dataset ids.
+DETAILED EXAMPLE:
+User: "Find vector datasets in Tehran"
+  → Your first action: geopack_sdk_geocode_place(query="Tehran, Iran")
+  → Tool response includes: {"bbox": [51.0892219, 35.5682071, 51.6063007, 35.8284702], ...}
+  → YOUR NEXT ACTION MUST BE: geopack_sdk_list_datasets(bbox=[51.0892219, 35.5682071, 51.6063007, 35.8284702], data_type="vector", details_level="lite", page_size=5)
+  → YOU ARE NOT ALLOWED TO CALL geopack_sdk_list_datasets WITHOUT THE bbox IN THIS CASE
 
-IMPORTANT:
+ANOTHER EXAMPLE:
+User: "Rasters near Kerman"
+  → First: geopack_sdk_geocode_place(query="Kerman, Iran")
+  → Then: geopack_sdk_list_datasets(bbox=[54.3703076, 26.4449954, 59.7254961, 31.9569589], data_type="raster", details_level="lite", page_size=5)
+
+ABSOLUTE RULES:
 - ALWAYS use details_level=lite when calling list_datasets
-- ALWAYS limit to maximum 5 items unless explicitly asked for more
-- Use page_size=5 when listing datasets
-- Keep all responses extremely concise
-- Only include essential information in your answers"""
+- ALWAYS limit to max 5 items (use page_size=5)
+- ALWAYS pass the bbox parameter to list_datasets after geocoding
+- NEVER skip the bbox parameter when you have geocode results
+- Keep responses concise
+- Only include essential information"""
 
 
 def _mcp_server_command() -> tuple[str, list[str]]:

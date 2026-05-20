@@ -69,20 +69,36 @@ def _use_inprocess() -> bool:
 
 def _json_schema_to_pydantic(model_name: str, schema: Dict[str, Any]):
     from pydantic import Field, create_model
+    from typing import List
 
     props = schema.get("properties") or {}
     required = set(schema.get("required") or [])
     fields: Dict[str, Any] = {}
-    type_map = {
-        "string": str,
-        "integer": int,
-        "number": float,
-        "boolean": bool,
-        "array": list,
-        "object": dict,
-    }
+    
     for key, spec in props.items():
-        py_type = type_map.get(spec.get("type", "string"), Any)
+        spec_type = spec.get("type", "string")
+        
+        if spec_type == "array":
+            items = spec.get("items", {})
+            item_type = items.get("type", "number")
+            if item_type == "number":
+                py_type = List[float]
+            elif item_type == "integer":
+                py_type = List[int]
+            elif item_type == "string":
+                py_type = List[str]
+            else:
+                py_type = list
+        else:
+            type_map = {
+                "string": str,
+                "integer": int,
+                "number": float,
+                "boolean": bool,
+                "object": dict,
+            }
+            py_type = type_map.get(spec_type, Any)
+        
         if key in required:
             fields[key] = (py_type, Field(description=spec.get("description", "")))
         else:
@@ -115,7 +131,17 @@ async def langchain_tools_from_inprocess(session: Any) -> List[Any]:
             _session: Any = session,
             **kwargs: Any,
         ) -> str:
-            clean = {k: v for k, v in kwargs.items() if v is not None}
+            clean: Dict[str, Any] = {}
+            for k, v in kwargs.items():
+                if v is not None:
+                    if isinstance(v, str):
+                        try:
+                            parsed = json.loads(v)
+                            clean[k] = parsed
+                        except (json.JSONDecodeError, TypeError):
+                            clean[k] = v
+                    else:
+                        clean[k] = v
             result = await _session.call_tool(_name, clean)
             return json.dumps(result, default=str)
 

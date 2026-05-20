@@ -28,7 +28,7 @@ def register(mcp: Any) -> None:
         search_query: Optional[str] = None,
         details_level: str = "lite",
         data_type: Optional[str] = None,
-        bbox: Optional[list] = None,
+        bbox: Optional[list[float]] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -38,6 +38,8 @@ def register(mcp: Any) -> None:
         details_level: lite (default) | standard | full.
         For spatial search use bbox from geopack_sdk_geocode_place: [west, south, east, north] WGS84.
         data_type: vector | raster. start_date/end_date: ISO YYYY-MM-DD.
+
+        IMPORTANT: Always pass the bbox parameter when you have geocoded a location!
         """
         try:
             return list_datasets(
