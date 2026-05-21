@@ -176,7 +176,7 @@ class TaskManager:
 
     def wait_for_task(self, task_id: str, timeout: int = 300, interval: int = 2, quiet: bool = False) -> TaskResult:
         """
-        Poll the task status until it is completed or failed with type-safe response.
+        Poll the task status until it reaches a terminal state with type-safe response.
 
         REST API: `GET /api/tasks/{taskId}` (polled)
 
@@ -187,7 +187,7 @@ class TaskManager:
             quiet: If True, suppress logging output
 
         Returns:
-            TaskResult: Validated task result model when completed
+            TaskResult: Validated task result model when completed or partial_success
 
         Raises:
             GeopackTaskError: If task fails or is canceled
@@ -195,6 +195,7 @@ class TaskManager:
 
         Expected terminal statuses:
         - completed
+        - partial_success
         - failed
         - canceled
         """
@@ -209,7 +210,7 @@ class TaskManager:
             if not quiet:
                 logger.info(f"Task {task_id}: {status}")
 
-            if status == "completed":
+            if status in ("completed", "partial_success"):
                 # Final fetch to ensure we have the output field
                 return self.get_status(task_id)
             if status in ["failed", "canceled"]:

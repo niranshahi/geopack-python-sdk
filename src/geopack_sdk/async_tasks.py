@@ -95,7 +95,7 @@ class AsyncTaskManager:
             if not quiet:
                 logger.info("Task %s: %s", task_id, status)
 
-            if status == "completed":
+            if status in ("completed", "partial_success"):
                 return await self.get_status(task_id)
             if status in ("failed", "canceled"):
                 if status == "failed" and not quiet:

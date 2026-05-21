@@ -56,6 +56,34 @@ class TestAsyncGeopackClient(unittest.IsolatedAsyncioTestCase):
 
 
 class TestAsyncTaskWaitForTasks(unittest.IsolatedAsyncioTestCase):
+    async def test_wait_for_task_returns_partial_success(self):
+        client = AsyncGeopackClient(
+            base_url="http://example.com/api",
+            enable_http_retries=False,
+        )
+        try:
+            from geopack_sdk.models import TaskResult
+
+            task = TaskResult(
+                taskId="task-1",
+                status="partial_success",
+                taskType="dataset:export",
+                userId=1,
+            )
+            client.tasks.get_status = AsyncMock(return_value=task)
+
+            result = await client.tasks.wait_for_task(
+                "task-1",
+                timeout=1,
+                interval=0,
+                quiet=True,
+            )
+
+            self.assertEqual(result.status, "partial_success")
+            self.assertEqual(client.tasks.get_status.await_count, 2)
+        finally:
+            await client.aclose()
+
     async def test_wait_for_tasks_gather(self):
         client = AsyncGeopackClient(
             base_url="http://example.com/api",

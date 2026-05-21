@@ -118,10 +118,10 @@ client.auth.login(username="my_user", password="my_password")
 ## Features
 - Datasets, DataStores, Workflows, Tasks, **Generated Files**, **Quotas (self)**.
 - Dataset **delete**, **ACL**, structured **query** (`build_simple_query`), **discover**.
-- Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks`.
+- Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks` (`partial_success` is terminal and returned like `completed`).
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (10 tools + 2 resource templates, v0.5.0).
+- GeoPandas integration; **Geopack SDK MCP** server (11 tools + 2 resource templates, v0.5.4).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
@@ -172,7 +172,7 @@ Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
 
 Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of username/password.
 
-**Tools (11, v0.5.3):**
+**Tools (11, v0.5.4):**
 
 | Tool | Purpose |
 |------|---------|
