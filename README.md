@@ -148,8 +148,9 @@ pip install -e ".[mcp]"
 | `python test_mcp_llm_prompt.py --loop "…"` | OpenAI tool loop over real MCP tools |
 | `python examples/langchain_geopack_agent.py` | **LangChain agent** — MCP tools via langchain-mcp-adapters |
 | `python examples/langchain_geopack_geocode_workflow.py` | LangChain agent — geocode then list (system prompt) |
-| `python -m pytest tests/test_geocoding.py` | Unit test: Nominatim bbox parsing (mocked HTTP) |
+| `python -m unittest tests.test_geocoding` | Unit test: Nominatim bbox parsing (mocked HTTP) |
 | `python -m geopack_sdk_mcp` | Server only; waits for MCP host (Ctrl+C to stop) |
+| `python -m unittest discover -s tests` | Unit test: All tests |
 
 Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
 
