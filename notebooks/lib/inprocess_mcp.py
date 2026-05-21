@@ -146,6 +146,35 @@ def dispatch_tool(client: Any, name: str, arguments: Dict[str, Any]) -> Any:
                 search_query=arguments.get("search_query"),
             )
 
+        if name == "geopack_sdk_get_workflow":
+            from geopack_sdk_mcp.tool_handlers.submit_workflow import get_workflow_with_params
+
+            return get_workflow_with_params(
+                client,
+                workflow_id=int(arguments["workflow_id"]),
+                include_params=arguments.get("include_params", False),
+            )
+
+        if name == "geopack_sdk_submit_workflow":
+            from geopack_sdk_mcp.tool_handlers.submit_workflow import submit_workflow
+
+            return submit_workflow(
+                client,
+                workflow_id=int(arguments["workflow_id"]),
+                params=arguments.get("params", {}),
+                override_datastore_id=arguments.get("override_datastore_id"),
+            )
+
+        if name == "geopack_sdk_download_workflow_artifact":
+            from geopack_sdk_mcp.tool_handlers.workflow_runs import download_workflow_artifact
+
+            return download_workflow_artifact(
+                client,
+                run_id=int(arguments["run_id"]),
+                artifact_id=int(arguments["artifact_id"]),
+                save_path=arguments.get("save_path", "./"),
+            )
+
         if name == "geopack_sdk_get_workflow_run":
             from geopack_sdk_mcp.tool_handlers.workflow_runs import get_workflow_run
 

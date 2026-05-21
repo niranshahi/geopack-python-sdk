@@ -102,7 +102,25 @@ class WorkflowManager:
                 if not key:
                     continue
                 
-                param_type = 'dataset-field' if type_name == 'datasetFieldParamNode' else str(config.get('type', 'string'))
+                # Map node type to standard WorkflowParameter type
+                if type_name == 'datasetFieldParamNode':
+                    param_type = 'dataset-field'
+                elif type_name == 'datasetSelectorParamNode':
+                    param_type = 'dataset'
+                elif type_name == 'geomParamNode':
+                    param_type = 'geometry'
+                else:
+                    # Default to config.type, with fallback to 'string'
+                    raw_type = str(config.get('type', 'string')).lower()
+                    # Normalize common variations
+                    if raw_type in ['dataset-selector']:
+                        param_type = 'dataset'
+                    elif raw_type in ['geom', 'geometry-param']:
+                        param_type = 'geometry'
+                    else:
+                        # Only accept valid literal values
+                        valid_types = ['string', 'number', 'dataset', 'dataset-field', 'geometry']
+                        param_type = raw_type if raw_type in valid_types else 'string'
                 
                 param_dict = {
                     "key": key,

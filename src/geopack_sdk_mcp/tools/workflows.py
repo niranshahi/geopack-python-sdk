@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from mcp.server.fastmcp import Context
 from mcp.server.session import ServerSession
@@ -10,6 +10,7 @@ from mcp.server.session import ServerSession
 from ..auth_bootstrap import AppContext
 from ..context import get_client
 from ..errors import tool_error_payload
+from ..tool_handlers.submit_workflow import get_workflow_with_params
 from ..tool_handlers.workflows import list_workflows
 
 
@@ -28,6 +29,29 @@ def register(mcp: Any) -> None:
                 page=page,
                 page_size=page_size,
                 search_query=search_query,
+            )
+        except Exception as exc:
+            return tool_error_payload(exc)
+
+    @mcp.tool()
+    def geopack_sdk_get_workflow(
+        ctx: Context[ServerSession, AppContext],
+        workflow_id: int,
+        include_params: bool = False,
+    ) -> Dict[str, Any]:
+        """Get workflow definition with optional parameter extraction.
+        
+        Parameters tell you what inputs the workflow needs (key, type, required, default, etc.).
+        
+        Args:
+            workflow_id: ID of the workflow to fetch
+            include_params: If True, extract runtime parameters from the workflow graph
+        """
+        try:
+            return get_workflow_with_params(
+                get_client(ctx),
+                workflow_id=workflow_id,
+                include_params=include_params,
             )
         except Exception as exc:
             return tool_error_payload(exc)
