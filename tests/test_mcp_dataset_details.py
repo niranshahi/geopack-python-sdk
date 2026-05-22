@@ -51,6 +51,30 @@ class TestMcpDatasetDetails(unittest.TestCase):
         self.assertTrue(attr.get("valuesOmitted"))
         self.assertEqual(attr.get("valuesCount"), 200)
 
+    def test_full_omits_display_renderer_blob(self):
+        raw = {
+            "type": "vector",
+            "tilejson": {"name": "x", "tiles": ["/mvt"]},
+            "display": {
+                "esri": {
+                    "renderer": {
+                        "type": "uniqueValue",
+                        "field1": "distr_id",
+                        "uniqueValueGroups": [{"classes": [{"label": str(i)} for i in range(50)]}],
+                    },
+                    "labelingInfo": [{"labelExpression": "[name]"}],
+                }
+            },
+        }
+        out = trim_details(raw, "full")
+        self.assertIn("display", out)
+        self.assertTrue(out["display"].get("_omitted"))
+        self.assertEqual(out["display"].get("rendererType"), "uniqueValue")
+        self.assertEqual(out["display"].get("field1"), "distr_id")
+        self.assertEqual(out["display"].get("classCount"), 50)
+        self.assertEqual(out["display"].get("labelExpression"), "[name]")
+        self.assertNotIn("uniqueValueGroups", out["display"])
+
     def test_list_payload_trims_each_dataset(self):
         huge = json.dumps(self._sample_vector_details())
         payload = {

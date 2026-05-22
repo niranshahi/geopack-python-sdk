@@ -106,6 +106,38 @@ def _slim_spatial_reference(spatial_ref: Any) -> Any:
     return slim
 
 
+def _omit_display_blob(display: Any) -> Dict[str, Any]:
+    """Replace portal symbology (renderer/labeling) with a tiny summary for LLM tools."""
+    hint: Dict[str, Any] = {"_omitted": True, "reason": "portal_map_symbology"}
+    if not isinstance(display, dict):
+        return hint
+    esri = display.get("esri")
+    if not isinstance(esri, dict):
+        return hint
+    renderer = esri.get("renderer")
+    if isinstance(renderer, dict):
+        hint["rendererType"] = renderer.get("type")
+        for key in ("field1", "field2", "field3"):
+            if key in renderer:
+                hint[key] = renderer[key]
+        groups = renderer.get("uniqueValueGroups") or []
+        if groups and isinstance(groups[0], dict):
+            classes = groups[0].get("classes") or []
+            if isinstance(classes, list):
+                hint["classCount"] = len(classes)
+    labeling = esri.get("labelingInfo")
+    if isinstance(labeling, list) and labeling:
+        hint["labelingCount"] = len(labeling)
+        first = labeling[0]
+        if isinstance(first, dict):
+            if "labelExpression" in first:
+                hint["labelExpression"] = first["labelExpression"]
+            info = first.get("labelExpressionInfo")
+            if isinstance(info, dict) and info.get("expression"):
+                hint["labelExpression"] = info["expression"]
+    return hint
+
+
 def _slim_fields(fields: Any) -> List[Dict[str, Any]]:
     slimmed: List[Dict[str, Any]] = []
     if not isinstance(fields, list):
@@ -169,7 +201,13 @@ def trim_details(details: Any, level: Union[DetailsLevel, DetailsProfile]) -> An
             out["fieldsCount"] = len(fields)
         return out
 
-    # level == "full"
+    # level == "full" — keep tilejson (MVT hints) but drop portal UI symbology
+    if "display" in out:
+        out["display"] = _omit_display_blob(out["display"])
+
+    for key in ("thumbnail",):
+        out.pop(key, None)
+
     tilejson = out.get("tilejson")
     if isinstance(tilejson, dict):
         if isinstance(tilejson.get("tilestats"), dict):
@@ -179,6 +217,11 @@ def trim_details(details: Any, level: Union[DetailsLevel, DetailsProfile]) -> An
 
     if "tilestats" in out:
         out["tilestats"] = _strip_tilestats_values(out.get("tilestats"), omit_values=True)
+
+    fields = out.get("fields")
+    if isinstance(fields, list):
+        out["fields"] = _slim_fields(fields)
+        out["fieldsCount"] = len(fields)
 
     data_type = out.get("dataType") or out.get("type")
     if data_type == "raster":
