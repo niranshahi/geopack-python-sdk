@@ -18,30 +18,50 @@ from ..tool_handlers.datasets import (
     list_datasets,
     query_dataset,
 )
+from ..tool_schema import (
+    BboxWgs84,
+    DataStoreId,
+    DataTypeFilter,
+    DatasetId,
+    DeclaredType,
+    DetailsLevel,
+    ExportFormat,
+    FeatureQuery,
+    IsoDate,
+    LocalFilePath,
+    OutSrid,
+    Page,
+    PageSize,
+    QueryLimit,
+    QueryOffset,
+    ReturnGeometry,
+    SavePath,
+    SearchQuery,
+    SharingPolicy,
+    UploadMetadata,
+    WorkgroupId,
+    WorkgroupIdOptional,
+)
 
 
 def register(mcp: Any) -> None:
-    @mcp.tool()
+    @mcp.tool(
+        description=(
+            "List datasets (paginated). Use geocode_place then pass bbox for location searches. "
+            "details_level lite | standard | full."
+        ),
+    )
     def geopack_sdk_list_datasets(
         ctx: Context[ServerSession, AppContext],
-        page: int = 1,
-        page_size: int = 20,
-        search_query: Optional[str] = None,
-        details_level: str = "lite",
-        data_type: Optional[str] = None,
-        bbox: Optional[list[float]] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        page: Page = 1,
+        page_size: PageSize = 20,
+        search_query: SearchQuery = None,
+        details_level: DetailsLevel = "lite",
+        data_type: DataTypeFilter = None,
+        bbox: BboxWgs84 = None,
+        start_date: IsoDate = None,
+        end_date: IsoDate = None,
     ) -> Dict[str, Any]:
-        """
-        List datasets visible to the authenticated user (paginated).
-
-        details_level: lite (default) | standard | full.
-        For spatial search use bbox from geopack_sdk_geocode_place: [west, south, east, north] WGS84.
-        data_type: vector | raster. start_date/end_date: ISO YYYY-MM-DD.
-
-        IMPORTANT: Always pass the bbox parameter when you have geocoded a location!
-        """
         try:
             return list_datasets(
                 get_client(ctx),
@@ -57,17 +77,14 @@ def register(mcp: Any) -> None:
         except Exception as exc:
             return tool_error_payload(exc)
 
-    @mcp.tool()
+    @mcp.tool(
+        description="Get one dataset by id. details_level full (default) | standard | lite.",
+    )
     def geopack_sdk_get_dataset(
         ctx: Context[ServerSession, AppContext],
-        dataset_id: int,
-        details_level: str = "full",
+        dataset_id: DatasetId,
+        details_level: DetailsLevel = "full",
     ) -> Dict[str, Any]:
-        """
-        Get one dataset by numeric id.
-
-        details_level: full (default) | standard | lite — trims heavy ``details`` (tilejson, WKT).
-        """
         try:
             return get_dataset(
                 get_client(ctx),
@@ -77,22 +94,21 @@ def register(mcp: Any) -> None:
         except Exception as exc:
             return tool_error_payload(exc)
 
-    @mcp.tool()
+    @mcp.tool(
+        description=(
+            "Query vector dataset features (max 500 in JSON). "
+            "Pass FeatureQuery in query or use limit/offset."
+        ),
+    )
     def geopack_sdk_query_dataset(
         ctx: Context[ServerSession, AppContext],
-        dataset_id: int,
-        query: Optional[Dict[str, Any]] = None,
-        limit: Optional[int] = 100,
-        offset: int = 0,
-        return_geometry: bool = True,
-        out_srid: Optional[int] = None,
+        dataset_id: DatasetId,
+        query: FeatureQuery = None,
+        limit: QueryLimit = 100,
+        offset: QueryOffset = 0,
+        return_geometry: ReturnGeometry = True,
+        out_srid: OutSrid = None,
     ) -> Dict[str, Any]:
-        """
-        Query dataset features (POST /datasets/{id}/query).
-
-        Pass a FeatureQuery DSL in ``query``, or omit it and use limit/offset/return_geometry.
-        Response is capped at 500 features for MCP context safety.
-        """
         try:
             return query_dataset(
                 get_client(ctx),
@@ -106,18 +122,17 @@ def register(mcp: Any) -> None:
         except Exception as exc:
             return tool_error_payload(exc)
 
-    @mcp.tool()
+    @mcp.tool(
+        description=(
+            "Save dataset preview PNG on the MCP host. "
+            "Default: downloads/dataset_{id}_thumbnail.png under process cwd."
+        ),
+    )
     def geopack_sdk_get_dataset_thumbnail(
         ctx: Context[ServerSession, AppContext],
-        dataset_id: int,
-        save_path: Optional[str] = None,
+        dataset_id: DatasetId,
+        save_path: SavePath = None,
     ) -> Dict[str, Any]:
-        """
-        Download dataset preview PNG to a local path on the MCP host.
-
-        Use when the chat host cannot render MCP resources. Default path:
-        downloads/dataset_{id}_thumbnail.png (relative to MCP process cwd).
-        """
         try:
             return get_dataset_thumbnail(
                 get_client(ctx),
@@ -127,28 +142,21 @@ def register(mcp: Any) -> None:
         except Exception as exc:
             return tool_error_payload(exc)
 
-    @mcp.tool()
+    @mcp.tool(
+        description=(
+            "Upload a local geospatial file; returns taskId (non-blocking). "
+            "Chain: geopack_sdk_wait_for_task → createdDatasetId in results. "
+            "Set metadata.name for display title. Inline GeoJSON: write a .geojson file first."
+        ),
+    )
     def geopack_sdk_upload_dataset(
         ctx: Context[ServerSession, AppContext],
-        file_path: str,
-        data_store_id: int,
-        workgroup_id: int,
-        declared_type: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        file_path: LocalFilePath,
+        data_store_id: DataStoreId,
+        workgroup_id: WorkgroupId,
+        declared_type: DeclaredType = None,
+        metadata: UploadMetadata = None,
     ) -> Dict[str, Any]:
-        """
-        Upload a geospatial file from the MCP host disk to create a new dataset.
-
-        file_path must exist locally (not a URL). Returns taskId; use
-        geopack_sdk_wait_for_task, then read createdDatasetId from task results.
-
-        metadata: optional dict; use metadata.name for the dataset display name
-        (otherwise the server uses the file basename).
-
-        Inline GeoJSON/text is not supported — write content to a local file first.
-
-        Optional env: GEOPACK_MCP_UPLOAD_ROOT, GEOPACK_MCP_MAX_UPLOAD_BYTES.
-        """
         try:
             return upload_dataset(
                 get_client(ctx),
@@ -161,20 +169,19 @@ def register(mcp: Any) -> None:
         except Exception as exc:
             return tool_error_payload(exc)
 
-    @mcp.tool()
+    @mcp.tool(
+        description=(
+            "Start async dataset export; returns taskId. "
+            "Chain: wait_for_task → download_generated_file."
+        ),
+    )
     def geopack_sdk_export_dataset(
         ctx: Context[ServerSession, AppContext],
-        dataset_id: int,
-        format: str,
-        workgroup_id: Optional[int] = None,
-        sharing_policy: str = "private",
+        dataset_id: DatasetId,
+        format: ExportFormat,
+        workgroup_id: WorkgroupIdOptional = None,
+        sharing_policy: SharingPolicy = "private",
     ) -> Dict[str, Any]:
-        """
-        Start an async dataset export (vector or raster). Returns taskId immediately.
-
-        Use geopack_sdk_wait_for_task, then geopack_sdk_download_generated_file.
-        workgroup_id defaults to the dataset owner workgroup when omitted.
-        """
         try:
             return export_dataset(
                 get_client(ctx),

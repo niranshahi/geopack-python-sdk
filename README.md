@@ -208,7 +208,7 @@ Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of us
 
 **Dataset thumbnails:** Tool JSON has `hasThumbnail`, `thumbnailApiPath`, `thumbnailResourceUri` (no BLOB). `test_mcp_stdio_client.py` verifies `read_resource` on `dataset://{id}/thumbnail`. **Cursor Agent chat** may not show images from resources alone — see [geopack_sdk_mcp_design.md §11.4](../docs/04_development/sdk/geopack_sdk_mcp_design.md). Geoportal UI and notebooks fetch via REST as usual.
 
-Design: [docs/04_development/sdk/geopack_sdk_mcp_design.md](../docs/04_development/sdk/geopack_sdk_mcp_design.md) (in the monorepo).
+Design: [docs/04_development/sdk/geopack_sdk_mcp_design.md](../docs/04_development/sdk/geopack_sdk_mcp_design.md) (in the monorepo). Tool parameters use `tool_schema.py` `Field(description=...)` so MCP clients show per-arg help (not docstrings alone).
 
 **Build a Python LLM agent (LangChain):** Start with [`examples/README.md`](examples/README.md) and [`examples/langchain_geopack_agent.py`](examples/langchain_geopack_agent.py) — discovers `geopack_sdk_*` tools from the MCP server via **langchain-mcp-adapters** (`pip install -e ".[langchain]"`). See [langchain_mcp_agents_design.md](../docs/04_development/sdk/langchain_mcp_agents_design.md).
 
