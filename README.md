@@ -121,7 +121,7 @@ client.auth.login(username="my_user", password="my_password")
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks` (`partial_success` is terminal and returned like `completed`).
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (**14 tools** + 2 resource templates, v0.5.4+; workflow execution + graph sanitization).
+- GeoPandas integration; **Geopack SDK MCP** server (**15 tools** + 2 resource templates, v0.5.4+; workflow execution, dataset upload, graph sanitization).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
@@ -173,7 +173,7 @@ Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
 
 Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of username/password.
 
-**Tools (14, v0.5.4+):**
+**Tools (15, v0.5.4+):**
 
 | Tool | Purpose |
 |------|---------|
@@ -184,6 +184,7 @@ Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of us
 | `geopack_sdk_get_dataset_thumbnail` | Save preview PNG on MCP host (`save_path` optional) |
 | `geopack_sdk_get_task` | Task status (sanitized) |
 | `geopack_sdk_wait_for_task` | Poll until export/job completes |
+| `geopack_sdk_upload_dataset` | Upload local file on MCP host → `dataset:upload`; use `metadata.name` for title |
 | `geopack_sdk_export_dataset` | Start `dataset:export` (returns `taskId`) |
 | `geopack_sdk_download_generated_file` | Save export to local `save_path` on MCP host |
 | `geopack_sdk_list_workflows` | List workflows (no `graphJson` in JSON) |
@@ -202,6 +203,8 @@ Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of us
 **Export flow:** `export_dataset` → `wait_for_task` → `download_generated_file` (see MCP design doc §12).
 
 **Workflow flow:** `get_workflow(include_params=true)` → `submit_workflow` → `wait_for_task` → `get_workflow_run` → optional `download_workflow_artifact` (MCP design doc §14; notebook `11_LangChain_MCP_Workflow_Execution.ipynb`).
+
+**Upload flow:** place file on MCP host → `upload_dataset(file_path, data_store_id, workgroup_id, declared_type?, metadata?)` → `wait_for_task` → read `createdDatasetId` from task `results` → optional workflow submit. For a custom title pass `metadata={"name": "My dataset"}`. Inline GeoJSON is not a tool arg — write to disk first. Restart MCP after upgrading so `metadata` appears in the tool schema.
 
 **Dataset thumbnails:** Tool JSON has `hasThumbnail`, `thumbnailApiPath`, `thumbnailResourceUri` (no BLOB). `test_mcp_stdio_client.py` verifies `read_resource` on `dataset://{id}/thumbnail`. **Cursor Agent chat** may not show images from resources alone — see [geopack_sdk_mcp_design.md §11.4](../docs/04_development/sdk/geopack_sdk_mcp_design.md). Geoportal UI and notebooks fetch via REST as usual.
 

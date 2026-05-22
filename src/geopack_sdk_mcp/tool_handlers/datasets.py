@@ -17,7 +17,7 @@ from ..sanitize.dataset_details import (
     trim_datasets_list_payload,
 )
 from ..sanitize.query_results import clamp_query_limit, trim_feature_collection_for_mcp
-from ..sanitize.task_results import sanitize_task_payload
+from ..sanitize.task_results import sanitize_async_task_start, sanitize_task_payload
 from ..serialize import to_jsonable
 
 ExportFormat = Literal[
@@ -181,4 +181,4 @@ def export_dataset(
         sharing_policy=sharing_policy,
         wait=False,
     )
-    return sanitize_task_payload(to_jsonable(task))
+    return sanitize_async_task_start(to_jsonable(task))

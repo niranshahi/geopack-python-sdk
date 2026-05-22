@@ -41,6 +41,17 @@ def sanitize_task_results(results: Any) -> Any:
     return out
 
 
+def sanitize_async_task_start(payload: Any) -> Dict[str, Any]:
+    """Minimal JSON when starting dataset:upload / dataset:export (taskId for wait_for_task)."""
+    if hasattr(payload, "model_dump"):
+        payload = payload.model_dump(mode="json")
+    if not isinstance(payload, dict):
+        return {"status": str(payload)}
+
+    keep = ("taskId", "status", "taskType")
+    return {k: payload[k] for k in keep if k in payload}
+
+
 def sanitize_task_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Return a copy safe for MCP tool JSON (truncate logs, sanitize results)."""
     if not isinstance(payload, dict):

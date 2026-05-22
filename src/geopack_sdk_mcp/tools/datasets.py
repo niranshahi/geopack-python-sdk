@@ -10,6 +10,7 @@ from mcp.server.session import ServerSession
 from ..auth_bootstrap import AppContext
 from ..context import get_client
 from ..errors import tool_error_payload
+from ..tool_handlers.dataset_upload import upload_dataset
 from ..tool_handlers.datasets import (
     export_dataset,
     get_dataset,
@@ -122,6 +123,40 @@ def register(mcp: Any) -> None:
                 get_client(ctx),
                 dataset_id,
                 save_path=save_path,
+            )
+        except Exception as exc:
+            return tool_error_payload(exc)
+
+    @mcp.tool()
+    def geopack_sdk_upload_dataset(
+        ctx: Context[ServerSession, AppContext],
+        file_path: str,
+        data_store_id: int,
+        workgroup_id: int,
+        declared_type: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Upload a geospatial file from the MCP host disk to create a new dataset.
+
+        file_path must exist locally (not a URL). Returns taskId; use
+        geopack_sdk_wait_for_task, then read createdDatasetId from task results.
+
+        metadata: optional dict; use metadata.name for the dataset display name
+        (otherwise the server uses the file basename).
+
+        Inline GeoJSON/text is not supported — write content to a local file first.
+
+        Optional env: GEOPACK_MCP_UPLOAD_ROOT, GEOPACK_MCP_MAX_UPLOAD_BYTES.
+        """
+        try:
+            return upload_dataset(
+                get_client(ctx),
+                file_path=file_path,
+                data_store_id=data_store_id,
+                workgroup_id=workgroup_id,
+                declared_type=declared_type,
+                metadata=metadata,
             )
         except Exception as exc:
             return tool_error_payload(exc)

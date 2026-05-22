@@ -110,6 +110,18 @@ def dispatch_tool(client: Any, name: str, arguments: Dict[str, Any]) -> Any:
                 save_path=arguments.get("save_path"),
             )
 
+        if name == "geopack_sdk_upload_dataset":
+            from geopack_sdk_mcp.tool_handlers.dataset_upload import upload_dataset
+
+            return upload_dataset(
+                client,
+                file_path=str(arguments["file_path"]),
+                data_store_id=int(arguments["data_store_id"]),
+                workgroup_id=int(arguments["workgroup_id"]),
+                declared_type=arguments.get("declared_type"),
+                metadata=arguments.get("metadata"),
+            )
+
         if name == "geopack_sdk_export_dataset":
             from geopack_sdk_mcp.tool_handlers.datasets import export_dataset
 
