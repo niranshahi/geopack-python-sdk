@@ -77,15 +77,22 @@ class WorkflowManager:
         else:
             workflow_dict = workflow
         
-        graph = workflow_dict.get('graphJson', {})
+        graph = workflow_dict.get("graphJson") or {}
+        if isinstance(graph, str):
+            try:
+                graph = json.loads(graph)
+            except (json.JSONDecodeError, TypeError):
+                graph = {}
+        if not isinstance(graph, dict):
+            graph = {}
         if not graph:
             return []
-            
-        nodes = graph.get('nodes', [])
+
+        nodes = graph.get("nodes", [])
         if not isinstance(nodes, list):
             return []
             
-        items = []
+        param_entries: List[tuple] = []
         for n in nodes:
             kind = str(n.get('kind') or n.get('data', {}).get('kind', ''))
             type_name = str(n.get('type') or '')
@@ -135,14 +142,14 @@ class WorkflowManager:
                     "multiple": config.get('multiple', False)
                 }
                 
-                # Validate as WorkflowParameter
-                items.append(WorkflowParameter(**param_dict))
-        
-        # Sort by Y position (Top to Bottom) then X (Left to Right) as per frontend layout logic
-        if items:
-            items.sort(key=lambda x: (nodes[0].get('position', {}).get('y', 0), nodes[0].get('position', {}).get('x', 0)))
-        
-        return items
+                pos = n.get("position") or n.get("data", {}).get("position") or {}
+                sort_y = float(pos.get("y", 0) or 0)
+                sort_x = float(pos.get("x", 0) or 0)
+                param_entries.append((WorkflowParameter(**param_dict), sort_y, sort_x))
+
+        # Sort by each param node's canvas position (top-to-bottom, left-to-right)
+        param_entries.sort(key=lambda entry: (entry[1], entry[2]))
+        return [entry[0] for entry in param_entries]
 
     def get_operations(self) -> List[Dict[str, Any]]:
         """Get the manifest of all available workflow operations (OGR, GDAL, etc.).

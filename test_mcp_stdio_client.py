@@ -165,6 +165,27 @@ async def _run() -> None:
                             blob_len = len(block.text)
                     print(f"[OK] thumbnail payload size ~{blob_len}")
 
+            workflow_id = os.getenv("TEST_WORKFLOW_ID")
+            if workflow_id:
+                wf_id = int(workflow_id)
+                print(f"\n[7] geopack_sdk_get_workflow id={wf_id} include_params=true ...")
+                wf_res = await session.call_tool(
+                    "geopack_sdk_get_workflow",
+                    {"workflow_id": wf_id, "include_params": True},
+                )
+                wf_payload = _tool_result_payload(wf_res)
+                if isinstance(wf_payload, dict) and wf_payload.get("error"):
+                    print("[FAIL]", wf_payload)
+                    raise SystemExit(1)
+                if "graphJson" in wf_payload:
+                    print("[FAIL] graphJson must be omitted from MCP get_workflow")
+                    raise SystemExit(1)
+                params = wf_payload.get("parameters") or []
+                print(
+                    f"[OK] {wf_payload.get('name')} parameters={len(params)} "
+                    f"graphOmitted={'graphOmitted' in wf_payload}"
+                )
+
     print("\n--- MCP stdio E2E test passed ---")
 
 

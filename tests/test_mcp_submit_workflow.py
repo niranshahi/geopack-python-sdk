@@ -4,10 +4,8 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from geopack_sdk.models import WorkflowParameter, WorkflowRun, WorkflowRunSubmitResponse
-from geopack_sdk_mcp.tool_handlers.submit_workflow import (
-    get_workflow_with_params,
-    submit_workflow,
-)
+from geopack_sdk_mcp.tool_handlers.submit_workflow import submit_workflow
+from geopack_sdk_mcp.tool_handlers.workflows import get_workflow_for_mcp
 from geopack_sdk_mcp.tool_handlers.workflow_runs import download_workflow_artifact
 
 
@@ -32,6 +30,7 @@ class TestSubmitWorkflowHandlers(unittest.TestCase):
         self.assertEqual(result["workflowRunId"], 123)
         self.assertEqual(result["taskId"], "task-abc")
         self.assertEqual(result["status"], "queued")
+        self.assertNotIn("messages", result)
         self.client.workflow_runs.submit.assert_called_once_with(
             workflow_id=42,
             params={"input_dataset_id": 100},
@@ -97,7 +96,7 @@ class TestSubmitWorkflowHandlers(unittest.TestCase):
         self.client.workflows.extract_params.return_value = params
 
         with patch(
-            "geopack_sdk_mcp.tool_handlers.submit_workflow.to_jsonable"
+            "geopack_sdk_mcp.tool_handlers.workflows.to_jsonable"
         ) as mock_to_jsonable:
             def to_jsonable_impl(value):
                 # Handle workflow dict
@@ -116,7 +115,7 @@ class TestSubmitWorkflowHandlers(unittest.TestCase):
 
             mock_to_jsonable.side_effect = to_jsonable_impl
 
-            result = get_workflow_with_params(
+            result = get_workflow_for_mcp(
                 self.client,
                 workflow_id=42,
                 include_params=True,
@@ -125,6 +124,7 @@ class TestSubmitWorkflowHandlers(unittest.TestCase):
             self.assertEqual(result["id"], 42)
             self.assertEqual(result["name"], "Hillshade")
             self.assertIn("parameters", result)
+            self.assertNotIn("graphJson", result)
             self.assertEqual(len(result["parameters"]), 2)
             self.assertEqual(result["parameters"][0]["key"], "input_dataset_id")
             self.assertEqual(result["parameters"][0]["required"], True)
@@ -144,13 +144,13 @@ class TestSubmitWorkflowHandlers(unittest.TestCase):
         self.client.workflows.extract_params.return_value = []
 
         with patch(
-            "geopack_sdk_mcp.tool_handlers.submit_workflow.to_jsonable"
+            "geopack_sdk_mcp.tool_handlers.workflows.to_jsonable"
         ) as mock_to_jsonable:
             mock_to_jsonable.side_effect = lambda x: (
                 workflow_dict if x is workflow else x
             )
 
-            result = get_workflow_with_params(
+            result = get_workflow_for_mcp(
                 self.client,
                 workflow_id=42,
                 include_params=False,
@@ -159,6 +159,7 @@ class TestSubmitWorkflowHandlers(unittest.TestCase):
             self.assertEqual(result["id"], 42)
             self.assertEqual(result["name"], "Hillshade")
             self.assertNotIn("parameters", result)
+            self.assertNotIn("graphJson", result)
             self.client.workflows.extract_params.assert_not_called()
 
     def test_download_workflow_artifact(self):

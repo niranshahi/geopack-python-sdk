@@ -202,7 +202,7 @@ YOU MUST FOLLOW THIS EXACT SEQUENCE:
 
 CRITICAL RULES:
 - ALWAYS use details_level="full" when getting dataset (need full column info)
-- ALWAYS use include_params=true when getting workflow definition
+- ALWAYS use include_params=true when getting workflow definition (parameters[] replaces graphJson in MCP output)
 - NEVER guess parameter values — extract them from dataset metadata
 - ALWAYS wait for task completion before showing results
 - If output has artifactId, optionally download it: geopack_sdk_download_workflow_artifact()

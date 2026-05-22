@@ -7,12 +7,13 @@ from typing import Any, Dict
 
 from geopack_sdk import GeopackClient
 
+from ..sanitize.workflow_payload import sanitize_workflow_run_for_mcp
 from ..serialize import to_jsonable
 
 
 def get_workflow_run(client: GeopackClient, run_id: int) -> Dict[str, Any]:
     result = client.workflow_runs.get(run_id)
-    return to_jsonable(result)
+    return sanitize_workflow_run_for_mcp(to_jsonable(result))
 
 
 def download_workflow_artifact(

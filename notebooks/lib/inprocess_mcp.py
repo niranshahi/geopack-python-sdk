@@ -147,9 +147,9 @@ def dispatch_tool(client: Any, name: str, arguments: Dict[str, Any]) -> Any:
             )
 
         if name == "geopack_sdk_get_workflow":
-            from geopack_sdk_mcp.tool_handlers.submit_workflow import get_workflow_with_params
+            from geopack_sdk_mcp.tool_handlers.workflows import get_workflow_for_mcp
 
-            return get_workflow_with_params(
+            return get_workflow_for_mcp(
                 client,
                 workflow_id=int(arguments["workflow_id"]),
                 include_params=arguments.get("include_params", False),

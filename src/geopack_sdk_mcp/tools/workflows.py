@@ -10,8 +10,7 @@ from mcp.server.session import ServerSession
 from ..auth_bootstrap import AppContext
 from ..context import get_client
 from ..errors import tool_error_payload
-from ..tool_handlers.submit_workflow import get_workflow_with_params
-from ..tool_handlers.workflows import list_workflows
+from ..tool_handlers.workflows import get_workflow_for_mcp, list_workflows
 
 
 def register(mcp: Any) -> None:
@@ -42,13 +41,14 @@ def register(mcp: Any) -> None:
         """Get workflow definition with optional parameter extraction.
         
         Parameters tell you what inputs the workflow needs (key, type, required, default, etc.).
+        graphJson is omitted from the tool result; use include_params=true for the parameters array.
         
         Args:
             workflow_id: ID of the workflow to fetch
-            include_params: If True, extract runtime parameters from the workflow graph
+            include_params: If True, extract runtime parameters from the workflow graph (server-side)
         """
         try:
-            return get_workflow_with_params(
+            return get_workflow_for_mcp(
                 get_client(ctx),
                 workflow_id=workflow_id,
                 include_params=include_params,
