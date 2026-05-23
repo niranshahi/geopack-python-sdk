@@ -9,8 +9,6 @@ from mcp.server.session import ServerSession
 
 from ..auth_bootstrap import AppContext
 from ..context import get_client
-from ..confirmation import get_confirmation_manager
-from ..destructive_guard import guard_destructive_operation
 from ..errors import tool_error_payload
 from ..tool_handlers.submit_workflow import submit_workflow
 from ..tool_handlers.workflow_runs import download_workflow_artifact, get_workflow_run
@@ -29,7 +27,8 @@ def register(mcp: Any) -> None:
         description=(
             "Start workflow execution (non-blocking). Returns workflowRunId and taskId. "
             "Call get_workflow(include_params=true) first to learn param keys. "
-            "Requires confirmation_id from a human-approved request (geopack-sdk-confirm CLI)."
+            "MUTATING: Before this call the host must describe workflow and params and obtain "
+            "explicit user consent in conversation; do not call if declined."
         ),
     )
     def geopack_sdk_submit_workflow(
@@ -37,32 +36,14 @@ def register(mcp: Any) -> None:
         workflow_id: WorkflowId,
         params: WorkflowParams,
         override_datastore_id: OverrideDatastoreId = None,
-        confirmation_id: str | None = None,
     ) -> Dict[str, Any]:
-        payload = {
-            "workflow_id": workflow_id,
-            "params": params,
-            "override_datastore_id": override_datastore_id,
-        }
-        guard = guard_destructive_operation(
-            "submit_workflow",
-            workflow_id,
-            confirmation_id=confirmation_id,
-            payload=payload,
-        )
-        if not guard.should_execute:
-            return guard.response or {}
-
-        manager = get_confirmation_manager()
         try:
-            result = submit_workflow(
+            return submit_workflow(
                 get_client(ctx),
                 workflow_id=workflow_id,
                 params=params,
                 override_datastore_id=override_datastore_id,
             )
-            manager.consume_request(guard.confirmation_id)
-            return result
         except Exception as exc:
             return tool_error_payload(exc)
 

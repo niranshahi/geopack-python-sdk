@@ -12,8 +12,6 @@ from .auth_bootstrap import AppContext, bootstrap_geopack_client
 from .context import set_lifespan_client
 from .resources import register_all_resources
 from .tools import register_all_tools
-from .confirmation_endpoints import register_confirmation_endpoints
-
 logger = logging.getLogger(__name__)
 
 
@@ -53,4 +51,3 @@ mcp = FastMCP(
 
 register_all_tools(mcp)
 register_all_resources(mcp)
-register_confirmation_endpoints(mcp)
