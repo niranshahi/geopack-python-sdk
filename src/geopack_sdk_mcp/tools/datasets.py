@@ -9,9 +9,12 @@ from mcp.server.session import ServerSession
 
 from ..auth_bootstrap import AppContext
 from ..context import get_client
+from ..confirmation import get_confirmation_manager
+from ..destructive_guard import guard_destructive_operation
 from ..errors import tool_error_payload
 from ..tool_handlers.dataset_upload import upload_dataset
 from ..tool_handlers.datasets import (
+    delete_dataset,
     export_dataset,
     get_dataset,
     get_dataset_thumbnail,
@@ -146,7 +149,8 @@ def register(mcp: Any) -> None:
         description=(
             "Upload a local geospatial file; returns taskId (non-blocking). "
             "Chain: geopack_sdk_wait_for_task → createdDatasetId in results. "
-            "Set metadata.name for display title. Inline GeoJSON: write a .geojson file first."
+            "Set metadata.name for display title. Inline GeoJSON: write a .geojson file first. "
+            "Requires confirmation_id from a human-approved request (geopack-sdk-confirm CLI)."
         ),
     )
     def geopack_sdk_upload_dataset(
@@ -156,9 +160,27 @@ def register(mcp: Any) -> None:
         workgroup_id: WorkgroupId,
         declared_type: DeclaredType = None,
         metadata: UploadMetadata = None,
+        confirmation_id: str | None = None,
     ) -> Dict[str, Any]:
+        payload = {
+            "file_path": str(file_path),
+            "data_store_id": data_store_id,
+            "workgroup_id": workgroup_id,
+            "declared_type": declared_type,
+            "metadata": metadata,
+        }
+        guard = guard_destructive_operation(
+            "upload_dataset",
+            file_path,
+            confirmation_id=confirmation_id,
+            payload=payload,
+        )
+        if not guard.should_execute:
+            return guard.response or {}
+
+        manager = get_confirmation_manager()
         try:
-            return upload_dataset(
+            result = upload_dataset(
                 get_client(ctx),
                 file_path=file_path,
                 data_store_id=data_store_id,
@@ -166,6 +188,8 @@ def register(mcp: Any) -> None:
                 declared_type=declared_type,
                 metadata=metadata,
             )
+            manager.consume_request(guard.confirmation_id)
+            return result
         except Exception as exc:
             return tool_error_payload(exc)
 
@@ -190,5 +214,32 @@ def register(mcp: Any) -> None:
                 workgroup_id=workgroup_id,
                 sharing_policy=sharing_policy,
             )
+        except Exception as exc:
+            return tool_error_payload(exc)
+
+    @mcp.tool(
+        description=(
+            "Delete a dataset by ID. WARNING: This is a destructive operation. "
+            "Requires confirmation_id from a human-approved request (geopack-sdk-confirm CLI)."
+        ),
+    )
+    def geopack_sdk_delete_dataset(
+        ctx: Context[ServerSession, AppContext],
+        dataset_id: DatasetId,
+        confirmation_id: str | None = None,
+    ) -> Dict[str, Any]:
+        guard = guard_destructive_operation(
+            "delete_dataset",
+            dataset_id,
+            confirmation_id=confirmation_id,
+        )
+        if not guard.should_execute:
+            return guard.response or {}
+
+        manager = get_confirmation_manager()
+        try:
+            result = delete_dataset(get_client(ctx), dataset_id)
+            manager.consume_request(guard.confirmation_id)
+            return result
         except Exception as exc:
             return tool_error_payload(exc)

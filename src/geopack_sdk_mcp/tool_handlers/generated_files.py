@@ -26,3 +26,20 @@ def download_generated_file(
         "savedPath": resolved_path,
         "downloadApiPath": generated_file_download_path(generated_file_id),
     }
+
+
+def delete_generated_file(
+    client: GeopackClient,
+    generated_file_id: int,
+) -> Dict[str, Any]:
+    """
+    Delete a generated file record and its storage.
+    
+    REST API: `DELETE /api/generated-files/{id}`
+    """
+    client.generated_files.delete(generated_file_id)
+    return {
+        "success": True,
+        "message": f"Generated file #{generated_file_id} deleted successfully.",
+        "generatedFileId": generated_file_id,
+    }

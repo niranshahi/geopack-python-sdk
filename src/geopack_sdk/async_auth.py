@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from .exceptions import GeopackAPIError
 
+from .token_registry import TokenRegistry
+
 if TYPE_CHECKING:
     from .async_client import AsyncGeopackClient
 
@@ -14,8 +16,24 @@ if TYPE_CHECKING:
 class AsyncAuthManager:
     def __init__(self, client: "AsyncGeopackClient"):
         self.client = client
-        self.token: Optional[str] = None
-        self.refresh_token: Optional[str] = None
+        self._registry = TokenRegistry()
+
+    @property
+    def token(self) -> Optional[str]:
+        return self._registry.access_token
+
+    @token.setter
+    def token(self, value: Optional[str]) -> None:
+        self._registry.access_token = value
+
+    @property
+    def refresh_token(self) -> Optional[str]:
+        return self._registry.refresh_token
+
+    @refresh_token.setter
+    def refresh_token(self, value: Optional[str]) -> None:
+        self._registry.refresh_token = value
+
 
     async def login(self, username: str = None, password: str = None) -> Dict[str, Any]:
         """

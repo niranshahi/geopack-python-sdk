@@ -121,7 +121,7 @@ client.auth.login(username="my_user", password="my_password")
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks` (`partial_success` is terminal and returned like `completed`).
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (**15 tools** + 2 resource templates, v0.5.4+; workflow execution, dataset upload, graph sanitization).
+- GeoPandas integration; **Geopack SDK MCP** server (**17 tools** + 2 resource templates, v0.5.4+; workflow execution, dataset upload, human-in-the-loop confirmations).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
@@ -173,7 +173,9 @@ Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
 
 Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of username/password.
 
-**Tools (15, v0.5.4+):**
+**Destructive operations:** require human approval via `geopack-sdk-confirm` (not an MCP tool). See [MCP Confirmation System](../docs/04_development/sdk/mcp_confirmation_system.md) in the monorepo docs.
+
+**Tools (17, v0.5.4+):**
 
 | Tool | Purpose |
 |------|---------|

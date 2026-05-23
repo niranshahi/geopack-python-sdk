@@ -1,13 +1,29 @@
 import os
-
+from typing import Optional
+from .token_registry import TokenRegistry
 from .exceptions import GeopackAPIError
-
 
 class AuthManager:
     def __init__(self, client):
         self.client = client
-        self.token = None
-        self.refresh_token = None
+        self._registry = TokenRegistry()
+
+    @property
+    def token(self) -> Optional[str]:
+        return self._registry.access_token
+
+    @token.setter
+    def token(self, value: Optional[str]) -> None:
+        self._registry.access_token = value
+
+    @property
+    def refresh_token(self) -> Optional[str]:
+        return self._registry.refresh_token
+
+    @refresh_token.setter
+    def refresh_token(self, value: Optional[str]) -> None:
+        self._registry.refresh_token = value
+
 
     def login(self, username: str = None, password: str = None):
         """

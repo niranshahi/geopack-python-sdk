@@ -36,6 +36,30 @@ class AsyncWorkflowManager:
             return [Workflow(**item) for item in items]
         return []
 
+    async def iter_workflows(
+        self,
+        page_size: int = 50,
+        search_query: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ):
+        """Iterate over all workflow definitions by auto-fetching successive pages asynchronously."""
+        current_page = 1
+        while True:
+            items = await self.list(
+                page=current_page,
+                page_size=page_size,
+                search_query=search_query,
+                filters=filters,
+            )
+            if not items:
+                break
+            for item in items:
+                yield item
+            if len(items) < page_size:
+                break
+            current_page += 1
+
     async def get(self, workflow_id: int) -> Workflow:
+
         response_data = await self.client.get(f"{self.base_url}/{workflow_id}")
         return Workflow(**response_data)

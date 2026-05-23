@@ -117,7 +117,28 @@ class WorkflowRunManager:
         response_data = self.client.get(self.base_url, params=params)
         return WorkflowRunListResponse(**response_data)
 
+    def iter_workflow_runs(
+        self,
+        page_size: int = 50,
+        filters: Optional[Dict[str, Any]] = None,
+    ):
+        """Iterate over all workflow runs by auto-fetching successive pages."""
+        current_page = 1
+        while True:
+            resp = self.list(
+                page=current_page,
+                page_size=page_size,
+                filters=filters,
+            )
+            if not resp.items:
+                break
+            yield from resp.items
+            if len(resp.items) < page_size:
+                break
+            current_page += 1
+
     def get(self, run_id: int) -> WorkflowRun:
+
         """Get detailed status of a workflow run, including node-level progress.
         
         REST API: `GET /api/workflow-runs/:id`

@@ -38,7 +38,32 @@ class GeneratedFileManager:
         response_data = self.client.get(self.base_url, params=params)
         return GeneratedFileListResponse(**response_data)
 
+    def iter_generated_files(
+        self,
+        page_size: int = 50,
+        search_query: Optional[str] = None,
+        order_by: str = "createdAt",
+        order_direction: str = "desc",
+    ):
+        """Iterate over all generated files by auto-fetching successive pages."""
+        current_page = 1
+        while True:
+            resp = self.list(
+                page=current_page,
+                page_size=page_size,
+                search_query=search_query,
+                order_by=order_by,
+                order_direction=order_direction,
+            )
+            if not resp.items:
+                break
+            yield from resp.items
+            if len(resp.items) < page_size:
+                break
+            current_page += 1
+
     def download(
+
         self,
         file_id: int,
         local_path: str,

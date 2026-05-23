@@ -72,6 +72,42 @@ class AsyncTaskManager:
         response_data = await self.client.get("/tasks", params=params)
         return TaskListResponse(**response_data)
 
+    async def iter_tasks(
+        self,
+        page_size: int = 50,
+        status: Optional[
+            Literal[
+                "pending",
+                "processing",
+                "completed",
+                "failed",
+                "partial_success",
+                "canceled",
+            ]
+        ] = None,
+        task_type: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_direction: Optional[Literal["ASC", "DESC"]] = None,
+    ):
+        """Iterate over all tasks by auto-fetching successive pages asynchronously."""
+        current_page = 1
+        while True:
+            resp = await self.list(
+                page=current_page,
+                page_size=page_size,
+                status=status,
+                task_type=task_type,
+                order_by=order_by,
+                order_direction=order_direction,
+            )
+            if not resp.tasks:
+                break
+            for task in resp.tasks:
+                yield task
+            if len(resp.tasks) < page_size:
+                break
+            current_page += 1
+
     async def get_status(self, task_id: str) -> TaskResult:
         response_data = await self.client.get(f"/tasks/{task_id}")
         return TaskResult(**response_data)

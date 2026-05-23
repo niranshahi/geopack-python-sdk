@@ -111,8 +111,16 @@ class AsyncGeopackClient:
         await self._client.aclose()
 
     async def _request(self, method: str, endpoint: str, **kwargs: Any) -> Any:
+        # Sync session headers with centralized TokenRegistry
+        token = getattr(self.auth, "token", None)
+        if token:
+            self._client.headers["Authorization"] = f"Bearer {token}"
+        else:
+            self._client.headers.pop("Authorization", None)
+
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         attempts = self._retry_total + 1 if self._enable_http_retries else 1
+
 
         last_response: Optional[httpx.Response] = None
         for attempt in range(attempts):

@@ -101,7 +101,34 @@ class DatasetManager:
     def _encode_query_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
         return encode_query_params(params)
 
+    def iter_datasets(
+        self,
+        page_size: int = 50,
+        search_query: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_direction: Optional[str] = None,
+        active_filters: Optional[Dict[str, Any]] = None,
+    ):
+        """Iterate over all datasets matching filters by auto-fetching successive pages."""
+        current_page = 1
+        while True:
+            resp = self.list(
+                page=current_page,
+                page_size=page_size,
+                search_query=search_query,
+                order_by=order_by,
+                order_direction=order_direction,
+                active_filters=active_filters,
+            )
+            if not resp.datasets:
+                break
+            yield from resp.datasets
+            if len(resp.datasets) < page_size:
+                break
+            current_page += 1
+
     def list(
+
         self,
         page: int = 1,
         page_size: int = 10,

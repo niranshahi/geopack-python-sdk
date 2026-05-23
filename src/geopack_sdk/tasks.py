@@ -93,7 +93,44 @@ class TaskManager:
         response_data = self.client.get("/tasks/summary")
         return ActiveTasksSummary(**response_data)
 
+    def iter_tasks(
+        self,
+
+        page_size: int = 50,
+        status: Optional[
+            Literal[
+                "pending",
+                "processing",
+                "completed",
+                "failed",
+                "partial_success",
+                "canceled",
+            ]
+        ] = None,
+        task_type: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_direction: Optional[Literal["ASC", "DESC"]] = None,
+    ):
+        """Iterate over all tasks by auto-fetching successive pages."""
+        current_page = 1
+        while True:
+            resp = self.list(
+                page=current_page,
+                page_size=page_size,
+                status=status,
+                task_type=task_type,
+                order_by=order_by,
+                order_direction=order_direction,
+            )
+            if not resp.tasks:
+                break
+            yield from resp.tasks
+            if len(resp.tasks) < page_size:
+                break
+            current_page += 1
+
     def list(
+
         self,
         page: int = 1,
         page_size: int = 10,

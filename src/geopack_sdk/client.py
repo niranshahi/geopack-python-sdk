@@ -104,11 +104,19 @@ class GeopackClient:
         self.organizations = OrganizationManager(self)
 
     def _request(self, method, endpoint, **kwargs):
+        # Sync session headers with centralized TokenRegistry
+        token = getattr(self.auth, "token", None)
+        if token:
+            self.session.headers["Authorization"] = f"Bearer {token}"
+        else:
+            self.session.headers.pop("Authorization", None)
+
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         if "timeout" not in kwargs:
             kwargs["timeout"] = 30
 
         try:
+
             response = self.session.request(method, url, **kwargs)
         except requests.Timeout as e:
             timeout = kwargs.get("timeout")

@@ -46,7 +46,30 @@ class WorkflowManager:
             return [Workflow(**item) for item in items]
         return []
 
+    def iter_workflows(
+        self,
+        page_size: int = 50,
+        search_query: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ):
+        """Iterate over all workflow definitions by auto-fetching successive pages."""
+        current_page = 1
+        while True:
+            items = self.list(
+                page=current_page,
+                page_size=page_size,
+                search_query=search_query,
+                filters=filters,
+            )
+            if not items:
+                break
+            yield from items
+            if len(items) < page_size:
+                break
+            current_page += 1
+
     def get(self, workflow_id: int) -> Workflow:
+
         """Get a single workflow definition by ID with type-safe response.
 
         REST API: `GET /api/workflows/:id`

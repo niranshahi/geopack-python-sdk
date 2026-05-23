@@ -51,6 +51,7 @@ all = [
 
 [project.scripts]
 geopack-sdk-mcp = "geopack_sdk_mcp.__main__:main"
+geopack-sdk-confirm = "geopack_sdk_mcp.confirm_cli:main"
 
 [project.urls]
 "Homepage" = "https://github.com/niranshahi/geopack-python-sdk"

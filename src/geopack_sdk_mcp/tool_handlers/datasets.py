@@ -148,9 +148,13 @@ def get_dataset_thumbnail(
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(body)
-
     resolved = str(target.resolve())
+    from ..context import register_temp_file
+    register_temp_file(resolved)
+
     return {
+
+
         "datasetId": dataset_id,
         "savedPath": resolved,
         "mimeType": mime_type,
@@ -182,3 +186,20 @@ def export_dataset(
         wait=False,
     )
     return sanitize_async_task_start(to_jsonable(task))
+
+
+def delete_dataset(
+    client: GeopackClient,
+    dataset_id: int,
+) -> Dict[str, Any]:
+    """
+    Delete a dataset by ID. This is a destructive operation.
+    
+    REST API: `DELETE /api/datasets/{id}`
+    """
+    client.datasets.delete(dataset_id)
+    return {
+        "success": True,
+        "message": f"Dataset #{dataset_id} deleted successfully.",
+        "datasetId": dataset_id,
+    }

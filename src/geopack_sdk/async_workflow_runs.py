@@ -35,7 +35,29 @@ class AsyncWorkflowRunManager:
         response_data = await self.client.get(self.base_url, params=params)
         return WorkflowRunListResponse(**response_data)
 
+    async def iter_workflow_runs(
+        self,
+        page_size: int = 50,
+        filters: Optional[Dict[str, Any]] = None,
+    ):
+        """Iterate over all workflow runs by auto-fetching successive pages asynchronously."""
+        current_page = 1
+        while True:
+            resp = await self.list(
+                page=current_page,
+                page_size=page_size,
+                filters=filters,
+            )
+            if not resp.items:
+                break
+            for item in resp.items:
+                yield item
+            if len(resp.items) < page_size:
+                break
+            current_page += 1
+
     async def get(self, run_id: int) -> WorkflowRun:
+
         response_data = await self.client.get(f"{self.base_url}/{run_id}")
 
         if "artifacts" not in response_data or not response_data["artifacts"]:

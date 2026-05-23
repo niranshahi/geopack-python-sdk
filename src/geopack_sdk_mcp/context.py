@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+import os
+import threading
+from typing import TYPE_CHECKING, Any, Optional, Set
+
 
 from geopack_sdk import GeopackClient
 
@@ -13,9 +16,24 @@ if TYPE_CHECKING:
     from mcp.server.session import ServerSession
 
 _lifespan_client: Optional[GeopackClient] = None
+_temp_files: Set[str] = set()
+_temp_files_lock = threading.Lock()
+
+
+def register_temp_file(path: str) -> None:
+    """Register a local file to be cleaned up on server exit."""
+    with _temp_files_lock:
+        _temp_files.add(os.path.abspath(path))
+
+
+def get_registered_temp_files() -> Set[str]:
+    """Get all registered temp files for cleanup."""
+    with _temp_files_lock:
+        return set(_temp_files)
 
 
 def set_lifespan_client(client: GeopackClient | None) -> None:
+
     """Set process-wide client (called from FastMCP lifespan)."""
     global _lifespan_client
     _lifespan_client = client

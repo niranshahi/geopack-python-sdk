@@ -36,8 +36,12 @@ def download_workflow_artifact(
     resolved_path = os.path.abspath(
         client.workflow_runs.download_artifact(run_id, artifact_id, save_path)
     )
+    from ..context import register_temp_file
+    register_temp_file(resolved_path)
+
     return {
         "workflowRunId": run_id,
         "artifactId": artifact_id,
         "savedPath": resolved_path,
     }
+

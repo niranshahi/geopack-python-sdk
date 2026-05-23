@@ -61,7 +61,35 @@ class AsyncDatasetManager:
         )
         return DatasetsApiResponse(**response_data)
 
+    async def iter_datasets(
+        self,
+        page_size: int = 50,
+        search_query: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_direction: Optional[str] = None,
+        active_filters: Optional[Dict[str, Any]] = None,
+    ):
+        """Iterate over all datasets matching filters by auto-fetching successive pages asynchronously."""
+        current_page = 1
+        while True:
+            resp = await self.list(
+                page=current_page,
+                page_size=page_size,
+                search_query=search_query,
+                order_by=order_by,
+                order_direction=order_direction,
+                active_filters=active_filters,
+            )
+            if not resp.datasets:
+                break
+            for dataset in resp.datasets:
+                yield dataset
+            if len(resp.datasets) < page_size:
+                break
+            current_page += 1
+
     async def get(self, dataset_id: int) -> Dataset:
+
         response_data = await self.client.get(f"/datasets/{dataset_id}")
         return Dataset(**response_data)
 
