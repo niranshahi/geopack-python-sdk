@@ -218,7 +218,7 @@ Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev 
 
 **Upload flow:** place file on MCP host → `upload_dataset(file_path, data_store_id, workgroup_id, declared_type?, metadata?)` → `wait_for_task` → read `createdDatasetId` from task `results` → optional workflow submit. For a custom title pass `metadata={"name": "My dataset"}`. Inline GeoJSON is not a tool arg — write to disk first. Restart MCP after upgrading so `metadata` appears in the tool schema.
 
-**Dataset thumbnails:** Tool JSON has `hasThumbnail`, `thumbnailApiPath`, `thumbnailResourceUri` (no BLOB). `test_mcp_stdio_client.py` verifies `read_resource` on `dataset://{id}/thumbnail`. **Cursor Agent chat** may not show images from resources alone — see [geopack_sdk_mcp_design.md §11.4](../docs/04_development/sdk/geopack_sdk_mcp_design.md). Geoportal UI and notebooks fetch via REST as usual.
+**Dataset thumbnails:** Tool JSON has `hasThumbnail`, `thumbnailApiPath`, `thumbnailMintPath`, `thumbnailResourceUri` (no BLOB, **no JWT in JSON**). MCP fetches bytes via Bearer on `GET /datasets/{id}/thumbnail` (`geopack_sdk.media_access`). For signed `<img>` URLs use `mint_dataset_thumbnail_url` — not `?auth_token=`. See [security.md §2.5](../docs/03_architecture/detailed_design/security.md).
 
 Design: [docs/04_development/sdk/geopack_sdk_mcp_design.md](../docs/04_development/sdk/geopack_sdk_mcp_design.md) (in the monorepo). Tool parameters use `tool_schema.py` `Field(description=...)` so MCP clients show per-arg help (not docstrings alone).
 

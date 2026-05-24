@@ -103,7 +103,11 @@ class Dataset(BaseModel):
     hasThumbnail: Optional[bool] = None
     thumbnailApiPath: Optional[str] = Field(
         default=None,
-        description="Relative API path, e.g. /datasets/42/thumbnail — append auth for browser/MCP host fetch",
+        description="Relative GET path for thumbnail bytes, e.g. /datasets/42/thumbnail (Bearer or signed URL)",
+    )
+    thumbnailMintPath: Optional[str] = Field(
+        default=None,
+        description="Relative mint path (Bearer only), e.g. /datasets/42/thumbnail/access-url",
     )
     thumbnailResourceUri: Optional[str] = Field(
         default=None,

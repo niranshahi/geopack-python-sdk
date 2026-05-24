@@ -24,6 +24,7 @@ class TestDatasetPayload(unittest.TestCase):
         self.assertNotIn("thumbnail", normalized)
         self.assertTrue(normalized["hasThumbnail"])
         self.assertEqual(normalized["thumbnailApiPath"], "/datasets/7/thumbnail")
+        self.assertEqual(normalized["thumbnailMintPath"], "/datasets/7/thumbnail/access-url")
         self.assertEqual(normalized["thumbnailResourceUri"], "dataset://7/thumbnail")
 
     def test_has_thumbnail_from_api_adds_path(self):

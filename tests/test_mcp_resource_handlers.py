@@ -26,6 +26,7 @@ class TestMcpResourceHandlers(unittest.TestCase):
         self.client.session.get.assert_called_once_with(
             "http://localhost:3000/api/datasets/2360/thumbnail",
             timeout=60,
+            stream=False,
         )
 
     def test_fetch_dataset_thumbnail_404(self):

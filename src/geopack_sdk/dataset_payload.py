@@ -6,8 +6,13 @@ from typing import Any, Dict, Optional
 
 
 def dataset_thumbnail_api_path(dataset_id: int) -> str:
-    """Relative REST path for GET thumbnail (no host, no auth token)."""
+    """Relative REST path for GET thumbnail bytes (Bearer or signed media+sig)."""
     return f"/datasets/{dataset_id}/thumbnail"
+
+
+def dataset_thumbnail_mint_path(dataset_id: int) -> str:
+    """Relative mint path (Bearer only): ``/datasets/{id}/thumbnail/access-url``."""
+    return f"/datasets/{dataset_id}/thumbnail/access-url"
 
 
 def dataset_thumbnail_resource_uri(dataset_id: int) -> str:
@@ -34,6 +39,7 @@ def normalize_dataset_dict(data: Dict[str, Any]) -> Dict[str, Any]:
     if out.get("hasThumbnail") and "id" in out:
         ds_id = int(out["id"])
         out.setdefault("thumbnailApiPath", dataset_thumbnail_api_path(ds_id))
+        out.setdefault("thumbnailMintPath", dataset_thumbnail_mint_path(ds_id))
         out.setdefault("thumbnailResourceUri", dataset_thumbnail_resource_uri(ds_id))
 
     return out
