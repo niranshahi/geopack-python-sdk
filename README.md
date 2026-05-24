@@ -154,6 +154,15 @@ pip install -e ".[mcp]"
 
 Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
 
+**Auth (recommended):** run once in a terminal (with `GEOPACK_API_URL` in `.env` or env):
+
+```bash
+geopack-sdk login
+geopack-sdk status
+```
+
+Tokens are saved to `~/.geopack/credentials.json` (mode `0600`). MCP reads them at startup — no password in IDE config.
+
 **Cursor** (`mcp.json` — use venv executable):
 
 ```json
@@ -171,7 +180,7 @@ Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
 }
 ```
 
-Or use `GEOPACK_ACCESS_TOKEN` (+ optional `GEOPACK_REFRESH_TOKEN`) instead of username/password.
+Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev only). See [MCP authentication options](../docs/04_development/sdk/mcp_auth_options.md).
 
 **Safety:** Dataset/generated-file **delete is not an MCP tool** (use Geoportal UI). Call `geopack_sdk_get_mcp_safety_policy` for server rules. Upload/workflow: host must get explicit user consent in chat before calling. See [MCP Safety Policy](../docs/04_development/sdk/mcp_safety_policy.md).
 

@@ -6,6 +6,7 @@ import os
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from .models import (
+    Dataset,
     WorkflowRun,
     WorkflowRunArtifact,
     WorkflowRunListResponse,
@@ -158,3 +159,28 @@ class AsyncWorkflowRunManager:
                 artifact_dict["display_name"] = f"Artifact {item.get('id')}"
             results.append(WorkflowRunArtifact(**artifact_dict))
         return results
+
+    async def convert_artifact_to_dataset(
+        self,
+        run_id: int,
+        artifact_id: int,
+        *,
+        name: str,
+        data_store_id: int,
+        description: Optional[str] = None,
+        add_to_map: bool = False,
+    ) -> Dataset:
+        """Convert a workflow run artifact into a portal dataset (async).
+
+        REST API: ``POST /api/workflow-runs/:runId/artifacts/:artifactId/convert-to-dataset``
+        """
+        payload: Dict[str, Any] = {
+            "name": name,
+            "dataStoreId": data_store_id,
+            "addToMap": add_to_map,
+        }
+        if description is not None:
+            payload["description"] = description
+        url = f"{self.base_url}/{run_id}/artifacts/{artifact_id}/convert-to-dataset"
+        response_data = await self.client.post(url, json=payload)
+        return Dataset(**response_data)

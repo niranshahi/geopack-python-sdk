@@ -2,6 +2,7 @@ import os
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from .models import (
+    Dataset,
     WorkflowRun,
     WorkflowRunArtifact,
     WorkflowRunListResponse,
@@ -320,3 +321,39 @@ class WorkflowRunManager:
                 f.write(chunk)
 
         return os.path.abspath(target_file)
+
+    def convert_artifact_to_dataset(
+        self,
+        run_id: int,
+        artifact_id: int,
+        *,
+        name: str,
+        data_store_id: int,
+        description: Optional[str] = None,
+        add_to_map: bool = False,
+    ) -> Dataset:
+        """Convert a workflow run artifact into a portal dataset.
+
+        REST API: ``POST /api/workflow-runs/:runId/artifacts/:artifactId/convert-to-dataset``
+
+        Args:
+            run_id: Workflow run id.
+            artifact_id: Artifact id from :meth:`get_artifacts`.
+            name: Dataset display name.
+            data_store_id: Target datastore id.
+            description: Optional dataset description.
+            add_to_map: When True, portal may add the dataset to the user's map.
+
+        Returns:
+            Created :class:`Dataset`.
+        """
+        payload: Dict[str, Any] = {
+            "name": name,
+            "dataStoreId": data_store_id,
+            "addToMap": add_to_map,
+        }
+        if description is not None:
+            payload["description"] = description
+        url = f"{self.base_url}/{run_id}/artifacts/{artifact_id}/convert-to-dataset"
+        response_data = self.client.post(url, json=payload)
+        return Dataset(**response_data)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geopack-sdk"
-version = "0.5.4"
+version = "0.5.5"
 authors = [
   { name="Geopack Team", email="info@geopack.com" },
 ]
@@ -50,6 +50,7 @@ all = [
 ]
 
 [project.scripts]
+geopack-sdk = "geopack_sdk.cli.main:main"
 geopack-sdk-mcp = "geopack_sdk_mcp.__main__:main"
 
 [project.urls]
