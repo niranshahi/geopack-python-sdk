@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from mcp.server.fastmcp import Context
 from mcp.server.session import ServerSession
 
 from ..auth_bootstrap import AppContext
+from ..bbox import normalize_bbox
 from ..context import get_client
 from ..errors import tool_error_payload
 from ..tool_handlers.dataset_upload import upload_dataset
@@ -63,6 +64,8 @@ def register(mcp: Any) -> None:
         end_date: IsoDate = None,
     ) -> Dict[str, Any]:
         try:
+            # Normalize bbox to handle both array and string formats from LLM
+            normalized_bbox = normalize_bbox(bbox)
             return list_datasets(
                 get_client(ctx),
                 page=page,
@@ -70,7 +73,7 @@ def register(mcp: Any) -> None:
                 search_query=search_query,
                 details_level=details_level,
                 data_type=data_type,
-                bbox=bbox,
+                bbox=normalized_bbox,
                 start_date=start_date,
                 end_date=end_date,
             )

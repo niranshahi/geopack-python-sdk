@@ -9,6 +9,7 @@ from geopack_sdk import GeopackClient
 from geopack_sdk.datasets import normalize_feature_query_dsl
 from geopack_sdk.dataset_payload import dataset_thumbnail_resource_uri
 
+from ..bbox import normalize_bbox
 from ..resource_handlers.datasets import fetch_dataset_thumbnail
 from ..sanitize.dataset_details import (
     DetailsLevel,
@@ -47,21 +48,12 @@ def list_datasets(
 ) -> Dict[str, Any]:
     level: DetailsLevel = normalize_details_level(details_level, default="lite")
     active_filters: Dict[str, Any] = {}
-    
-    parsed_bbox = None
-    if bbox is not None:
-        if isinstance(bbox, str):
-            import json
-            try:
-                parsed_bbox = json.loads(bbox)
-            except (json.JSONDecodeError, TypeError):
-                parsed_bbox = None
-        elif isinstance(bbox, list):
-            parsed_bbox = bbox
-    
+
+    parsed_bbox = normalize_bbox(bbox)
+
     if data_type:
         active_filters["dataType"] = data_type
-    if parsed_bbox and len(parsed_bbox) == 4:
+    if parsed_bbox is not None:
         active_filters["bbox"] = parsed_bbox
     if start_date:
         active_filters["startDate"] = start_date
