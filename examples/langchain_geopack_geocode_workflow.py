@@ -32,6 +32,18 @@ if load_dotenv:
     load_dotenv(SDK_ROOT / ".env")
     load_dotenv(SDK_ROOT / "notebooks" / ".env")
 
+
+sys.path.insert(0, str(SDK_ROOT / "notebooks" / "lib"))
+
+SIMPLE_SYSTEM_PROMPT = """You are a Geoportal assistant. Use the Geopack MCP tools to answer the user.
+
+IMPORTANT RULES:
+- ALWAYS use details_level=lite when calling list_datasets
+- ALWAYS limit to maximum 5 items unless explicitly asked for more
+- Use page_size=5 when listing datasets
+- Keep all responses extremely concise
+- Only include essential information in your answers"""
+
 GEOCODE_SYSTEM_PROMPT = """You are a Geoportal GIS assistant with Geopack MCP tools.
 
 CRITICAL INSTRUCTIONS:
@@ -78,6 +90,7 @@ def _chat_model():
         "temperature": 0,
     }
     base_url = os.getenv("OPENAI_BASE_URL")
+    print(kwargs["model"])
     if base_url:
         kwargs["base_url"] = base_url.rstrip("/")
     return ChatOpenAI(**kwargs)
@@ -107,19 +120,27 @@ async def main(user_prompt: str) -> None:
     agent = create_agent(
         llm,
         tools,
-        system_prompt=GEOCODE_SYSTEM_PROMPT,
+        system_prompt=SIMPLE_SYSTEM_PROMPT,#GEOCODE_SYSTEM_PROMPT,
     )
 
     print("\n--- User ---")
     print(user_prompt)
-    result = await agent.ainvoke({"messages": user_prompt})
+    agent_result = await agent.ainvoke({"messages": user_prompt})
 
-    for msg in reversed(result.get("messages", [])):
+    for msg in reversed(agent_result.get("messages", [])):
         if hasattr(msg, "content") and msg.content and not getattr(msg, "tool_calls", None):
             print("\n--- Assistant ---")
             print(msg.content)
             return
-    print(result)
+    print(agent_result)
+
+    # from notebook_langchain import last_assistant_text
+    # from display_datasets import print_tool_trace
+    
+    # messages = agent_result.get("messages", [])
+    # print_tool_trace(messages)
+    # print("\n--- Assistant ---\n")
+    # print(last_assistant_text(agent_result))
 
 
 if __name__ == "__main__":
@@ -131,6 +152,6 @@ if __name__ == "__main__":
     prompt = (
         sys.argv[1]
         if len(sys.argv) > 1
-        else "Find raster datasets in the Tehran area."
+        else "Find raster datasets in the tehran area."
     )
     asyncio.run(main(prompt))
