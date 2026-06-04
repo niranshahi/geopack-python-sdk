@@ -120,7 +120,8 @@ async def main(user_prompt: str) -> None:
     agent = create_agent(
         llm,
         tools,
-        system_prompt=SIMPLE_SYSTEM_PROMPT,#GEOCODE_SYSTEM_PROMPT,
+        #system_prompt=SIMPLE_SYSTEM_PROMPT,#GEOCODE_SYSTEM_PROMPT,
+        system_prompt=GEOCODE_SYSTEM_PROMPT,
     )
 
     print("\n--- User ---")
