@@ -113,7 +113,7 @@ def bootstrap_geopack_client() -> GeopackClient:
             fixes=[
                 "Remove GEOPACK_API_KEY and use `geopack-sdk login` instead.",
                 "Or use GEOPACK_ACCESS_TOKEN / username+password until API keys ship.",
-                "See docs/04_development/sdk/mcp_auth_api_keys.md.",
+                "See docs/09-sdk/mcp-design/mcp-auth.md.",
             ],
         )
 
