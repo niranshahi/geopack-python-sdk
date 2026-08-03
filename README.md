@@ -180,9 +180,9 @@ Tokens are saved to `~/.geopack/credentials.json` (mode `0600`). MCP reads them 
 }
 ```
 
-Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev only). See [MCP authentication options](../docs/04_development/sdk/mcp_auth_options.md).
+Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev only). See [MCP authentication options](../docs/09-sdk/mcp-design/mcp-auth.md).
 
-**Safety:** Dataset/generated-file **delete is not an MCP tool** (use Geoportal UI). Call `geopack_sdk_get_mcp_safety_policy` for server rules. Upload/workflow: host must get explicit user consent in chat before calling. See [MCP Safety Policy](../docs/04_development/sdk/mcp_safety_policy.md).
+**Safety:** Dataset/generated-file **delete is not an MCP tool** (use Geoportal UI). Call `geopack_sdk_get_mcp_safety_policy` for server rules. Upload/workflow: host must get explicit user consent in chat before calling. See [MCP Safety Policy](../docs/09-sdk/mcp-design/mcp-safety.md).
 
 **Tools (16, v0.5.4+):**
 
@@ -218,13 +218,13 @@ Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev 
 
 **Upload flow:** place file on MCP host → `upload_dataset(file_path, data_store_id, workgroup_id, declared_type?, metadata?)` → `wait_for_task` → read `createdDatasetId` from task `results` → optional workflow submit. For a custom title pass `metadata={"name": "My dataset"}`. Inline GeoJSON is not a tool arg — write to disk first. Restart MCP after upgrading so `metadata` appears in the tool schema.
 
-**Dataset thumbnails:** Tool JSON has `hasThumbnail`, `thumbnailApiPath`, `thumbnailMintPath`, `thumbnailResourceUri` (no BLOB, **no JWT in JSON**). MCP fetches bytes via Bearer on `GET /datasets/{id}/thumbnail` (`geopack_sdk.media_access`). For signed `<img>` URLs use `mint_dataset_thumbnail_url` — not `?auth_token=`. See [security.md §2.5](../docs/03_architecture/detailed_design/security.md).
+**Dataset thumbnails:** Tool JSON has `hasThumbnail`, `thumbnailApiPath`, `thumbnailMintPath`, `thumbnailResourceUri` (no BLOB, **no JWT in JSON**). MCP fetches bytes via Bearer on `GET /datasets/{id}/thumbnail` (`geopack_sdk.media_access`). For signed `<img>` URLs use `mint_dataset_thumbnail_url` — not `?auth_token=`. See [security.md §2.5](../old-docs/03_architecture/detailed_design/security.md).
 
-Design: [docs/04_development/sdk/geopack_sdk_mcp_design.md](../docs/04_development/sdk/geopack_sdk_mcp_design.md) (in the monorepo). Tool parameters use `tool_schema.py` `Field(description=...)` so MCP clients show per-arg help (not docstrings alone).
+Design: [docs/09-sdk/mcp-design/mcp-architecture.md](../docs/09-sdk/mcp-design/mcp-architecture.md) (in the monorepo). Tool parameters use `tool_schema.py` `Field(description=...)` so MCP clients show per-arg help (not docstrings alone).
 
-**Build a Python LLM agent (LangChain):** Start with [`examples/README.md`](examples/README.md) and [`examples/langchain_geopack_agent.py`](examples/langchain_geopack_agent.py) — discovers `geopack_sdk_*` tools from the MCP server via **langchain-mcp-adapters** (`pip install -e ".[langchain]"`). See [langchain_mcp_agents_design.md](../docs/04_development/sdk/langchain_mcp_agents_design.md).
+**Build a Python LLM agent (LangChain):** Start with [`examples/README.md`](examples/README.md) and [`examples/langchain_geopack_agent.py`](examples/langchain_geopack_agent.py) — discovers `geopack_sdk_*` tools from the MCP server via **langchain-mcp-adapters** (`pip install -e ".[langchain]"`). See [langchain-integration.md](../docs/09-sdk/mcp-design/langchain-integration.md).
 
-**Other LLM demos:** [08_LLM_MCP_Dataset_Discovery.ipynb](notebooks/08_LLM_MCP_Dataset_Discovery.ipynb) (OpenAI + MCP, no LangChain); [llm_geoportal_use_cases.md](../docs/04_development/sdk/llm_geoportal_use_cases.md).
+**Other LLM demos:** [08_LLM_MCP_Dataset_Discovery.ipynb](notebooks/08_LLM_MCP_Dataset_Discovery.ipynb) (OpenAI + MCP, no LangChain); [llm_geoportal_use_cases.md](../old-docs/04_development/sdk/llm_geoportal_use_cases.md).
 
 ### Async example
 

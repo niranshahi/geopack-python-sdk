@@ -73,5 +73,5 @@ Notebooks use **in-process** MCP (no `asyncio.run`). Terminal scripts use stdio 
 
 ## More docs
 
-- [LangChain + MCP agents design](../../docs/04_development/sdk/langchain_mcp_agents_design.md)
-- [Geopack SDK MCP design](../../docs/04_development/sdk/geopack_sdk_mcp_design.md)
+- [LangChain + MCP agents design](../../docs/09-sdk/mcp-design/langchain-integration.md)
+- [Geopack SDK MCP design](../../docs/09-sdk/mcp-design/mcp-architecture.md)

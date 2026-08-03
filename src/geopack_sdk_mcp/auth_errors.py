@@ -55,7 +55,7 @@ class GeopackMCPAuthError(Exception):
             lines.append("")
         lines.extend(
             [
-                "  Docs: docs/04_development/sdk/mcp_auth_options.md",
+                "  Docs: docs/09-sdk/mcp-design/mcp-auth.md",
                 "==============================================================",
                 "",
             ]
