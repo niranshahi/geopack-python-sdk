@@ -37,6 +37,11 @@ def register(mcp: Any) -> None:
                     "obtain explicit user consent in conversation. "
                     "Do not call if user declined."
                 ),
+                "geopack_sdk_run_analysis": (
+                    "Before calling: read the tool's manifest (list_analysis_tools with "
+                    "tool_id), describe the tool and every param value, and obtain explicit "
+                    "user consent in conversation. Do not call if user declined."
+                ),
             },
             "note": (
                 "Conversational consent is enforced by MCP tool design for mutating tools only. "

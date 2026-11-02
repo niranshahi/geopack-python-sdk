@@ -1,5 +1,8 @@
 from .client import GeopackClient
 from .exceptions import (
+    AnalysisParamError,
+    AnalysisSurfaceUnavailable,
+    AnalysisTimeout,
     GeopackAPIError,
     GeopackAuthError,
     GeopackError,
@@ -16,7 +19,7 @@ from .tasks import (
 )
 from .workflow_runs import inspect_workflow_run_outcome
 
-__version__ = "0.5.4"
+__version__ = "0.6.0"
 __all__ = [
     "AsyncGeopackClient",
     "GeopackClient",
@@ -26,6 +29,9 @@ __all__ = [
     "GeopackValidationError",
     "GeopackTimeoutError",
     "GeopackTaskError",
+    "AnalysisSurfaceUnavailable",
+    "AnalysisParamError",
+    "AnalysisTimeout",
     "TaskMessageInfo",
     "inspect_workflow_run_outcome",
     "task_log_entries_needing_review",

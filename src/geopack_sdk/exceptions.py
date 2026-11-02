@@ -134,3 +134,75 @@ class GeopackTaskError(GeopackError):
         self.status = status
         text = message or f"Task {task_id} {status}"
         super().__init__(text, details={"task_id": task_id, "status": status})
+
+
+# --- Analysis-tool surface (portal slices 030 / 031) -------------------------
+
+
+class AnalysisSurfaceUnavailable(GeopackAPIError):
+    """Raised when the portal does not serve the analysis-tool surface.
+
+    The catalog endpoint (``GET /api/workflows/tools``) answering 404 means the
+    portal predates the surface. There is deliberately **no** fallback to
+    ``list_workflows`` / ``get_workflow``: a silent downgrade would hand the
+    caller an untyped workflow and hide the deployment gap.
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "The portal does not serve the analysis-tool surface "
+            "(GET /api/workflows/tools returned 404). Deploy a portal with slice 030."
+        ),
+        *,
+        status_code: int = 404,
+        details: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(status_code, message, details)
+
+
+class AnalysisParamError(GeopackError):
+    """Raised when a workflow cannot describe itself as a tool.
+
+    Carries the server's ``TOOL_MANIFEST_INVALID`` reason and the offending node
+    id, so the caller can report *which* node broke the manifest instead of
+    guessing. The SDK never repairs a manifest client-side (030 §1).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        tool_id: Optional[int] = None,
+        node_id: Optional[str] = None,
+        reason: Optional[str] = None,
+    ):
+        self.tool_id = tool_id
+        self.node_id = node_id
+        self.reason = reason or message
+        details: Dict[str, Any] = {"reason": self.reason}
+        if tool_id is not None:
+            details["tool_id"] = tool_id
+        if node_id is not None:
+            details["node_id"] = node_id
+        super().__init__(message, details)
+
+
+class AnalysisTimeout(GeopackTimeoutError):
+    """Raised when ``wait`` polling exceeds ``timeout_s``.
+
+    The run keeps going on the server: ``run_id`` is attached so the caller can
+    resume with :meth:`get_analysis_result` instead of starting a second run.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        run_id: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ):
+        self.run_id = run_id
+        super().__init__(message, timeout=timeout)
+        if run_id is not None:
+            self.details["run_id"] = run_id

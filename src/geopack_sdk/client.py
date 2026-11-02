@@ -9,6 +9,7 @@ from .datastores import DataStoreManager
 from .datasets import DatasetManager
 from .tasks import TaskManager
 from .workflows import WorkflowManager
+from .analysis_tools import AnalysisToolManager
 from .workflow_runs import WorkflowRunManager
 from .generated_files import GeneratedFileManager
 from .quotas import QuotaManager
@@ -93,6 +94,7 @@ class GeopackClient:
         self.datasets = DatasetManager(self)
         self.tasks = TaskManager(self)
         self.workflows = WorkflowManager(self)
+        self.analysis_tools = AnalysisToolManager(self)
         self.workflow_runs = WorkflowRunManager(self)
         self.generated_files = GeneratedFileManager(self)
         self.quotas = QuotaManager(self)

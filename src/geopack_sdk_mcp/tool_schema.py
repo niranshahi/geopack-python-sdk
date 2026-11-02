@@ -150,6 +150,57 @@ OverrideDatastoreId = Annotated[
 WorkflowRunId = Annotated[int, Field(description="Workflow run id from submit_workflow or wait_for_task results.")]
 ArtifactId = Annotated[int, Field(description="Artifact id from geopack_sdk_get_workflow_run artifacts[].")]
 
+# --- Analysis tools (workflow-as-tool surface, portal slice 030) ---
+
+AnalysisToolId = Annotated[
+    int,
+    Field(description="Analysis tool id (toolId) from geopack_sdk_list_analysis_tools."),
+]
+AnalysisToolSelector = Annotated[
+    Optional[int],
+    Field(
+        description=(
+            "Optional single-tool selector. When set, the catalog call returns that ONE "
+            "tool's full parameter manifest instead of the list — read this before running."
+        ),
+        default=None,
+    ),
+]
+AnalysisParams = Annotated[
+    Dict[str, Any],
+    Field(
+        description=(
+            "Input values keyed by the manifest's params[].key. Read the manifest first "
+            "(list_analysis_tools with tool_id); never guess a key."
+        ),
+    ),
+]
+AnalysisTag = Annotated[
+    Optional[str],
+    Field(description="Exact tag filter for the analysis-tool catalog.", default=None),
+]
+AnalysisWaitFlag = Annotated[
+    bool,
+    Field(
+        description=(
+            "true (default): wait for the run to finish and return its result summary. "
+            "false: return workflowRunId/taskId immediately and poll with "
+            "get_analysis_result."
+        ),
+    ),
+]
+AnalysisTimeoutSeconds = Annotated[
+    int,
+    Field(
+        description=(
+            "Polling budget in seconds when wait=true (default 900). A timeout does NOT "
+            "cancel the run — it keeps going and its run id is returned in the error."
+        ),
+        ge=1,
+        le=86400,
+    ),
+]
+
 # --- Generated files ---
 
 GeneratedFileId = Annotated[

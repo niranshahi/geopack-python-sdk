@@ -116,12 +116,12 @@ client.auth.login(username="my_user", password="my_password")
 ```
 
 ## Features
-- Datasets, DataStores, Workflows, Tasks, **Generated Files**, **Quotas (self)**.
+- Datasets, DataStores, Workflows, **Analysis tools** (a workflow run as a typed tool), Tasks, **Generated Files**, **Quotas (self)**.
 - Dataset **delete**, **ACL**, structured **query** (`build_simple_query`), **discover**.
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks` (`partial_success` is terminal and returned like `completed`).
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (**16 tools** + 2 resource templates, v0.5.4+; workflow execution, upload; no dataset delete via MCP).
+- GeoPandas integration; **Geopack SDK MCP** server (**19 tools** + 2 resource templates, v0.6.0+; workflow execution incl. typed analysis tools, upload; no dataset delete via MCP).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
@@ -184,7 +184,7 @@ Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev 
 
 **Safety:** Dataset/generated-file **delete is not an MCP tool** (use Geoportal UI). Call `geopack_sdk_get_mcp_safety_policy` for server rules. Upload/workflow: host must get explicit user consent in chat before calling. See [MCP Safety Policy](../docs/09-sdk/mcp-design/mcp-safety.md).
 
-**Tools (16, v0.5.4+):**
+**Tools (19, v0.6.0+):**
 
 | Tool | Purpose |
 |------|---------|
@@ -204,6 +204,9 @@ Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev 
 | `geopack_sdk_submit_workflow` | Start run; returns `workflowRunId` + `taskId` |
 | `geopack_sdk_get_workflow_run` | Run status + artifacts |
 | `geopack_sdk_download_workflow_artifact` | Save workflow output on MCP host |
+| `geopack_sdk_list_analysis_tools` | The workflows this caller may run, as typed tools; `tool_id` for one manifest |
+| `geopack_sdk_run_analysis` | Run one by `tool_id` + `params`; waits by default. **Mutating** — consent first |
+| `geopack_sdk_get_analysis_result` | Result summary (scalars, datasets, artifacts) — never records |
 
 **Resource templates (not listed as tools in Cursor UI):**
 
@@ -215,6 +218,8 @@ Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev 
 **Export flow:** `export_dataset` → `wait_for_task` → `download_generated_file` (see MCP design doc §12).
 
 **Workflow flow:** `get_workflow(include_params=true)` → `submit_workflow` → `wait_for_task` → `get_workflow_run` → optional `download_workflow_artifact` (MCP design doc §14; notebook `11_LangChain_MCP_Workflow_Execution.ipynb`).
+
+**Analysis flow:** `list_analysis_tools` → `list_analysis_tools(tool_id=…)` for its parameter manifest → `run_analysis(tool_id, params)` → result summary (or `get_analysis_result(run_id)` after `wait=false` / a timeout). Unlike the workflow flow this needs no `wait_for_task`: the tool waits on the run, not the task. The catalog **is** the caller's run set — there is no publish step (ADR-0019).
 
 **Upload flow:** place file on MCP host → `upload_dataset(file_path, data_store_id, workgroup_id, declared_type?, metadata?)` → `wait_for_task` → read `createdDatasetId` from task `results` → optional workflow submit. For a custom title pass `metadata={"name": "My dataset"}`. Inline GeoJSON is not a tool arg — write to disk first. Restart MCP after upgrading so `metadata` appears in the tool schema.
 

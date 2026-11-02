@@ -828,6 +828,95 @@ class WorkflowRunListResponse(BaseModel):
 
 
 # ============================================================================
+# --- ANALYSIS TOOLS (workflow-as-tool surface, portal slice 030) ---
+# ============================================================================
+
+
+class AnalysisParam(BaseModel):
+    """One input a caller must supply to run an analysis tool.
+
+    Derived server-side from the workflow's param nodes on every read, so it
+    cannot go stale when the graph changes (030 §1).
+    """
+
+    key: str
+    label: Optional[str] = None
+    type: str
+    required: bool = False
+    nullable: bool = True
+    options: Optional[List[Any]] = None
+    allowCustom: bool = False
+    default: Any = None
+    description: str = ""
+    bindingMode: str = "param"
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AnalysisTool(BaseModel):
+    """A runnable workflow as the portal describes it.
+
+    Both response shapes parse here: the catalog returns CARDS (no ``params`` /
+    ``inputs``, which are per-parameter detail) and the single-tool selector
+    returns the full MANIFEST.
+    """
+
+    toolId: int
+    title: str
+    summary: str = ""
+    tags: List[str] = Field(default_factory=list)
+    version: str = "1"
+    # None (not []) on a catalog card: the server omits per-parameter detail there,
+    # and an empty list would read as "this tool takes no arguments".
+    params: Optional[List[AnalysisParam]] = None
+    inputs: Optional[List[Dict[str, Any]]] = None
+    outputs: List[Dict[str, Any]] = Field(default_factory=list)
+    graph: Optional[Dict[str, Any]] = None
+    runtime: Optional[Dict[str, Any]] = None
+    access: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AnalysisToolListResponse(BaseModel):
+    """Response from GET /api/workflows/tools — the caller's run set."""
+
+    items: List[AnalysisTool] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    pageSize: int = 20
+    warnings: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class AnalysisResult(BaseModel):
+    """Response from GET /api/workflow-runs/:id/result-summary.
+
+    Metadata only — scalars, dataset NAMES and artifact metadata. Records,
+    geometry and filesystem paths never cross this boundary (030 §5).
+    """
+
+    runId: int
+    workflowId: int
+    toolId: Optional[int] = None
+    title: Optional[str] = None
+    status: str
+    complete: bool = False
+    startedAt: Optional[datetime] = None
+    finishedAt: Optional[datetime] = None
+    durationMs: Optional[int] = None
+    source: str = "ui"
+    params: Dict[str, Any] = Field(default_factory=dict)
+    scalars: Dict[str, Any] = Field(default_factory=dict)
+    datasets: List[Dict[str, Any]] = Field(default_factory=list)
+    artifacts: List[Dict[str, Any]] = Field(default_factory=list)
+    errors: List[Dict[str, Any]] = Field(default_factory=list)
+    portFallbacks: int = 0
+    warnings: List[Dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+# ============================================================================
 # --- GENERATED FILES ---
 # ============================================================================
 

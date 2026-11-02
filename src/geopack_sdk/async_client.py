@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from .async_auth import AsyncAuthManager
+from .async_analysis_tools import AsyncAnalysisToolManager
 from .async_datastores import AsyncDataStoreManager
 from .async_datasets import AsyncDatasetManager
 from .async_generated_files import AsyncGeneratedFileManager
@@ -88,6 +89,7 @@ class AsyncGeopackClient:
         self.datasets = AsyncDatasetManager(self)
         self.tasks = AsyncTaskManager(self)
         self.workflows = AsyncWorkflowManager(self)
+        self.analysis_tools = AsyncAnalysisToolManager(self)
         self.workflow_runs = AsyncWorkflowRunManager(self)
         self.generated_files = AsyncGeneratedFileManager(self)
         self.quotas = AsyncQuotaManager(self)
