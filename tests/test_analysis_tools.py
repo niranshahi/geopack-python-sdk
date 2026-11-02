@@ -11,7 +11,12 @@ from geopack_sdk.exceptions import (
     AnalysisTimeout,
     GeopackAPIError,
 )
-from geopack_sdk.models import AnalysisResult, WorkflowRunSubmitResponse
+from geopack_sdk.models import (
+    AnalysisResult,
+    AnalysisTool,
+    AnalysisToolListResponse,
+    WorkflowRunSubmitResponse,
+)
 from geopack_sdk_mcp.sanitize.analysis_result import (
     find_forbidden_keys,
     sanitize_analysis_result,
@@ -209,9 +214,10 @@ class TestAnalysisHandlers(unittest.TestCase):
         self.client = MagicMock()
 
     def test_selector_returns_the_manifest_not_the_catalog(self):
-        self.client.analysis_tools.get.return_value = MagicMock(
-            **{"model_dump.return_value": MANIFEST}
-        )
+        # A REAL model, not a mock: the handler serializes through `to_jsonable`,
+        # which dumps pydantic models (a duck-typed `model_dump` would not be
+        # what production ever receives).
+        self.client.analysis_tools.get.return_value = AnalysisTool(**MANIFEST)
 
         result = list_analysis_tools(self.client, tool_id=5)
 
@@ -220,16 +226,16 @@ class TestAnalysisHandlers(unittest.TestCase):
         self.assertEqual(result["params"][0]["key"], "distance")
 
     def test_catalog_cards_omit_absent_parameter_detail(self):
-        card = MagicMock()
-        card.model_dump.return_value = {
-            "toolId": 5,
-            "title": "Well buffer",
-            "params": None,
-            "inputs": None,
-            "outputs": [],
-        }
-        self.client.analysis_tools.list.return_value = MagicMock(
-            **{"model_dump.return_value": {"items": [card], "total": 1}}
+        card = AnalysisTool(
+            toolId=5,
+            title="Well buffer",
+            params=None,
+            inputs=None,
+            outputs=[],
+        )
+        self.client.analysis_tools.list.return_value = AnalysisToolListResponse(
+            items=[card],
+            total=1,
         )
 
         payload = list_analysis_tools(self.client)
@@ -240,9 +246,7 @@ class TestAnalysisHandlers(unittest.TestCase):
         self.assertIn("outputs", payload["items"][0])
 
     def test_run_analysis_sanitizes_the_result(self):
-        self.client.analysis_tools.run.return_value = MagicMock(
-            **{"model_dump.return_value": dict(SUMMARY)}
-        )
+        self.client.analysis_tools.run.return_value = AnalysisResult(**SUMMARY)
 
         payload = run_analysis(self.client, 5, {"distance": 100})
 
@@ -250,9 +254,7 @@ class TestAnalysisHandlers(unittest.TestCase):
         self.assertEqual(find_forbidden_keys(payload), [])
 
     def test_get_analysis_result_reads_the_summary(self):
-        self.client.analysis_tools.result.return_value = MagicMock(
-            **{"model_dump.return_value": dict(SUMMARY)}
-        )
+        self.client.analysis_tools.result.return_value = AnalysisResult(**SUMMARY)
 
         payload = get_analysis_result(self.client, 7)
 
