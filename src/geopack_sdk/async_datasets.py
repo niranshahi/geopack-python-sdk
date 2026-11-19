@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .datasets import (
+    _build_aggregate_payload,
+    _build_paged_dsl,
     build_simple_query,
     encode_query_params,
     normalize_feature_query_dsl,
 )
-from .models import Dataset, DatasetsApiResponse, FeatureCollection
+from .models import (
+    AggregateResult,
+    Dataset,
+    DatasetsApiResponse,
+    FeatureCollection,
+    MintedUrl,
+    PagedFeatureCollection,
+)
 
 if TYPE_CHECKING:
     from .async_client import AsyncGeopackClient
@@ -121,3 +130,134 @@ class AsyncDatasetManager:
 
     async def delete(self, dataset_id: int) -> None:
         await self.client.delete(f"/datasets/{dataset_id}")
+
+    # --- Query lanes (slice 010) --------------------------------------------
+
+    async def query_paged(
+        self,
+        dataset_id: int,
+        query: Optional[Dict[str, Any]] = None,
+        *,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        order_by: Optional[List[Dict[str, Any]]] = None,
+        include_total_count: bool = True,
+    ) -> PagedFeatureCollection:
+        """Async twin of :meth:`geopack_sdk.datasets.DatasetManager.query_paged`."""
+        dsl = _build_paged_dsl(
+            query,
+            page=page,
+            page_size=page_size,
+            order_by=order_by,
+            include_total_count=include_total_count,
+        )
+        response_data = await self.client.post(
+            f"/datasets/{dataset_id}/query/paged",
+            json=dsl,
+        )
+        return PagedFeatureCollection(**(response_data or {}))
+
+    async def iterate_pages(
+        self,
+        dataset_id: int,
+        query: Optional[Dict[str, Any]] = None,
+        *,
+        page_size: int = 1000,
+        include_total_count: bool = True,
+    ):
+        """Async twin of :meth:`DatasetManager.iterate_pages`."""
+        page = 1
+        while True:
+            result = await self.query_paged(
+                dataset_id,
+                query,
+                page=page,
+                page_size=page_size,
+                include_total_count=include_total_count,
+            )
+            yield result
+            if not result.features or not result.pagination.has_next_page:
+                break
+            page += 1
+
+    async def aggregate(
+        self,
+        dataset_id: int,
+        *,
+        aggregation: Dict[str, Any],
+        filter: Optional[Dict[str, Any]] = None,
+        spatial_filter: Optional[Dict[str, Any]] = None,
+    ) -> AggregateResult:
+        """Async twin of :meth:`DatasetManager.aggregate`."""
+        payload = _build_aggregate_payload(aggregation, filter, spatial_filter)
+        response_data = await self.client.post(
+            f"/datasets/{dataset_id}/query/aggregate",
+            json=payload,
+        )
+        return AggregateResult(**(response_data or {}))
+
+    async def count(
+        self,
+        dataset_id: int,
+        *,
+        filter: Optional[Dict[str, Any]] = None,
+        spatial_filter: Optional[Dict[str, Any]] = None,
+        field: Optional[str] = None,
+        distinct: bool = False,
+    ) -> int:
+        """Async twin of :meth:`DatasetManager.count`."""
+        entry: Dict[str, Any] = {
+            "aggregate": "countDistinct" if distinct else "count",
+            "alias": "value",
+        }
+        if field:
+            entry["field"] = field
+
+        result = await self.aggregate(
+            dataset_id,
+            aggregation={"aggregates": [entry], "limit": 1},
+            filter=filter,
+            spatial_filter=spatial_filter,
+        )
+
+        if not result.rows:
+            return 0
+        row = result.rows[0]
+        value = row.get("value")
+        if value is None and len(row) == 1:
+            value = next(iter(row.values()))
+        return int(value or 0)
+
+    async def mint_query_access_url(
+        self, dataset_id: int, query_dsl: Dict[str, Any]
+    ) -> MintedUrl:
+        """Async twin of :meth:`DatasetManager.mint_query_access_url`."""
+        if not isinstance(query_dsl, dict):
+            raise ValueError("query_dsl must be a dict — the DSL the URL is bound to")
+        response_data = await self.client.post(
+            f"/datasets/{dataset_id}/query/mint-access-url",
+            json={"queryDsl": query_dsl},
+        )
+        return MintedUrl(**(response_data or {}))
+
+    async def mint_mvt_access_url(
+        self,
+        dataset_id: int,
+        query_dsl: Optional[Dict[str, Any]] = None,
+    ) -> MintedUrl:
+        """Async twin of :meth:`DatasetManager.mint_mvt_access_url`."""
+        payload: Dict[str, Any] = {}
+        if query_dsl is not None:
+            if not isinstance(query_dsl, dict):
+                raise ValueError("query_dsl must be a dict when provided")
+            payload["queryDsl"] = query_dsl
+        response_data = await self.client.post(
+            f"/datasets/{dataset_id}/mvt/mint-access-url",
+            json=payload,
+        )
+        return MintedUrl(**(response_data or {}))
+
+    async def get_tiles_access_url(self, dataset_id: int) -> MintedUrl:
+        """Async twin of :meth:`DatasetManager.get_tiles_access_url`."""
+        response_data = await self.client.get(f"/datasets/{dataset_id}/tiles/access-url")
+        return MintedUrl(**(response_data or {}))

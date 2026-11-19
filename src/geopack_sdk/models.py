@@ -267,6 +267,97 @@ class FeatureCollection(BaseModel):
 
 
 # ============================================================================
+# --- QUERY LANE MODELS (slice 010) ---
+# ============================================================================
+#
+# The envelopes below are ``extra="allow"`` on purpose: a server field addition
+# must never break an installed client.
+
+
+class PagePagination(BaseModel):
+    """Page envelope returned by ``POST /datasets/{id}/query/paged``."""
+
+    page: int = 1
+    page_size: Optional[int] = Field(default=None, alias="pageSize")
+    total_count: Optional[int] = Field(default=None, alias="totalCount")
+    total_pages: Optional[int] = Field(default=None, alias="totalPages")
+    has_next_page: bool = Field(default=False, alias="hasNextPage")
+    has_previous_page: bool = Field(default=False, alias="hasPreviousPage")
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    @property
+    def is_count_degraded(self) -> bool:
+        """True when the server skipped the COUNT (``totalCount`` is null).
+
+        This is a documented 200 answer (100k rows or a 15 s count timeout),
+        never a failure: callers must not treat it as an error.
+        """
+        return self.total_count is None
+
+
+class PagedFeatureCollection(BaseModel):
+    """One page of features plus the scope metadata a caller uses as proof."""
+
+    features: List[Dict[str, Any]] = Field(default_factory=list)
+    pagination: PagePagination = Field(default_factory=PagePagination)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    crs: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(extra="allow")
+
+    @property
+    def feature_count(self) -> int:
+        return len(self.features)
+
+
+class AggregateColumn(BaseModel):
+    """Column descriptor from ``POST /datasets/{id}/query/aggregate``."""
+
+    type: Optional[str] = None
+    field: Optional[str] = None
+    key: Optional[str] = None
+    source_alias: Optional[str] = Field(default=None, alias="sourceAlias")
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+
+class AggregateResult(BaseModel):
+    """Buckets only: the aggregate lane never returns rows or geometry."""
+
+    dataset_id: Optional[int] = Field(default=None, alias="datasetId")
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+    columns: List[AggregateColumn] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+
+class MintedUrl(BaseModel):
+    """A capability URL — it grants read access until ``expires_at``.
+
+    Treat it like a credential: do not log it and do not reuse it against a
+    different dataset.
+    """
+
+    url: str
+    expires_at: Optional[str] = Field(default=None, alias="expiresAt")
+    media_query: Optional[str] = Field(default=None, alias="mediaQuery")
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    @property
+    def expires_at_datetime(self) -> Optional[datetime]:
+        """``expires_at`` as an aware datetime (``None`` when absent/invalid)."""
+        if not self.expires_at:
+            return None
+        try:
+            return datetime.fromisoformat(self.expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+
+# ============================================================================
 # --- TASK MODELS ---
 # ============================================================================
 

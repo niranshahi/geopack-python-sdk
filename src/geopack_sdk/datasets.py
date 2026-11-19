@@ -2,6 +2,7 @@ import os
 import json
 from typing import Any, Dict, List, Optional, Union
 from .models import (
+    AggregateResult,
     Dataset,
     DatasetAcl,
     DatasetsApiResponse,
@@ -13,8 +14,99 @@ from .models import (
     DatasetStatsByStore,
     DatasetStatsByGeomType,
     DatasetDiscoverResponse,
+    MintedUrl,
+    PagedFeatureCollection,
     TaskResult,
 )
+
+
+def _positive_int(value: Any, name: str) -> int:
+    """Coerce a pagination argument to an int >= 1 (``ValueError`` otherwise)."""
+    number = int(value)
+    if number < 1:
+        raise ValueError(f"{name} must be >= 1 (got {value!r})")
+    return number
+
+
+def _build_paged_dsl(
+    query: Optional[Dict[str, Any]] = None,
+    *,
+    page: Optional[int] = None,
+    page_size: Optional[int] = None,
+    order_by: Optional[List[Dict[str, Any]]] = None,
+    include_total_count: bool = True,
+) -> Dict[str, Any]:
+    """Compose the ``query/paged`` body from a caller DSL (shared by both lanes).
+
+    The caller's dict is honoured verbatim: ``filter`` / ``spatialFilter`` keep
+    an explicit ``null``. Explicit arguments win over values already in the DSL.
+    """
+    dsl: Dict[str, Any] = dict(query or {})
+
+    pagination = dict(dsl.get("pagination") or {})
+    if page is not None:
+        pagination["page"] = _positive_int(page, "page")
+    if page_size is not None:
+        pagination["pageSize"] = _positive_int(page_size, "page_size")
+    pagination.setdefault("page", 1)
+    pagination.setdefault("pageSize", 100)
+    dsl["pagination"] = pagination
+
+    if order_by is not None:
+        dsl["orderBy"] = order_by
+
+    options = dict(dsl.get("options") or {})
+    options["includeTotalCount"] = bool(include_total_count)
+    dsl["options"] = options
+    return dsl
+
+
+def _validate_aggregation(aggregation: Dict[str, Any]) -> None:
+    """Mirror the validator's structural limits before spending a round trip.
+
+    The aggregate *kinds* are deliberately not checked: the validator owns that
+    enum and the SDK must never narrow it.
+    """
+    if not isinstance(aggregation, dict) or not aggregation:
+        raise ValueError(
+            "aggregation must be a non-empty dict "
+            "({groupBy?, aggregates?, orderBy?, limit?})"
+        )
+
+    group_by = aggregation.get("groupBy")
+    if group_by is not None:
+        if not isinstance(group_by, list) or len(group_by) > 3:
+            raise ValueError("aggregation.groupBy must be a list of at most 3 fields")
+
+    order_by = aggregation.get("orderBy")
+    if order_by is not None:
+        if not isinstance(order_by, list) or len(order_by) > 3:
+            raise ValueError(
+                "aggregation.orderBy must be a list of at most 3 {key, direction} entries"
+            )
+
+    aggregates = aggregation.get("aggregates")
+    if aggregates is not None and not isinstance(aggregates, list):
+        raise ValueError("aggregation.aggregates must be a list")
+
+    limit = aggregation.get("limit")
+    if limit is not None and not 1 <= int(limit) <= 50:
+        raise ValueError("aggregation.limit must be between 1 and 50")
+
+
+def _build_aggregate_payload(
+    aggregation: Dict[str, Any],
+    filter: Optional[Dict[str, Any]],
+    spatial_filter: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Compose the ``query/aggregate`` body (explicit nulls, verbatim DSL)."""
+    _validate_aggregation(aggregation)
+    return {
+        "filter": filter,
+        "spatialFilter": spatial_filter,
+        "aggregation": dict(aggregation),
+    }
+
 
 def build_simple_query(
     *,
@@ -659,6 +751,217 @@ class DatasetManager:
             json=query,
         )
         return FeatureCollection(**response_data)
+
+    # --- Query lanes (slice 010) --------------------------------------------
+
+    def query_paged(
+        self,
+        dataset_id: int,
+        query: Optional[Dict[str, Any]] = None,
+        *,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        order_by: Optional[List[Dict[str, Any]]] = None,
+        include_total_count: bool = True,
+    ) -> PagedFeatureCollection:
+        """Run the server-paged query lane (COUNT + page envelope).
+
+        REST API: `POST /api/datasets/{datasetId}/query/paged`
+
+        Args:
+            dataset_id: Target dataset ID.
+            query: FeatureQuery DSL. The dict is honoured verbatim: ``filter``
+                and ``spatialFilter`` keep an explicit ``null`` (the DSL's own
+                "no scope"), they are never dropped.
+            page: 1-based page number. Defaults to the DSL's value, else 1.
+            page_size: Rows per page. Defaults to the DSL's value, else 100.
+            order_by: `orderBy` entries, e.g. ``[{"field": "area",
+                "direction": "DESC"}]``.
+            include_total_count: ``False`` skips the COUNT (``total_count`` is
+                then ``None``). Default True.
+
+        Notes:
+            The server clamps page/pageSize and may *degrade* the count to
+            ``null`` (100k rows or a 15 s timeout). That is a normal 200 answer:
+            check :attr:`PagePagination.is_count_degraded`, never an exception.
+            ``result.metadata`` carries ``baseFilterApplied`` / ``rlsApplied`` /
+            ``queryMode`` — it is how a caller proves the scope was applied.
+
+        Raises:
+            PagedUnsupported: the datastore cannot page this query (400
+                ``PAGED_UNSUPPORTED``); fall back to :meth:`query`.
+        """
+        dsl = _build_paged_dsl(
+            query,
+            page=page,
+            page_size=page_size,
+            order_by=order_by,
+            include_total_count=include_total_count,
+        )
+
+        response_data = self.client.post(
+            f"/datasets/{dataset_id}/query/paged",
+            json=dsl,
+        )
+        return PagedFeatureCollection(**(response_data or {}))
+
+    def iterate_pages(
+        self,
+        dataset_id: int,
+        query: Optional[Dict[str, Any]] = None,
+        *,
+        page_size: int = 1000,
+        include_total_count: bool = True,
+    ):
+        """Yield :class:`PagedFeatureCollection` objects until the last page.
+
+        Stops on ``has_next_page == false`` or on an empty page (the guard that
+        keeps a server that ignores ``pagination.page`` from looping forever).
+        """
+        page = 1
+        while True:
+            result = self.query_paged(
+                dataset_id,
+                query,
+                page=page,
+                page_size=page_size,
+                include_total_count=include_total_count,
+            )
+            yield result
+            if not result.features or not result.pagination.has_next_page:
+                break
+            page += 1
+
+    def aggregate(
+        self,
+        dataset_id: int,
+        *,
+        aggregation: Dict[str, Any],
+        filter: Optional[Dict[str, Any]] = None,
+        spatial_filter: Optional[Dict[str, Any]] = None,
+    ) -> AggregateResult:
+        """Group and aggregate over the same access-scoped base as ``query_paged``.
+
+        REST API: `POST /api/datasets/{datasetId}/query/aggregate`
+
+        Args:
+            dataset_id: Target dataset ID.
+            aggregation: ``{groupBy?, aggregates?, orderBy?, limit?}``.
+                ``aggregates[]`` entries are ``{field?, aggregate, alias?, p?}``
+                where ``p`` (0..1) is percentile-only. ``groupBy`` holds at most
+                3 ``{field}`` entries, ``orderBy`` at most 3
+                ``{key, direction, by?}`` entries and ``limit`` is 1..50.
+            filter: Optional attribute scope; sent as an explicit ``null`` when
+                omitted, like the portal's own DSL.
+            spatial_filter: Optional spatial scope, same null semantics.
+
+        Returns:
+            Buckets only — this lane never returns feature rows or geometry.
+
+        Raises:
+            ValueError: a structural limit is violated (no round trip spent).
+            AggregationUnsupported: the datastore cannot aggregate (400).
+            AggregationInvalidArgs: the server rejected a named key (400); the
+                offending key is on ``error.key``.
+        """
+        payload = _build_aggregate_payload(aggregation, filter, spatial_filter)
+        response_data = self.client.post(
+            f"/datasets/{dataset_id}/query/aggregate",
+            json=payload,
+        )
+        return AggregateResult(**(response_data or {}))
+
+    def count(
+        self,
+        dataset_id: int,
+        *,
+        filter: Optional[Dict[str, Any]] = None,
+        spatial_filter: Optional[Dict[str, Any]] = None,
+        field: Optional[str] = None,
+        distinct: bool = False,
+    ) -> int:
+        """Count features (or distinct values of ``field``) in one round trip.
+
+        Sugar over :meth:`aggregate`: no ``groupBy``, ``limit`` 1. Counting rows
+        client-side by paging the whole result set is exactly what this avoids.
+        """
+        entry: Dict[str, Any] = {
+            "aggregate": "countDistinct" if distinct else "count",
+            "alias": "value",
+        }
+        if field:
+            entry["field"] = field
+
+        result = self.aggregate(
+            dataset_id,
+            aggregation={"aggregates": [entry], "limit": 1},
+            filter=filter,
+            spatial_filter=spatial_filter,
+        )
+
+        if not result.rows:
+            return 0
+        row = result.rows[0]
+        value = row.get("value")
+        if value is None and len(row) == 1:
+            value = next(iter(row.values()))
+        return int(value or 0)
+
+    # --- Minted capability URLs (slice 010) ---------------------------------
+
+    def mint_query_access_url(
+        self, dataset_id: int, query_dsl: Dict[str, Any]
+    ) -> MintedUrl:
+        """Mint a signed URL for the query-features lane.
+
+        REST API: `POST /api/datasets/{datasetId}/query/mint-access-url`
+        (bearer-only, no cookie session).
+
+        The answer is a **capability URL**: anyone holding it can read the bound
+        query on this dataset until ``expires_at``. Do not log it and do not
+        replay it against another dataset.
+        """
+        if not isinstance(query_dsl, dict):
+            raise ValueError("query_dsl must be a dict — the DSL the URL is bound to")
+        response_data = self.client.post(
+            f"/datasets/{dataset_id}/query/mint-access-url",
+            json={"queryDsl": query_dsl},
+        )
+        return MintedUrl(**(response_data or {}))
+
+    def mint_mvt_access_url(
+        self,
+        dataset_id: int,
+        query_dsl: Optional[Dict[str, Any]] = None,
+    ) -> MintedUrl:
+        """Mint a signed URL for the MVT tile lane (bearer-only).
+
+        REST API: `POST /api/datasets/{datasetId}/mvt/mint-access-url`
+
+        ``query_dsl`` is optional here (the whole dataset is the default scope).
+        The answer is a capability URL — see :meth:`mint_query_access_url`.
+        """
+        payload: Dict[str, Any] = {}
+        if query_dsl is not None:
+            if not isinstance(query_dsl, dict):
+                raise ValueError("query_dsl must be a dict when provided")
+            payload["queryDsl"] = query_dsl
+        response_data = self.client.post(
+            f"/datasets/{dataset_id}/mvt/mint-access-url",
+            json=payload,
+        )
+        return MintedUrl(**(response_data or {}))
+
+    def get_tiles_access_url(self, dataset_id: int) -> MintedUrl:
+        """Mint the dataset tiles access URL (bearer-only).
+
+        REST API: `GET /api/datasets/{id}/tiles/access-url`
+
+        Video and raster datasets answer with the media variant of the same
+        envelope. The URL is a capability — see :meth:`mint_query_access_url`.
+        """
+        response_data = self.client.get(f"/datasets/{dataset_id}/tiles/access-url")
+        return MintedUrl(**(response_data or {}))
 
     def discover(
         self,
