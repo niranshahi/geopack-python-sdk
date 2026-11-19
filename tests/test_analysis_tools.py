@@ -179,16 +179,17 @@ class TestAnalysisToolManager(unittest.TestCase):
         self.client.post.assert_called_once()
         self.assertEqual(self.client.get.call_count, 3)
 
-    def test_run_stamps_the_mcp_attribution_header(self):
+    def test_run_leaves_attribution_to_the_client(self):
         self.client.post.return_value = SUBMISSION
 
         submission = self.manager.run(5, {"distance": 100}, wait=False)
 
         self.assertIsInstance(submission, WorkflowRunSubmitResponse)
         self.assertEqual(submission.workflowRunId, 7)
-        # 030 §2 attributes the lane from this header; without it a run is 'ui'.
-        headers = self.client.post.call_args.kwargs["headers"]
-        self.assertEqual(headers["X-Geoportal-Client"], "mcp")
+        # 030 §2 attributes the lane from X-Geoportal-Client, which the MCP
+        # bootstrap sets as a CLIENT default (slice 016 §1.1). The manager must
+        # not hard-code it: one source of truth for both sync and async lanes.
+        self.assertNotIn("headers", self.client.post.call_args.kwargs)
         self.assertEqual(
             self.client.post.call_args.kwargs["json"],
             {"workflowId": 5, "params": {"distance": 100}},

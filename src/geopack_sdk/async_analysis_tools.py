@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 # The refusal translation and polling constants live beside the sync manager on
 # purpose: both lanes must raise the SAME exceptions for the same server answer.
 from .analysis_tools import (
-    _CLIENT_HEADERS,
     _POLL_BACKOFF,
     _POLL_FLOOR_S,
     _POLL_MAX_S,
@@ -84,9 +83,9 @@ class AsyncAnalysisToolManager:
         if override_datastore_id is not None:
             payload["overrideDataStoreId"] = override_datastore_id
 
-        response = await self.client.post(
-            self.runs_url, json=payload, headers=dict(_CLIENT_HEADERS)
-        )
+        # Attribution (030 §2) comes from the client-level default header set by
+        # the MCP bootstrap — one source of truth (slice 016 §1.1).
+        response = await self.client.post(self.runs_url, json=payload)
         submission = WorkflowRunSubmitResponse(**(response or {}))
         if not wait:
             return submission

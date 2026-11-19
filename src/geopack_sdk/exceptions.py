@@ -12,6 +12,42 @@ if TYPE_CHECKING:
     import httpx
 
 
+def _error_code_from_details(details: Optional[Dict[str, Any]]) -> TypingOptional[str]:
+    """Extract the machine-readable ``code`` from a server error body.
+
+    Lookup order (slice 016 §1.2): ``body.code`` -> ``body.error.code`` ->
+    ``body.errors[0].code``. Message text is never inspected: messages are
+    user-facing and change without notice.
+    """
+    if not isinstance(details, dict):
+        return None
+    code = details.get("code")
+    if isinstance(code, str) and code:
+        return code
+    nested = details.get("error")
+    if isinstance(nested, dict):
+        code = nested.get("code")
+        if isinstance(code, str) and code:
+            return code
+    errors = details.get("errors")
+    if isinstance(errors, list) and errors and isinstance(errors[0], dict):
+        code = errors[0].get("code")
+        if isinstance(code, str) and code:
+            return code
+    return None
+
+
+def _lookup_detail(details: Optional[Dict[str, Any]], name: str) -> Any:
+    """Read ``name`` from an error body, accepting the camelCase twin."""
+    if not isinstance(details, dict):
+        return None
+    if name in details:
+        return details[name]
+    parts = name.split("_")
+    camel = parts[0] + "".join(part.capitalize() for part in parts[1:])
+    return details.get(camel)
+
+
 class GeopackError(Exception):
     """Base exception for all Geopack SDK errors."""
 
@@ -37,6 +73,7 @@ class GeopackAPIError(GeopackError):
     ):
         self.status_code = status_code
         self.response = response
+        self.code = _error_code_from_details(details)
         super().__init__(message, details)
 
     @classmethod
@@ -79,8 +116,17 @@ class GeopackAPIError(GeopackError):
             if stripped:
                 message = stripped[:500]
 
-        exc_type = GeopackAuthError if status_code in (401, 403) else cls
-        return exc_type(status_code, message, details, response=response)
+        if status_code in (401, 403):
+            return GeopackAuthError(status_code, message, details, response=response)
+
+        typed = _typed_error_class(status_code, details)
+        if typed is None:
+            return cls(status_code, message, details, response=response)
+
+        extras = {
+            name: _lookup_detail(details, name) for name in getattr(typed, "_extras", ())
+        }
+        return typed(status_code, message, details, response=response, **extras)
 
     @classmethod
     def from_response(cls, response: requests.Response) -> GeopackAPIError:
@@ -107,6 +153,152 @@ class GeopackAPIError(GeopackError):
 
 class GeopackAuthError(GeopackAPIError):
     """Raised on authentication or authorization failures (401, 403)."""
+
+
+# --- Coded 4xx errors (slice 016 §1.2) ---------------------------------------
+#
+# The server answers request-shape problems with a stable ``code``. Callers must
+# branch on the class (and its named fields) instead of parsing message text.
+
+
+class _CodedAPIError(GeopackAPIError):
+    """Base for coded 4xx errors whose extras are lifted out of the body."""
+
+    _extras: tuple = ()
+
+    def __init__(
+        self,
+        status_code: int = 400,
+        message: TypingOptional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        *,
+        response: TypingOptional[Any] = None,
+        **extras: Any,
+    ):
+        details = dict(details or {})
+        for name in self._extras:
+            value = extras.get(name, _lookup_detail(details, name))
+            setattr(self, name, value)
+            if value is not None:
+                details.setdefault(name, value)
+        super().__init__(
+            status_code, message or f"HTTP {status_code}", details, response=response
+        )
+
+
+class PagedUnsupported(_CodedAPIError):
+    """``PAGED_UNSUPPORTED`` — the store cannot page this query."""
+
+    _extras = ("data_store_type",)
+
+
+class AggregationUnsupported(_CodedAPIError):
+    """``AGGREGATION_UNSUPPORTED`` — the store cannot aggregate this lane."""
+
+    _extras = ("data_store_type",)
+
+
+class AggregationInvalidArgs(_CodedAPIError):
+    """``AGGREGATION_INVALID_ARGS`` — ``key`` names the offending argument."""
+
+    _extras = ("key",)
+
+
+class QueryValidationError(_CodedAPIError):
+    """``QUERY_PAGED_*`` — request-shape problem other than supportability.
+
+    Deliberately an :class:`GeopackAPIError` (not ``GeopackValidationError``,
+    which stays pydantic-only) so ``except GeopackAPIError`` keeps working.
+    """
+
+
+class FieldPolicyError(_CodedAPIError):
+    """``FIELD_POLICY_INVALID`` / ``FIELD_POLICY_PROTECTED_FIELD``."""
+
+
+class QuotaExceeded(_CodedAPIError):
+    """``QUOTA_EXCEEDED`` — carries the dimension, its limit and current usage."""
+
+    _extras = ("dimension", "limit", "used")
+
+
+class DatasetReadOnly(_CodedAPIError):
+    """HTTP 423 — the dataset is archived or locked against edits."""
+
+    def __init__(
+        self,
+        status_code: int = 423,
+        message: TypingOptional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        *,
+        response: TypingOptional[Any] = None,
+        **extras: Any,
+    ):
+        super().__init__(status_code, message, details, response=response, **extras)
+
+
+class EditConflict(_CodedAPIError):
+    """409 on the edits lane — ``conflicts`` lists the losing operations."""
+
+    _extras = ("conflicts",)
+
+
+class PublicationStateConflict(_CodedAPIError):
+    """409 on publication transitions — ``state`` is the current state."""
+
+    _extras = ("state",)
+
+
+class RelationshipCatalogUnavailable(_CodedAPIError):
+    """409 on the relationship catalog — it is busy or not built yet."""
+
+
+class EditDocumentVersionError(GeopackError):
+    """Client-side: the caller's edit document declares an unknown version.
+
+    Raised before any network call, so the caller learns the supported shape
+    instead of collecting a server 400.
+    """
+
+    def __init__(self, message: str, *, version: TypingOptional[str] = None):
+        self.version = version
+        details: Dict[str, Any] = {}
+        if version is not None:
+            details["version"] = version
+        super().__init__(message, details)
+
+
+def _typed_error_class(
+    status_code: int, details: Optional[Dict[str, Any]]
+) -> TypingOptional[type]:
+    """Map ``(status, code)`` to a typed class; ``None`` keeps the legacy class."""
+    if status_code == 423:
+        return DatasetReadOnly
+
+    code = (_error_code_from_details(details) or "").upper()
+
+    if status_code == 409:
+        if code.startswith(("EDIT", "EDITS")):
+            return EditConflict
+        if code.startswith("PUBLICATION"):
+            return PublicationStateConflict
+        if code.startswith("RELATIONSHIP"):
+            return RelationshipCatalogUnavailable
+        return None
+
+    if code == "PAGED_UNSUPPORTED":
+        return PagedUnsupported
+    if code == "AGGREGATION_UNSUPPORTED":
+        return AggregationUnsupported
+    if code == "AGGREGATION_INVALID_ARGS":
+        return AggregationInvalidArgs
+    if code.startswith("QUERY_PAGED"):
+        return QueryValidationError
+    if code in ("FIELD_POLICY_INVALID", "FIELD_POLICY_PROTECTED_FIELD"):
+        return FieldPolicyError
+    if code == "QUOTA_EXCEEDED":
+        return QuotaExceeded
+    return None
 
 
 class GeopackValidationError(GeopackError):

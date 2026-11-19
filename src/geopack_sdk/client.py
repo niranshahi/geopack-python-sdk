@@ -65,6 +65,7 @@ class GeopackClient:
         self,
         base_url: str = None,
         *,
+        default_headers: dict = None,
         enable_http_retries: bool = True,
         retry_total: int = _DEFAULT_RETRY_TOTAL,
         retry_backoff_factor: float = _DEFAULT_RETRY_BACKOFF_FACTOR,
@@ -78,6 +79,10 @@ class GeopackClient:
                 "Geopack API base URL must be provided either as a parameter 'base_url' "
                 "or via the 'GEOPACK_API_URL' environment variable (example: http://localhost:3000/api)."
             )
+
+        #: Headers added to every request; per-call ``headers`` win over these.
+        #: ``Authorization`` is managed by the client and is never overridable.
+        self.default_headers = dict(default_headers or {})
 
         self.session = requests.Session()
         if enable_http_retries:
@@ -112,6 +117,26 @@ class GeopackClient:
             self.session.headers["Authorization"] = f"Bearer {token}"
         else:
             self.session.headers.pop("Authorization", None)
+
+        # Merge order (slice 016 §1.1): managed Authorization -> default_headers
+        # -> per-call headers. A per-call value wins; Authorization never does.
+        call_headers = kwargs.pop("headers", None)
+        if self.default_headers:
+            merged = dict(self.default_headers)
+            if call_headers:
+                merged.update(call_headers)
+            merged.pop("Authorization", None)
+            kwargs["headers"] = merged
+        elif call_headers and any(
+            key.lower() == "authorization" for key in call_headers
+        ):
+            kwargs["headers"] = {
+                key: value
+                for key, value in call_headers.items()
+                if key.lower() != "authorization"
+            }
+        elif call_headers is not None:
+            kwargs["headers"] = call_headers
 
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         if "timeout" not in kwargs:

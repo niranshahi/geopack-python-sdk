@@ -39,10 +39,6 @@ _POLL_MAX_S = 5.0
 _POLL_BACKOFF = 1.5
 _POLL_FLOOR_S = 0.05
 
-#: Attribution 030 §2 reads (``deriveRunSource`` → ``RUN_SOURCES``), so a run
-#: started from MCP is distinguishable from a portal click.
-_CLIENT_HEADERS = {"X-Geoportal-Client": "mcp"}
-
 
 def _surface_unavailable(exc: GeopackAPIError, url: str) -> AnalysisSurfaceUnavailable:
     """Translate the catalog's 404 into the typed 'deploy 030' error."""
@@ -170,9 +166,9 @@ class AnalysisToolManager:
         if override_datastore_id is not None:
             payload["overrideDataStoreId"] = override_datastore_id
 
-        response = self.client.post(
-            self.runs_url, json=payload, headers=dict(_CLIENT_HEADERS)
-        )
+        # Attribution (030 §2) comes from the client-level default header set by
+        # the MCP bootstrap — one source of truth (slice 016 §1.1).
+        response = self.client.post(self.runs_url, json=payload)
         submission = WorkflowRunSubmitResponse(**(response or {}))
         if not wait:
             return submission

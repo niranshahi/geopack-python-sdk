@@ -133,15 +133,16 @@ class TestAsyncAnalysisToolManager(unittest.IsolatedAsyncioTestCase):
         self.client.post.assert_awaited_once()
         self.assertEqual(self.client.get.await_count, 3)
 
-    async def test_run_stamps_the_mcp_attribution_header(self):
+    async def test_run_leaves_attribution_to_the_client(self):
         self.client.post.return_value = SUBMISSION
 
         submission = await self.manager.run(5, {"distance": 100}, wait=False)
 
         self.assertIsInstance(submission, WorkflowRunSubmitResponse)
         self.assertEqual(submission.workflowRunId, 7)
-        headers = self.client.post.call_args.kwargs["headers"]
-        self.assertEqual(headers["X-Geoportal-Client"], "mcp")
+        # Attribution is a CLIENT default set by the MCP bootstrap (slice 016
+        # §1.1); the manager must not hard-code a second copy.
+        self.assertNotIn("headers", self.client.post.call_args.kwargs)
         self.assertEqual(
             self.client.post.call_args.kwargs["json"],
             {"workflowId": 5, "params": {"distance": 100}},
@@ -203,12 +204,18 @@ class TestAsyncSyncParity(unittest.IsolatedAsyncioTestCase):
         # let the two lanes drift apart on backoff without anyone noticing.
         from geopack_sdk import async_analysis_tools as async_module
 
-        for name in ("_POLL_BACKOFF", "_POLL_MAX_S", "_POLL_FLOOR_S", "_CLIENT_HEADERS"):
+        for name in ("_POLL_BACKOFF", "_POLL_MAX_S", "_POLL_FLOOR_S"):
             self.assertEqual(
                 getattr(async_module, name),
                 getattr(sync_module, name),
                 name,
             )
+
+        # Attribution moved to the client (slice 016 §1.1): neither lane may
+        # carry a private copy of the MCP header dict, or sync and async calls
+        # could be attributed differently.
+        for module in (sync_module, async_module):
+            self.assertFalse(hasattr(module, "_CLIENT_HEADERS"))
 
 
 if __name__ == "__main__":

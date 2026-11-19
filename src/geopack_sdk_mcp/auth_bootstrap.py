@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 
 _precached_client: Optional[GeopackClient] = None
 
+#: Every call this process makes is attributed to the MCP lane (030 §2 reads
+#: ``X-Geoportal-Client`` to derive the run source). Set once, here: the client
+#: is the single source of truth for attribution (slice 016 §1.1).
+MCP_CLIENT_HEADERS = {"X-Geoportal-Client": "mcp"}
+
 
 def _auth_checks(api_url: str) -> List[AuthCheck]:
     cred_path = credentials_file_path()
@@ -93,7 +98,7 @@ def bootstrap_geopack_client() -> GeopackClient:
         return _precached_client
 
     load_geopack_env()
-    client = GeopackClient()
+    client = GeopackClient(default_headers=dict(MCP_CLIENT_HEADERS))
     api_url = os.getenv("GEOPACK_API_URL") or client.base_url
 
     access_token = os.getenv("GEOPACK_ACCESS_TOKEN")
