@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Annotated, Any
 
 from mcp.server.fastmcp import Context
 from mcp.server.session import ServerSession
+from mcp.types import CallToolResult
 
+from ..annotations import local_write_tool, mutating_tool, read_tool
 from ..auth_bootstrap import AppContext
 from ..bbox import normalize_bbox
 from ..context import get_client
-from ..errors import tool_error_payload
+from ..errors import tool_error_result, tool_result
+from ..output_schema import AggregateEnvelope, DatasetSchemaEnvelope
 from ..tool_handlers.dataset_upload import upload_dataset
 from ..tool_handlers.datasets import (
     aggregate_dataset,
@@ -63,6 +66,7 @@ from ..tool_schema import (
 
 def register(mcp: Any) -> None:
     @mcp.tool(
+        annotations=read_tool("geopack_sdk_list_datasets"),
         description=(
             "List datasets (paginated). Use geocode_place then pass bbox for location searches. "
             "details_level lite | standard | full."
@@ -78,25 +82,28 @@ def register(mcp: Any) -> None:
         bbox: BboxWgs84 = None,
         start_date: IsoDate = None,
         end_date: IsoDate = None,
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         try:
             # Normalize bbox to handle both array and string formats from LLM
             normalized_bbox = normalize_bbox(bbox)
-            return list_datasets(
-                get_client(ctx),
-                page=page,
-                page_size=page_size,
-                search_query=search_query,
-                details_level=details_level,
-                data_type=data_type,
-                bbox=normalized_bbox,
-                start_date=start_date,
-                end_date=end_date,
+            return tool_result(
+                list_datasets(
+                    get_client(ctx),
+                    page=page,
+                    page_size=page_size,
+                    search_query=search_query,
+                    details_level=details_level,
+                    data_type=data_type,
+                    bbox=normalized_bbox,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
     @mcp.tool(
+        annotations=read_tool("geopack_sdk_get_dataset"),
         description=(
             "Get one dataset by id. details_level full (default) | standard | lite. "
             "For field names, types, domains and valid relationship names use "
@@ -107,17 +114,20 @@ def register(mcp: Any) -> None:
         ctx: Context[ServerSession, AppContext],
         dataset_id: DatasetId,
         details_level: DetailsLevel = "full",
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         try:
-            return get_dataset(
-                get_client(ctx),
-                dataset_id,
-                details_level=details_level,
+            return tool_result(
+                get_dataset(
+                    get_client(ctx),
+                    dataset_id,
+                    details_level=details_level,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
     @mcp.tool(
+        annotations=read_tool("geopack_sdk_get_dataset_schema"),
         description=(
             "Return the dataset's FIELD CONTRACT: field names, types, computed flags, optional "
             "coded-value domains, effective field access and the valid relationship names. "
@@ -129,18 +139,21 @@ def register(mcp: Any) -> None:
         dataset_id: DatasetId,
         include_domains: IncludeDomainValues = False,
         include_relationships: IncludeRelationships = True,
-    ) -> Dict[str, Any]:
+    ) -> Annotated[CallToolResult, DatasetSchemaEnvelope]:
         try:
-            return get_dataset_schema(
-                get_client(ctx),
-                dataset_id,
-                include_domains=include_domains,
-                include_relationships=include_relationships,
+            return tool_result(
+                get_dataset_schema(
+                    get_client(ctx),
+                    dataset_id,
+                    include_domains=include_domains,
+                    include_relationships=include_relationships,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
     @mcp.tool(
+        annotations=read_tool("geopack_sdk_aggregate_dataset"),
         description=(
             "Answer counts, sums, averages, min/max, distributions and top-N in ONE call over "
             "the same access-scoped rows as query_dataset. aggregates[].aggregate is one of: "
@@ -158,22 +171,25 @@ def register(mcp: Any) -> None:
         limit: AggregateLimit = 20,
         filter: FeatureFilter = None,
         spatial_filter: SpatialFilter = None,
-    ) -> Dict[str, Any]:
+    ) -> Annotated[CallToolResult, AggregateEnvelope]:
         try:
-            return aggregate_dataset(
-                get_client(ctx),
-                dataset_id,
-                aggregates=aggregates,
-                group_by=group_by,
-                order_by=order_by,
-                limit=limit,
-                filter=filter,
-                spatial_filter=spatial_filter,
+            return tool_result(
+                aggregate_dataset(
+                    get_client(ctx),
+                    dataset_id,
+                    aggregates=aggregates,
+                    group_by=group_by,
+                    order_by=order_by,
+                    limit=limit,
+                    filter=filter,
+                    spatial_filter=spatial_filter,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
     @mcp.tool(
+        annotations=read_tool("geopack_sdk_get_dataset_relationships"),
         description=(
             "List the relationship names valid for this dataset (name, target dataset, "
             "cardinality, read-only). Call it before geopack_sdk_get_related_records; never "
@@ -183,13 +199,14 @@ def register(mcp: Any) -> None:
     def geopack_sdk_get_dataset_relationships(
         ctx: Context[ServerSession, AppContext],
         dataset_id: DatasetId,
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         try:
-            return get_dataset_relationships(get_client(ctx), dataset_id)
+            return tool_result(get_dataset_relationships(get_client(ctx), dataset_id))
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
     @mcp.tool(
+        annotations=read_tool("geopack_sdk_get_related_records"),
         description=(
             "Records related to the given source OIDs through ONE relationship hop. Get "
             "relationship_name from geopack_sdk_get_dataset_relationships and the OID values "
@@ -206,22 +223,25 @@ def register(mcp: Any) -> None:
         limit: RelatedLimit = 50,
         offset: QueryOffset = 0,
         return_geometry: ReturnGeometry = False,
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         try:
-            return get_related_records(
-                get_client(ctx),
-                dataset_id,
-                relationship_name,
-                origin_object_ids,
-                direction=direction,
-                limit=limit,
-                offset=offset,
-                return_geometry=return_geometry,
+            return tool_result(
+                get_related_records(
+                    get_client(ctx),
+                    dataset_id,
+                    relationship_name,
+                    origin_object_ids,
+                    direction=direction,
+                    limit=limit,
+                    offset=offset,
+                    return_geometry=return_geometry,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
     @mcp.tool(
+        annotations=read_tool("geopack_sdk_query_dataset"),
         description=(
             "Query vector dataset features (max 500 in JSON). "
             "Pass FeatureQuery in query or use limit/offset. "
@@ -237,21 +257,24 @@ def register(mcp: Any) -> None:
         offset: QueryOffset = 0,
         return_geometry: ReturnGeometry = True,
         out_srid: OutSrid = None,
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         try:
-            return query_dataset(
-                get_client(ctx),
-                dataset_id,
-                query,
-                limit=limit,
-                offset=offset,
-                return_geometry=return_geometry,
-                out_srid=out_srid,
+            return tool_result(
+                query_dataset(
+                    get_client(ctx),
+                    dataset_id,
+                    query,
+                    limit=limit,
+                    offset=offset,
+                    return_geometry=return_geometry,
+                    out_srid=out_srid,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
     @mcp.tool(
+        annotations=local_write_tool("geopack_sdk_get_dataset_thumbnail"),
         description=(
             "Save dataset preview PNG on the MCP host. "
             "Default: downloads/dataset_{id}_thumbnail.png under process cwd."
@@ -261,17 +284,20 @@ def register(mcp: Any) -> None:
         ctx: Context[ServerSession, AppContext],
         dataset_id: DatasetId,
         save_path: SavePath = None,
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         try:
-            return get_dataset_thumbnail(
-                get_client(ctx),
-                dataset_id,
-                save_path=save_path,
+            return tool_result(
+                get_dataset_thumbnail(
+                    get_client(ctx),
+                    dataset_id,
+                    save_path=save_path,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
     @mcp.tool(
+        annotations=mutating_tool("geopack_sdk_upload_dataset"),
         description=(
             "Upload a local geospatial file; returns taskId (non-blocking). "
             "Chain: geopack_sdk_wait_for_task → createdDatasetId in results. "
@@ -287,20 +313,23 @@ def register(mcp: Any) -> None:
         workgroup_id: WorkgroupId,
         declared_type: DeclaredType = None,
         metadata: UploadMetadata = None,
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         try:
-            return upload_dataset(
-                get_client(ctx),
-                file_path=file_path,
-                data_store_id=data_store_id,
-                workgroup_id=workgroup_id,
-                declared_type=declared_type,
-                metadata=metadata,
+            return tool_result(
+                upload_dataset(
+                    get_client(ctx),
+                    file_path=file_path,
+                    data_store_id=data_store_id,
+                    workgroup_id=workgroup_id,
+                    declared_type=declared_type,
+                    metadata=metadata,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
     @mcp.tool(
+        annotations=read_tool("geopack_sdk_export_dataset"),
         description=(
             "Start async dataset export; returns taskId. "
             "Chain: wait_for_task → download_generated_file."
@@ -312,14 +341,16 @@ def register(mcp: Any) -> None:
         format: ExportFormat,
         workgroup_id: WorkgroupIdOptional = None,
         sharing_policy: SharingPolicy = "private",
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         try:
-            return export_dataset(
-                get_client(ctx),
-                dataset_id,
-                format,
-                workgroup_id=workgroup_id,
-                sharing_policy=sharing_policy,
+            return tool_result(
+                export_dataset(
+                    get_client(ctx),
+                    dataset_id,
+                    format,
+                    workgroup_id=workgroup_id,
+                    sharing_policy=sharing_policy,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)

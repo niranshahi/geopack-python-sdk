@@ -143,7 +143,7 @@ client.auth.login(username="my_user", password="my_password")
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks` (`partial_success` is terminal and returned like `completed`).
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (**19 tools** + 2 resource templates, v0.6.0+; workflow execution incl. typed analysis tools, upload; no dataset delete via MCP).
+- GeoPandas integration; **Geopack SDK MCP** server (**28 tools** + 2 resource templates, v0.7.0+; read lanes for schema/aggregate/relationships, workflow execution incl. typed analysis tools, the edit ladder, upload; no delete via MCP).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
@@ -206,29 +206,44 @@ Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev 
 
 **Safety:** Dataset/generated-file **delete is not an MCP tool** (use Geoportal UI). Call `geopack_sdk_get_mcp_safety_policy` for server rules. Upload/workflow: host must get explicit user consent in chat before calling. See [MCP Safety Policy](../docs/09-sdk/mcp-design/mcp-safety.md).
 
-**Tools (19, v0.6.0+):**
+**Tools (28, v0.7.0+):**
 
 | Tool | Purpose |
 |------|---------|
-| `geopack_sdk_get_mcp_safety_policy` | Server rules: what MCP cannot do (e.g. no dataset delete) |
+| `geopack_sdk_get_mcp_safety_policy` | Server rules: mutating tools, local writes, refused operations, upload caps |
 | `geopack_sdk_geocode_place` | Place name → WGS84 bbox (Nominatim; use before spatial list) |
 | `geopack_sdk_list_datasets` | Paginated list; `bbox`, `data_type`, dates; `details_level` default `lite` |
 | `geopack_sdk_get_dataset` | One dataset; `details_level` default `full` |
+| `geopack_sdk_get_dataset_schema` | Field contract: names, types, domains, field access, relationship names |
 | `geopack_sdk_query_dataset` | Feature query (max 500 features in JSON) |
+| `geopack_sdk_aggregate_dataset` | Counts, sums, distributions, top-N in one call (the answer-first lane) |
+| `geopack_sdk_get_dataset_relationships` | The relationship names valid for this dataset |
+| `geopack_sdk_get_related_records` | One relationship hop from a set of OIDs |
 | `geopack_sdk_get_dataset_thumbnail` | Save preview PNG on MCP host (`save_path` optional) |
 | `geopack_sdk_get_task` | Task status (sanitized) |
+| `geopack_sdk_cancel_task` | Request cancellation of a running task (best effort) |
 | `geopack_sdk_wait_for_task` | Poll until export/job completes |
+| `geopack_sdk_get_quota_summary` | Caller's quota usage per dimension |
+| `geopack_sdk_list_generated_files` | Downloadable exports/workflow outputs with ids |
 | `geopack_sdk_upload_dataset` | Upload local file on MCP host → `dataset:upload`; use `metadata.name` for title |
 | `geopack_sdk_export_dataset` | Start `dataset:export` (returns `taskId`) |
 | `geopack_sdk_download_generated_file` | Save export to local `save_path` on MCP host |
 | `geopack_sdk_list_workflows` | List workflows (no `graphJson` in JSON) |
 | `geopack_sdk_get_workflow` | Workflow metadata; `include_params=true` adds `parameters[]` |
 | `geopack_sdk_submit_workflow` | Start run; returns `workflowRunId` + `taskId` |
+| `geopack_sdk_list_workflow_runs` | Runs you can see (id, status, submitter, timestamps) |
 | `geopack_sdk_get_workflow_run` | Run status + artifacts |
 | `geopack_sdk_download_workflow_artifact` | Save workflow output on MCP host |
 | `geopack_sdk_list_analysis_tools` | The workflows this caller may run, as typed tools; `tool_id` for one manifest |
 | `geopack_sdk_run_analysis` | Run one by `tool_id` + `params`; waits by default. **Mutating** — consent first |
 | `geopack_sdk_get_analysis_result` | Result summary (scalars, datasets, artifacts) — never records |
+| `geopack_sdk_submit_edit_document` | EditDoc ladder `validate` → `preview` → `apply`. **Mutating** — `apply` writes records |
+
+**Error contract (v0.7.0+):** a failed call answers `isError: true` with `structuredContent` = `{error, code, type, statusCode, message, hint, invalidArgs?}`. `code` is the server's coded error when it sends one, otherwise derived from the exception class (`DATASET_READ_ONLY`, `AGGREGATION_UNSUPPORTED`, `EDIT_CONFLICT`, `QUOTA_EXCEEDED`, …). `hint` names the next tool to call; `invalidArgs` lists the arguments a client-side validator refused before any network call. `get_dataset_relationships` still degrades to `catalogUnavailable: true` with `isError: false` (a state, not a failure); `get_mcp_safety_policy` never fails.
+
+**Annotations (v0.7.0+):** every tool declares `title`, `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`. `destructiveHint` is true only for `submit_edit_document`; `openWorldHint` only for `geocode_place` and `run_analysis`; `readOnlyHint` is false for the three file-saving tools and the mutating tools, while `idempotentHint` is false for them too and for `export_dataset` (a read that still mints a new artifact on every call).
+
+**Transport:** stdio only in 0.7.0 (`python -m geopack_sdk_mcp`, no transport flag). A future HTTP mode must solve per-request identity (the current bootstrap caches one process-wide client/token), OAuth/token pass-through, and multi-tenant temp-file isolation before it can be offered.
 
 **Resource templates (not listed as tools in Cursor UI):**
 

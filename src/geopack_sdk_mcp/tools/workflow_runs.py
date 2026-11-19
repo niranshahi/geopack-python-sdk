@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Annotated, Any
 
 from mcp.server.fastmcp import Context
 from mcp.server.session import ServerSession
+from mcp.types import CallToolResult
 
+from ..annotations import local_write_tool, mutating_tool, read_tool
 from ..auth_bootstrap import AppContext
 from ..context import get_client
-from ..errors import tool_error_payload
+from ..errors import tool_error_result, tool_result
+from ..output_schema import PageEnvelope
 from ..tool_handlers.submit_workflow import submit_workflow
 from ..tool_handlers.workflow_runs import (
     download_workflow_artifact,
@@ -32,6 +35,7 @@ from ..tool_schema import (
 
 def register(mcp: Any) -> None:
     @mcp.tool(
+        annotations=mutating_tool("geopack_sdk_submit_workflow"),
         description=(
             "Start workflow execution (non-blocking). Returns workflowRunId and taskId. "
             "Call get_workflow(include_params=true) first to learn param keys. "
@@ -44,19 +48,22 @@ def register(mcp: Any) -> None:
         workflow_id: WorkflowId,
         params: WorkflowParams,
         override_datastore_id: OverrideDatastoreId = None,
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         try:
-            return submit_workflow(
-                get_client(ctx),
-                workflow_id=workflow_id,
-                params=params,
-                override_datastore_id=override_datastore_id,
+            return tool_result(
+                submit_workflow(
+                    get_client(ctx),
+                    workflow_id=workflow_id,
+                    params=params,
+                    override_datastore_id=override_datastore_id,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
 
     @mcp.tool(
+        annotations=read_tool("geopack_sdk_list_workflow_runs"),
         description=(
             "List workflow runs you can see (id, workflowId, status, submitter, timestamps), "
             "optionally filtered by workflow_id or status. Use this to answer 'what did I start' "
@@ -69,31 +76,35 @@ def register(mcp: Any) -> None:
         status: RunStatusFilter = None,
         limit: PageSize = 20,
         offset: QueryOffset = 0,
-    ) -> Dict[str, Any]:
+    ) -> Annotated[CallToolResult, PageEnvelope]:
         try:
-            return list_workflow_runs(
-                get_client(ctx),
-                workflow_id=workflow_id,
-                status=status,
-                limit=limit,
-                offset=offset,
+            return tool_result(
+                list_workflow_runs(
+                    get_client(ctx),
+                    workflow_id=workflow_id,
+                    status=status,
+                    limit=limit,
+                    offset=offset,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
     @mcp.tool(
+        annotations=read_tool("geopack_sdk_get_workflow_run"),
         description="Get workflow run status, step nodes, and output artifacts by run id.",
     )
     def geopack_sdk_get_workflow_run(
         ctx: Context[ServerSession, AppContext],
         run_id: WorkflowRunId,
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         try:
-            return get_workflow_run(get_client(ctx), run_id)
+            return tool_result(get_workflow_run(get_client(ctx), run_id))
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)
 
     @mcp.tool(
+        annotations=local_write_tool("geopack_sdk_download_workflow_artifact"),
         description=(
             "Download a workflow output file to the MCP host. "
             "Returns savedPath. Get artifact_id from get_workflow_run."
@@ -104,13 +115,15 @@ def register(mcp: Any) -> None:
         run_id: WorkflowRunId,
         artifact_id: ArtifactId,
         save_path: SavePathRequired = "./",
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         try:
-            return download_workflow_artifact(
-                get_client(ctx),
-                run_id=run_id,
-                artifact_id=artifact_id,
-                save_path=save_path,
+            return tool_result(
+                download_workflow_artifact(
+                    get_client(ctx),
+                    run_id=run_id,
+                    artifact_id=artifact_id,
+                    save_path=save_path,
+                )
             )
         except Exception as exc:
-            return tool_error_payload(exc)
+            return tool_error_result(exc)

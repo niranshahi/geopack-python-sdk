@@ -101,10 +101,12 @@ class _FakeMCP:
 
     def __init__(self) -> None:
         self.tools: Dict[str, Any] = {}
+        self.annotations: Dict[str, Any] = {}
 
-    def tool(self, description: str = ""):
+    def tool(self, description: str = "", annotations: Any = None):
         def decorator(fn):
             self.tools[fn.__name__] = fn
+            self.annotations[fn.__name__] = annotations
             setattr(fn, "__mcp_description__", description)
             return fn
 

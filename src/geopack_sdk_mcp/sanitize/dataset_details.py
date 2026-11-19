@@ -6,6 +6,8 @@ import copy
 import json
 from typing import Any, Dict, List, Literal, Optional, Union
 
+from ..errors import ToolArgumentError
+
 DetailsLevel = Literal["lite", "standard", "full"]
 # Legacy aliases used internally before v0.5
 DetailsProfile = Literal["list", "get"]
@@ -41,8 +43,13 @@ def normalize_details_level(
         return "lite"
     if normalized == "get":
         return "full"
-    raise ValueError(
-        f"Invalid details_level {level!r}; use lite, standard, or full."
+    raise ToolArgumentError(
+        f"Invalid details_level {level!r}; use lite, standard, or full.",
+        key="details_level",
+        hint=(
+            "details_level is lite | standard | full (defaults: lite for lists, full for "
+            "a single dataset)."
+        ),
     )
 
 

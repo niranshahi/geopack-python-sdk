@@ -18,6 +18,7 @@ from geopack_sdk.exceptions import (
 )
 
 from ..bbox import normalize_bbox
+from ..errors import ToolArgumentError
 from ..resource_handlers.datasets import fetch_dataset_thumbnail
 from ..sanitize.dataset_details import (
     DetailsLevel,
@@ -279,22 +280,34 @@ def get_dataset_schema(
 
 
 def _normalize_aggregates(aggregates: Any) -> List[Dict[str, Any]]:
-    """Validate aggregate specs client-side, before spending a round trip."""
+    """Validate aggregate specs client-side, before spending a round trip.
+
+    Refusals raise :class:`ToolArgumentError` (slice 022 §1.2): the payload
+    names the offending argument and the accepted enumeration, so the model
+    fixes the call instead of collecting a server 400.
+    """
     specs = list(aggregates) if isinstance(aggregates, (list, tuple)) else []
     if not specs:
         specs = [{"aggregate": "count"}]
 
     normalized: List[Dict[str, Any]] = []
-    for spec in specs:
+    for index, spec in enumerate(specs):
         if not isinstance(spec, dict):
-            raise ValueError(
-                "Each aggregate must be an object like {aggregate: 'sum', field: 'area'}"
+            raise ToolArgumentError(
+                "Each aggregate must be an object like {aggregate: 'sum', field: 'area'}",
+                key=f"aggregates.{index}",
+                hint="Pass aggregates as a list of {aggregate, field, alias?} objects.",
             )
 
         kind = spec.get("aggregate")
         if kind not in AGGREGATE_KINDS:
-            raise ValueError(
-                f"Unknown aggregate {kind!r}; use one of: {', '.join(AGGREGATE_KINDS)}"
+            raise ToolArgumentError(
+                f"Unknown aggregate {kind!r}; use one of: {', '.join(AGGREGATE_KINDS)}",
+                key=f"aggregates.{index}.aggregate",
+                hint=(
+                    "aggregates[].aggregate must be one of: "
+                    f"{', '.join(AGGREGATE_KINDS)}."
+                ),
             )
 
         entry: Dict[str, Any] = {"aggregate": kind}
@@ -302,17 +315,32 @@ def _normalize_aggregates(aggregates: Any) -> List[Dict[str, Any]]:
         if field:
             entry["field"] = str(field)
         elif kind != "count":
-            raise ValueError(f"Aggregate {kind!r} needs a field name")
+            raise ToolArgumentError(
+                f"Aggregate {kind!r} needs a field name",
+                key=f"aggregates.{index}.field",
+                hint=(
+                    "Call geopack_sdk_get_dataset_schema and pass an exact field name; "
+                    "only count works without one."
+                ),
+            )
         if spec.get("alias"):
             entry["alias"] = str(spec["alias"])
 
         if kind == "percentile":
             p = spec.get("p")
             if p is None:
-                raise ValueError("percentile requires p between 0 and 1")
+                raise ToolArgumentError(
+                    "percentile requires p between 0 and 1",
+                    key=f"aggregates.{index}.p",
+                    hint="Set p (the percentile fraction, e.g. 0.9) on every percentile aggregate.",
+                )
             p_value = float(p)
             if not 0.0 <= p_value <= 1.0:
-                raise ValueError(f"percentile p must be between 0 and 1 (got {p!r})")
+                raise ToolArgumentError(
+                    f"percentile p must be between 0 and 1 (got {p!r})",
+                    key=f"aggregates.{index}.p",
+                    hint="p is a fraction of the distribution: 0.0..1.0 (p=0.5 is the median).",
+                )
             entry["p"] = p_value
 
         normalized.append(entry)
@@ -323,26 +351,40 @@ def _normalize_aggregates(aggregates: Any) -> List[Dict[str, Any]]:
 def _normalize_group_by(group_by: Any) -> List[Dict[str, Any]]:
     fields = [str(name).strip() for name in (group_by or []) if str(name).strip()]
     if len(fields) > MAX_GROUP_BY:
-        raise ValueError(f"group_by accepts at most {MAX_GROUP_BY} fields")
+        raise ToolArgumentError(
+            f"group_by accepts at most {MAX_GROUP_BY} fields",
+            key="group_by",
+            hint=f"Pass at most {MAX_GROUP_BY} field names in one call.",
+        )
     return [{"field": name} for name in fields]
 
 
 def _normalize_order_by(order_by: Any) -> List[Dict[str, Any]]:
     entries: List[Dict[str, Any]] = []
-    for item in order_by or []:
+    for index, item in enumerate(order_by or []):
         if not isinstance(item, dict) or not item.get("key"):
-            raise ValueError(
-                'Each order_by entry needs a "key" (a groupBy field or an aggregate alias)'
+            raise ToolArgumentError(
+                'Each order_by entry needs a "key" (a groupBy field or an aggregate alias)',
+                key=f"order_by.{index}.key",
+                hint="Use a group_by field name or an aggregate alias as the order key.",
             )
         direction = str(item.get("direction") or "asc").strip().lower()
         if direction not in ("asc", "desc"):
-            raise ValueError('order_by direction must be "asc" or "desc"')
+            raise ToolArgumentError(
+                'order_by direction must be "asc" or "desc"',
+                key=f"order_by.{index}.direction",
+                hint='Pass direction "asc" (default) or "desc".',
+            )
         entry: Dict[str, Any] = {"key": item["key"], "direction": direction}
         if item.get("by"):
             entry["by"] = item["by"]
         entries.append(entry)
     if len(entries) > MAX_ORDER_BY:
-        raise ValueError(f"order_by accepts at most {MAX_ORDER_BY} entries")
+        raise ToolArgumentError(
+            f"order_by accepts at most {MAX_ORDER_BY} entries",
+            key="order_by",
+            hint=f"Pass at most {MAX_ORDER_BY} order entries in one call.",
+        )
     return entries
 
 
@@ -365,8 +407,10 @@ def aggregate_dataset(
     """
     bucket_limit = int(limit)
     if not 1 <= bucket_limit <= AGGREGATE_MAX_LIMIT:
-        raise ValueError(
-            f"limit must be between 1 and {AGGREGATE_MAX_LIMIT} (got {limit!r})"
+        raise ToolArgumentError(
+            f"limit must be between 1 and {AGGREGATE_MAX_LIMIT} (got {limit!r})",
+            key="limit",
+            hint=f"limit is the number of buckets to return: 1..{AGGREGATE_MAX_LIMIT}.",
         )
 
     aggregation: Dict[str, Any] = {
@@ -474,21 +518,39 @@ def get_related_records(
     """
     name = str(relationship_name or "").strip()
     if not name:
-        raise ValueError(
-            "relationship_name is required; call geopack_sdk_get_dataset_relationships first"
+        raise ToolArgumentError(
+            "relationship_name is required; call geopack_sdk_get_dataset_relationships first",
+            key="relationship_name",
+            hint=(
+                "Call geopack_sdk_get_dataset_relationships and pass one of the names it "
+                "returns; never invent one."
+            ),
         )
 
     normalized_direction = str(direction or "forward").strip().lower()
     if normalized_direction not in ("forward", "backward"):
-        raise ValueError('direction must be "forward" or "backward"')
+        raise ToolArgumentError(
+            'direction must be "forward" or "backward"',
+            key="direction",
+            hint='Use "forward" (origin -> related) or "backward" (related -> origin).',
+        )
 
     oids = [int(value) for value in (origin_object_ids or [])]
     if not oids:
-        raise ValueError("origin_object_ids needs at least one source OID")
+        raise ToolArgumentError(
+            "origin_object_ids needs at least one source OID",
+            key="origin_object_ids",
+            hint=(
+                "Pass OID values from geopack_sdk_query_dataset; the OID field name is "
+                "oidField in geopack_sdk_get_dataset_schema."
+            ),
+        )
     if len(oids) > RELATED_MAX_ORIGIN_IDS:
-        raise ValueError(
+        raise ToolArgumentError(
             f"origin_object_ids accepts at most {RELATED_MAX_ORIGIN_IDS} ids per call; "
-            "split the request"
+            "split the request",
+            key="origin_object_ids",
+            hint=f"Split into batches of at most {RELATED_MAX_ORIGIN_IDS} ids; one call per batch.",
         )
 
     effective_limit = max(1, min(int(limit), RELATED_MAX_LIMIT))

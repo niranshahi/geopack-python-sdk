@@ -22,9 +22,12 @@ from typing import Any, Dict, Optional
 from geopack_sdk import GeopackClient
 from mcp.server.fastmcp import Context
 from mcp.server.session import ServerSession
+from mcp.types import CallToolResult
 
+from ..annotations import read_tool
 from ..auth_bootstrap import AppContext
 from ..context import get_client
+from ..errors import tool_result
 
 #: Tools that change portal state. ``dryRun`` is the mode that writes nothing
 #: (``False`` when there is none); ``consent`` is how loudly the description
@@ -152,6 +155,7 @@ def build_policy_payload(client: Optional[GeopackClient] = None) -> Dict[str, An
 
 def register(mcp: Any) -> None:
     @mcp.tool(
+        annotations=read_tool("geopack_sdk_get_mcp_safety_policy"),
         description=(
             "Returns the MCP safety policy: which tools mutate state (and what consent they "
             "need), which only write local files, which operations are deliberately unavailable, "
@@ -161,10 +165,10 @@ def register(mcp: Any) -> None:
     )
     def geopack_sdk_get_mcp_safety_policy(
         ctx: Context[ServerSession, AppContext],
-    ) -> Dict[str, Any]:
+    ) -> CallToolResult:
         """Policy is returned by the MCP server, not by agent instructions."""
         try:
             client: Optional[GeopackClient] = get_client(ctx)
         except Exception:  # noqa: BLE001 - policy must never fail
             client = None
-        return build_policy_payload(client)
+        return tool_result(build_policy_payload(client))
