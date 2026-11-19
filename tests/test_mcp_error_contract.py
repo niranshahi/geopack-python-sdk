@@ -20,6 +20,7 @@ from geopack_sdk.exceptions import (
     EditConflict,
     GeopackAPIError,
     GeopackAuthError,
+    GeopackError,
     GeopackTaskError,
     GeopackTimeoutError,
     PagedUnsupported,
@@ -147,6 +148,26 @@ class ApiErrorPayloadTest(unittest.TestCase):
         self.assertEqual(timeout["timeout"], 5)
         self.assertEqual(unknown["code"], "UNKNOWN_ERROR")
         self.assertEqual(unknown["type"], "ValueError")
+
+    def test_a_transport_failure_is_coded_and_sanitised(self):
+        # The SDK wraps requests errors in GeopackError("Network error calling …") whose
+        # message embeds host:port — the edge must replace it (no URL in the contract).
+        import requests
+
+        try:
+            try:
+                raise requests.ConnectionError(
+                    "HTTPConnectionPool(host='internal-host', port=3999): refused"
+                )
+            except requests.RequestException as cause:
+                raise GeopackError("Network error calling /datasets/1: refused") from cause
+        except GeopackError as exc:
+            payload = tool_error_payload(exc)
+
+        self.assertEqual(payload["code"], "TRANSPORT_ERROR")
+        self.assertIn("GEOPACK_API_URL", payload["hint"])
+        self.assertNotIn("internal-host", json.dumps(payload))
+        self.assertNotIn("3999", json.dumps(payload))
 
     def test_no_credential_or_url_leaks_into_the_payload(self):
         payload = tool_error_payload(

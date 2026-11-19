@@ -206,6 +206,23 @@ _STATUS_HINTS: Dict[int, str] = {
     429: "Rate limited. Wait before retrying.",
 }
 _SERVER_ERROR_HINT = "The portal failed. Retry once, then report the failure."
+_TRANSPORT_CODE = "TRANSPORT_ERROR"
+_TRANSPORT_HINT = (
+    "The portal API is unreachable. Check that the Geoportal is running and GEOPACK_API_URL "
+    "points at its /api base, then retry."
+)
+_TRANSPORT_MESSAGE = "Cannot reach the portal API at the configured base URL."
+
+
+def _is_transport_failure(exc: BaseException) -> bool:
+    """True when the SDK wrapped a ``requests`` transport error (API down, DNS, reset).
+
+    ``GeopackClient._request`` raises ``GeopackError("Network error calling <path>: …")``
+    from a ``requests.RequestException``; that message embeds the host and port, which the
+    contract forbids, so the edge replaces it with a fixed sentence.
+    """
+    cause = exc.__cause__
+    return cause is not None and type(cause).__module__.split(".")[0] == "requests"
 
 
 def _code_for(exc: BaseException) -> str:
@@ -313,6 +330,14 @@ def tool_error_payload(exc: BaseException) -> Dict[str, Any]:
             "code": _code_for(exc),
             "message": exc.message,
             "timeout": exc.timeout,
+        }
+    elif isinstance(exc, GeopackError) and _is_transport_failure(exc):
+        payload = {
+            "error": True,
+            "type": type(exc).__name__,
+            "code": _TRANSPORT_CODE,
+            "message": _TRANSPORT_MESSAGE,
+            "hint": _TRANSPORT_HINT,
         }
     elif isinstance(exc, GeopackError):
         payload = {
