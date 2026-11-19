@@ -231,6 +231,18 @@ WaitInterval = Annotated[
 # --- Workflows ---
 
 WorkflowId = Annotated[int, Field(description="Workflow definition id from geopack_sdk_list_workflows.")]
+BudgetChars = Annotated[
+    Optional[int],
+    Field(
+        description=(
+            "Optional character budget for the projected spec. Omit for the full spec; "
+            "a small budget answers with refs (and a section index when even those do not fit)."
+        ),
+        ge=2000,
+        le=200000,
+        default=None,
+    ),
+]
 IncludeWorkflowParams = Annotated[
     bool,
     Field(

@@ -21,6 +21,8 @@ from geopack_sdk import (
     QueryValidationError,
     QuotaExceeded,
     RelationshipCatalogUnavailable,
+    WorkflowHasActiveRuns,
+    WorkflowHasRuns,
 )
 
 
@@ -119,6 +121,37 @@ class CodedErrorMappingTest(unittest.TestCase):
         error = _error(409, {"code": "RELATIONSHIP_CATALOG_STALE"})
 
         self.assertIsInstance(error, RelationshipCatalogUnavailable)
+
+    def test_409_workflow_has_runs_carries_the_cascade_cost(self):
+        # Slice 033: the refusal names what a with_runs cascade would destroy, so
+        # the caller can show the count instead of guessing it.
+        error = _error(
+            409,
+            {
+                "code": "WORKFLOW_HAS_RUNS",
+                "runs": 3,
+                "active": 0,
+                "byStatus": {"succeeded": 2, "failed": 1},
+                "message": "This workflow still has runs",
+            },
+        )
+
+        self.assertIsInstance(error, WorkflowHasRuns)
+        self.assertEqual(error.runs, 3)
+        self.assertEqual(error.active, 0)
+        self.assertEqual(error.by_status, {"succeeded": 2, "failed": 1})
+        self.assertEqual(error.code, "WORKFLOW_HAS_RUNS")
+
+    def test_409_workflow_has_active_runs_names_the_live_runs(self):
+        error = _error(
+            409,
+            {"code": "WORKFLOW_HAS_ACTIVE_RUNS", "active": 1, "running": [41]},
+        )
+
+        self.assertIsInstance(error, WorkflowHasActiveRuns)
+        self.assertNotIsInstance(error, WorkflowHasRuns)
+        self.assertEqual(error.active, 1)
+        self.assertEqual(error.running, [41])
 
     def test_409_without_a_known_code_keeps_the_legacy_class(self):
         error = _error(409, {"message": "Conflict"})

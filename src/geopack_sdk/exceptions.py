@@ -264,6 +264,29 @@ class RelationshipCatalogUnavailable(_CodedAPIError):
     """409 on the relationship catalog — it is busy or not built yet."""
 
 
+class WorkflowHasRuns(_CodedAPIError):
+    """``WORKFLOW_HAS_RUNS`` — the delete was refused, nothing was removed.
+
+    A workflow that still owns history is not deleted by default (slice 033).
+    ``runs`` is the total, ``active`` the live count (0 for this code) and
+    ``by_status`` the breakdown, so a caller can show the cost of the cascade
+    without a second request and then retry with ``with_runs=True``.
+    """
+
+    _extras = ("runs", "active", "by_status")
+
+
+class WorkflowHasActiveRuns(_CodedAPIError):
+    """``WORKFLOW_HAS_ACTIVE_RUNS`` — a live run blocks the delete.
+
+    ``running`` lists the offending run ids. Not even ``with_runs=True``
+    overrides this refusal: the worker is still writing datasets and updating
+    the very row a cascade would destroy. Cancel the run and wait.
+    """
+
+    _extras = ("active", "running")
+
+
 class EditDocumentVersionError(GeopackError):
     """Client-side: the caller's edit document declares an unknown version.
 
@@ -295,6 +318,10 @@ def _typed_error_class(
             return PublicationStateConflict
         if code.startswith("RELATIONSHIP"):
             return RelationshipCatalogUnavailable
+        if code == "WORKFLOW_HAS_RUNS":
+            return WorkflowHasRuns
+        if code == "WORKFLOW_HAS_ACTIVE_RUNS":
+            return WorkflowHasActiveRuns
         return None
 
     if status_code in (400, 422) and code.startswith("RELATIONSHIP_"):

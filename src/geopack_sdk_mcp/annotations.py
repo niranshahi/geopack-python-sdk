@@ -51,6 +51,7 @@ TITLES: Dict[str, str] = {
     "geopack_sdk_get_mcp_safety_policy": "Get MCP safety policy",
     "geopack_sdk_list_workflows": "List workflows",
     "geopack_sdk_get_workflow": "Get a workflow",
+    "geopack_sdk_get_workflow_spec": "Read a workflow's graph as a spec",
     "geopack_sdk_submit_workflow": "Submit a workflow",
     "geopack_sdk_list_workflow_runs": "List workflow runs",
     "geopack_sdk_get_workflow_run": "Get a workflow run",

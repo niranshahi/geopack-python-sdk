@@ -56,6 +56,16 @@ class AsyncWorkflowAdminTest(unittest.IsolatedAsyncioTestCase):
             self.client.post.call_args.kwargs["json"], {"workflowId": 12}
         )
 
+    async def test_compile_spec_forwards_the_budget(self):
+        self.client.post.return_value = COMPILED_OK
+
+        await self.manager.compile_spec(workflow_id=12, budget_chars=4000)
+
+        self.assertEqual(
+            self.client.post.call_args.kwargs["json"],
+            {"workflowId": 12, "budgetChars": 4000},
+        )
+
     async def test_compile_spec_requires_exactly_one_mode(self):
         with self.assertRaises(ValueError):
             await self.manager.compile_spec()
@@ -70,6 +80,19 @@ class AsyncWorkflowAdminTest(unittest.IsolatedAsyncioTestCase):
 
         self.client.get.assert_awaited_once_with("/workflows/12/tool-manifest")
         self.assertIs(manifest, TOOL_MANIFEST)
+
+    async def test_delete_both_lanes(self):
+        self.client.delete.return_value = {"id": 12, "deleted": True, "runsDeleted": 0}
+        await self.manager.delete(12)
+        self.client.delete.assert_awaited_once_with("/workflows/12")
+
+        self.client.delete.reset_mock()
+        self.client.delete.return_value = {"id": 12, "deleted": True, "runsDeleted": 2}
+        outcome = await self.manager.delete(12, with_runs=True)
+        self.client.delete.assert_awaited_once_with(
+            "/workflows/12", params={"withRuns": "true"}
+        )
+        self.assertEqual(outcome["runsDeleted"], 2)
 
 
 class AsyncWorkflowRunDeleteTest(unittest.IsolatedAsyncioTestCase):

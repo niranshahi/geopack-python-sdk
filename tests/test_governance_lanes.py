@@ -105,6 +105,17 @@ class WorkflowAdminTest(unittest.TestCase):
             self.client.post.call_args.kwargs["json"], {"workflowId": 12}
         )
 
+    def test_compile_spec_forwards_the_budget_when_given(self):
+        # Slice 031: the MCP spec lane asks for a compacted projection by budget.
+        self.client.post.return_value = COMPILED_OK
+
+        self.manager.compile_spec(workflow_id=12, budget_chars=4000)
+
+        self.assertEqual(
+            self.client.post.call_args.kwargs["json"],
+            {"workflowId": 12, "budgetChars": 4000},
+        )
+
     def test_unpublishable_spec_is_an_answer_not_an_exception(self):
         self.client.post.return_value = COMPILED_NOT_PUBLISHABLE
 
@@ -126,6 +137,26 @@ class WorkflowAdminTest(unittest.TestCase):
 
         self.client.get.assert_called_once_with("/workflows/12/tool-manifest")
         self.assertIs(manifest, TOOL_MANIFEST)
+
+    def test_delete_without_runs_sends_no_flag(self):
+        # Slice 033: the default lane is the safe one — the server refuses when
+        # runs exist, so the SDK must not opt into the cascade by accident.
+        self.client.delete.return_value = {"id": 12, "deleted": True, "runsDeleted": 0}
+
+        outcome = self.manager.delete(12)
+
+        self.client.delete.assert_called_once_with("/workflows/12")
+        self.assertEqual(outcome["runsDeleted"], 0)
+
+    def test_delete_with_runs_asks_for_the_cascade(self):
+        self.client.delete.return_value = {"id": 12, "deleted": True, "runsDeleted": 4}
+
+        outcome = self.manager.delete(12, with_runs=True)
+
+        self.client.delete.assert_called_once_with(
+            "/workflows/12", params={"withRuns": "true"}
+        )
+        self.assertEqual(outcome["runsDeleted"], 4)
 
 
 class WorkflowRunDeleteTest(unittest.TestCase):

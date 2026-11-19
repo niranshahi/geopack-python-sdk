@@ -80,6 +80,7 @@ _READ_TOOLS = (
     "geopack_sdk_export_dataset",
     "geopack_sdk_list_workflows",
     "geopack_sdk_get_workflow",
+    "geopack_sdk_get_workflow_spec",
     "geopack_sdk_get_workflow_run",
     "geopack_sdk_list_workflow_runs",
     "geopack_sdk_list_analysis_tools",
@@ -100,6 +101,7 @@ UNAVAILABLE_OPERATIONS = (
     "delete_map",
     "delete_publication",
     "delete_workflow",
+    "delete_workflow_run",
     "delete_task_record",
 )
 

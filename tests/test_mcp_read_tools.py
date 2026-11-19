@@ -2,13 +2,14 @@
 
 Handler-level tests use REAL SDK models (the 2026-11-02 lesson: a mocked
 ``model_dump()`` hides contract drift) and a ``MagicMock`` client that returns
-them. The registration test asserts the whole 28-tool surface and the policy
-registry, so a name collision or a missing policy entry fails here. (Slice 021
-grew the surface to 28; the seven names below are this slice's.)
+them. The registration test asserts the whole 29-tool surface and the policy
+registry, so a name collision or a missing policy entry fails here. (Slice 031
+grew the surface to 29; the seven names below are slice 020's.)
 """
 
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import MagicMock
 
@@ -48,6 +49,7 @@ from geopack_sdk_mcp.tool_handlers.datasets import (
 from geopack_sdk_mcp.tool_handlers.generated_files import list_generated_files
 from geopack_sdk_mcp.tool_handlers.quotas import get_quota_summary
 from geopack_sdk_mcp.tool_handlers.workflow_runs import list_workflow_runs
+from geopack_sdk_mcp.tool_handlers.workflows import get_workflow_spec
 from geopack_sdk_mcp.tools.policy import TOOL_POLICY
 
 EXPECTED_TOOL_NAMES = {
@@ -70,6 +72,7 @@ EXPECTED_TOOL_NAMES = {
     "geopack_sdk_get_mcp_safety_policy",
     "geopack_sdk_list_workflows",
     "geopack_sdk_get_workflow",
+    "geopack_sdk_get_workflow_spec",
     "geopack_sdk_submit_workflow",
     "geopack_sdk_list_workflow_runs",
     "geopack_sdk_get_workflow_run",
@@ -81,7 +84,7 @@ EXPECTED_TOOL_NAMES = {
     "geopack_sdk_cancel_task",
 }
 
-#: The seven tools this slice added (slice 021 added two more).
+#: The seven tools slice 020 added (021 added two more, 031 one).
 READ_LANES = {
     "geopack_sdk_get_dataset_schema",
     "geopack_sdk_aggregate_dataset",
@@ -648,6 +651,62 @@ class ListLanesHandlerTest(unittest.TestCase):
         self.assertEqual(self.client.generated_files.list.call_count, 2)
 
 
+class WorkflowSpecLaneTest(unittest.TestCase):
+    """Slice 031 — the spec lane returns the projection, never canvas state."""
+
+    def setUp(self):
+        self.client = MagicMock()
+
+    def test_ui_keys_are_stripped_and_semantics_survive(self):
+        # The projection is position-free today; this fixture plants canvas keys so a
+        # future payload change cannot smuggle them through the MCP edge.
+        self.client.workflows.compile_spec.return_value = {
+            "ok": True,
+            "mode": "project",
+            "workflow": {"id": 12, "name": "buffer", "position": {"x": 1, "y": 2}},
+            "projected": {
+                "schemaVersion": 1,
+                "nodes": [
+                    {
+                        "id": "buffer_1",
+                        "op": "buffer",
+                        "label": "Buffer 100m",
+                        "position": {"x": 120, "y": 40},
+                        "ui": {"measured": {"width": 180, "height": 60}},
+                        "config": {"distance": 100, "width": 250, "height": 400},
+                    }
+                ],
+                "edges": [{"from": "src", "to": "buffer_1", "sourcePosition": "right"}],
+            },
+            "summary": {"nodes": 1, "edges": 1},
+            "issues": [],
+            "compacted": {"level": 1, "budgetChars": None},
+        }
+
+        payload = get_workflow_spec(self.client, workflow_id=12)
+
+        rendered = json.dumps(payload)
+        self.assertNotIn("position", rendered)
+        self.assertNotIn("measured", rendered)
+        self.assertNotIn("sourcePosition", rendered)
+        node = payload["projected"]["nodes"][0]
+        # An operator's own width/height is run-form semantics, not canvas state.
+        self.assertEqual(node["config"]["width"], 250)
+        self.assertEqual(node["label"], "Buffer 100m")
+        self.assertEqual(payload["summary"]["nodes"], 1)
+
+    def test_a_budget_is_forwarded_and_none_is_the_default(self):
+        self.client.workflows.compile_spec.return_value = {"ok": True, "mode": "project"}
+
+        get_workflow_spec(self.client, workflow_id=12)
+        self.assertIsNone(self.client.workflows.compile_spec.call_args.kwargs["budget_chars"])
+
+        get_workflow_spec(self.client, workflow_id=12, budget_chars=4000)
+        self.assertEqual(
+            self.client.workflows.compile_spec.call_args.kwargs["budget_chars"], 4000
+        )
+
+
 class ToolSurfaceTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -655,8 +714,8 @@ class ToolSurfaceTest(unittest.TestCase):
 
         cls.tools = {tool.name: tool for tool in mcp._tool_manager.list_tools()}  # noqa: SLF001
 
-    def test_surface_is_twenty_eight_tools(self):
-        self.assertEqual(len(self.tools), 28)
+    def test_surface_is_twenty_nine_tools(self):
+        self.assertEqual(len(self.tools), 29)
         self.assertEqual(set(self.tools), EXPECTED_TOOL_NAMES)
 
     def test_no_tool_name_collides(self):

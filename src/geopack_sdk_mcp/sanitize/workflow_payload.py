@@ -8,6 +8,47 @@ from typing import Any, Dict, List, Union
 # before these keys are removed from tool output.
 _GRAPH_BLOB_KEYS = ("graphJson", "graph_json", "graphSnapshot", "graph_snapshot")
 
+#: Canvas/runtime keys a graph blob carries that no MCP consumer can use (slice 031).
+#: Deliberately NARROW: `width`/`height`/`style` are NOT here — a raster operator's
+#: config may legitimately set them, and the projection is the run-form contract.
+_UI_ONLY_KEYS = frozenset(
+    {
+        "position",
+        "positions",
+        "ui",
+        "measured",
+        "selected",
+        "dragging",
+        "handleBounds",
+        "nodeInternals",
+        "sourcePosition",
+        "targetPosition",
+        "computedPosition",
+        "positionAbsolute",
+        "parentNode",
+        "zIndex",
+        "expanded",
+    }
+)
+
+
+def strip_graph_ui_keys(value: Any) -> Any:
+    """Recursively drop UI-only keys from a projected wf-spec (slice 031).
+
+    The backend projection (``graphToWfSpec``) is already position-free, so this
+    is defence in depth: a future payload change must not leak canvas state
+    through the MCP edge, where it has no consumer and costs tokens.
+    """
+    if isinstance(value, dict):
+        return {
+            key: strip_graph_ui_keys(item)
+            for key, item in value.items()
+            if key not in _UI_ONLY_KEYS
+        }
+    if isinstance(value, list):
+        return [strip_graph_ui_keys(item) for item in value]
+    return value
+
 
 def omit_workflow_graph_blobs(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Remove graph definitions from a workflow or workflow-run dict for LLM-safe JSON."""

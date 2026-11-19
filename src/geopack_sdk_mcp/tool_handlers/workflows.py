@@ -9,6 +9,7 @@ from geopack_sdk import GeopackClient
 from ..sanitize.workflow_payload import (
     sanitize_workflow_for_mcp,
     sanitize_workflow_list_for_mcp,
+    strip_graph_ui_keys,
 )
 from ..serialize import to_jsonable
 
@@ -44,3 +45,22 @@ def get_workflow_for_mcp(
         result["parameters"] = to_jsonable(client.workflows.extract_params(workflow))
 
     return sanitize_workflow_for_mcp(result, include_graph=include_graph)
+
+
+def get_workflow_spec(
+    client: GeopackClient,
+    workflow_id: int,
+    *,
+    budget_chars: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Project a saved workflow into the model-facing wf-spec (read-only).
+
+    ``POST /workflows/compile-spec {workflowId}`` never persists anything: this is
+    the inspection lane, not the authoring one. The backend projection is already
+    position-free; ``strip_graph_ui_keys`` keeps it that way if the payload grows.
+    """
+    payload = client.workflows.compile_spec(
+        workflow_id=workflow_id,
+        budget_chars=budget_chars,
+    )
+    return strip_graph_ui_keys(to_jsonable(payload))

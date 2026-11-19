@@ -12,8 +12,13 @@ from ..annotations import read_tool
 from ..auth_bootstrap import AppContext
 from ..context import get_client
 from ..errors import tool_error_result, tool_result
-from ..tool_handlers.workflows import get_workflow_for_mcp, list_workflows
+from ..tool_handlers.workflows import (
+    get_workflow_for_mcp,
+    get_workflow_spec,
+    list_workflows,
+)
 from ..tool_schema import (
+    BudgetChars,
     IncludeWorkflowParams,
     Page,
     PageSize,
@@ -63,6 +68,31 @@ def register(mcp: Any) -> None:
                     get_client(ctx),
                     workflow_id=workflow_id,
                     include_params=include_params,
+                )
+            )
+        except Exception as exc:
+            return tool_error_result(exc)
+
+    @mcp.tool(
+        annotations=read_tool("geopack_sdk_get_workflow_spec"),
+        description=(
+            "Read a saved workflow's graph as a spec: nodes, operators and their config, "
+            "plus params — the document the editor round-trips (no canvas positions). "
+            "Read-only; it never creates, saves or edits a workflow. Use list_workflows to "
+            "find the id and get_workflow(include_params=true) for the run contract."
+        ),
+    )
+    def geopack_sdk_get_workflow_spec(
+        ctx: Context[ServerSession, AppContext],
+        workflow_id: WorkflowId,
+        budget_chars: BudgetChars = None,
+    ) -> CallToolResult:
+        try:
+            return tool_result(
+                get_workflow_spec(
+                    get_client(ctx),
+                    workflow_id=workflow_id,
+                    budget_chars=budget_chars,
                 )
             )
         except Exception as exc:

@@ -227,10 +227,11 @@ class PolicyRegistryTest(unittest.TestCase):
         self.assertEqual(cancel["consent"], "brief")
         self.assertFalse(cancel["dryRun"])
 
-    def test_six_operations_are_stated_unavailable(self):
+    def test_seven_operations_are_stated_unavailable(self):
+        # 031 added delete_workflow_run beside delete_workflow: no create, no delete.
         payload = build_policy_payload(None)
 
-        self.assertEqual(len(payload["unavailable"]), 6)
+        self.assertEqual(len(payload["unavailable"]), 7)
         self.assertEqual(tuple(payload["unavailable"]), UNAVAILABLE_OPERATIONS)
         self.assertFalse(
             [name for name in self.tools if "delete" in name],

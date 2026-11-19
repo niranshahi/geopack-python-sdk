@@ -21,6 +21,8 @@ from .exceptions import (
     QueryValidationError,
     QuotaExceeded,
     RelationshipCatalogUnavailable,
+    WorkflowHasActiveRuns,
+    WorkflowHasRuns,
 )
 from .tasks import (
     TaskMessageInfo,
@@ -31,7 +33,7 @@ from .tasks import (
 )
 from .workflow_runs import inspect_workflow_run_outcome
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 __all__ = [
     "AsyncGeopackClient",
     "GeopackClient",
@@ -55,6 +57,8 @@ __all__ = [
     "EditDocumentVersionError",
     "PublicationStateConflict",
     "RelationshipCatalogUnavailable",
+    "WorkflowHasRuns",
+    "WorkflowHasActiveRuns",
     "new_edit_ref",
     "build_edit_document",
     "TaskMessageInfo",

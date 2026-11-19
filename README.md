@@ -2,7 +2,7 @@
 
 A standalone Python library to interact with the Geopack Geoportal API.
 
-Current release: **0.7.0** — see [CHANGELOG.md](CHANGELOG.md).
+Current release: **0.8.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Naming
 
@@ -154,10 +154,11 @@ client.auth.login(username="my_user", password="my_password")
 ## Features
 - Datasets, DataStores, Workflows, **Analysis tools** (a workflow run as a typed tool), Tasks, **Generated Files**, **Quotas (self)**.
 - Dataset **delete**, **ACL**, structured **query** (`build_simple_query`), **discover**.
+- Workflow **delete** with an explicit run cascade: `workflows.delete(id)` refuses (409) while the workflow still owns runs, `with_runs=True` accepts the irreversible cascade, and the typed `WorkflowHasRuns` / `WorkflowHasActiveRuns` errors carry the counts.
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks` (`partial_success` is terminal and returned like `completed`).
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (**28 tools** + 2 resource templates, v0.7.0+; read lanes for schema/aggregate/relationships, workflow execution incl. typed analysis tools, the edit ladder, upload; no delete via MCP).
+- GeoPandas integration; **Geopack SDK MCP** server (**29 tools** + 2 resource templates, v0.8.0+; read lanes for schema/aggregate/relationships/workflow-spec, workflow execution incl. typed analysis tools, the edit ladder, upload; no create/edit/delete of workflows via MCP, no delete at all).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
@@ -218,9 +219,9 @@ Tokens are saved to `~/.geopack/credentials.json` (mode `0600`). MCP reads them 
 
 Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev only). See [MCP authentication options](../docs/09-sdk/mcp-design/mcp-auth.md).
 
-**Safety:** Dataset/generated-file **delete is not an MCP tool** (use Geoportal UI). Call `geopack_sdk_get_mcp_safety_policy` for server rules. Upload/workflow: host must get explicit user consent in chat before calling. See [MCP Safety Policy](../docs/09-sdk/mcp-design/mcp-safety.md).
+**Safety:** Dataset/generated-file **delete is not an MCP tool** (use Geoportal UI). **No workflow authoring or deletion over MCP** either — `geopack_sdk_get_workflow_spec` reads a graph, it cannot create, save or delete one. Call `geopack_sdk_get_mcp_safety_policy` for server rules. Upload/workflow: host must get explicit user consent in chat before calling. See [MCP Safety Policy](../docs/09-sdk/mcp-design/mcp-safety.md).
 
-**Tools (28, v0.7.0+):**
+**Tools (29, v0.8.0+):**
 
 | Tool | Purpose |
 |------|---------|
@@ -244,6 +245,7 @@ Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev 
 | `geopack_sdk_download_generated_file` | Save export to local `save_path` on MCP host |
 | `geopack_sdk_list_workflows` | List workflows (no `graphJson` in JSON) |
 | `geopack_sdk_get_workflow` | Workflow metadata; `include_params=true` adds `parameters[]` |
+| `geopack_sdk_get_workflow_spec` | The saved graph as a model-facing wf-spec (nodes, operators, config); no canvas positions. Read-only — never creates or saves |
 | `geopack_sdk_submit_workflow` | Start run; returns `workflowRunId` + `taskId` |
 | `geopack_sdk_list_workflow_runs` | Runs you can see (id, status, submitter, timestamps) |
 | `geopack_sdk_get_workflow_run` | Run status + artifacts |
@@ -257,7 +259,7 @@ Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev 
 
 **Annotations (v0.7.0+):** every tool declares `title`, `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`. `destructiveHint` is true only for `submit_edit_document`; `openWorldHint` only for `geocode_place` and `run_analysis`; `readOnlyHint` is false for the three file-saving tools and the mutating tools, while `idempotentHint` is false for them too and for `export_dataset` (a read that still mints a new artifact on every call).
 
-**Transport:** stdio only in 0.7.0 (`python -m geopack_sdk_mcp`, no transport flag). A future HTTP mode must solve per-request identity (the current bootstrap caches one process-wide client/token), OAuth/token pass-through, and multi-tenant temp-file isolation before it can be offered.
+**Transport:** stdio only in 0.8.0 (`python -m geopack_sdk_mcp`, no transport flag). A future HTTP mode must solve per-request identity (the current bootstrap caches one process-wide client/token), OAuth/token pass-through, and multi-tenant temp-file isolation before it can be offered.
 
 **Resource templates (not listed as tools in Cursor UI):**
 

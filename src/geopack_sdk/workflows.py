@@ -223,13 +223,35 @@ class WorkflowManager:
         response_data = self.client.put(f"{self.base_url}/{workflow_id}", json=payload)
         return Workflow(**response_data)
 
-    def delete(self, workflow_id: int) -> bool:
-        """Delete a workflow definition.
-        
-        REST API: `DELETE /api/workflows/:id`
+    def delete(self, workflow_id: int, with_runs: bool = False) -> Dict[str, Any]:
+        """Delete a workflow definition, optionally with its run history.
+
+        A workflow that still owns runs is refused with a typed
+        :class:`~geopack_sdk.exceptions.WorkflowHasRuns` (409) and nothing is
+        removed. ``with_runs=True`` accepts that cost: the server destroys every
+        run row and artifact of the workflow together with it, in one
+        transaction (slice 033). The cascade is **irreversible** — ask the owner
+        before using it on someone else's history.
+
+        A run that is still ``running`` blocks both lanes with
+        :class:`~geopack_sdk.exceptions.WorkflowHasActiveRuns`; cancel and wait
+        instead of forcing it.
+
+        Args:
+            workflow_id: ID of the workflow to delete
+            with_runs: also delete the workflow's runs (default: refuse)
+
+        Returns:
+            Dict[str, Any]: ``{id, deleted, runsDeleted}`` from the server
+
+        REST API: `DELETE /api/workflows/:id[?withRuns=true]`
         """
-        self.client.delete(f"{self.base_url}/{workflow_id}")
-        return True
+        endpoint = f"{self.base_url}/{workflow_id}"
+        if with_runs:
+            response_data = self.client.delete(endpoint, params={"withRuns": "true"})
+        else:
+            response_data = self.client.delete(endpoint)
+        return response_data if isinstance(response_data, dict) else {}
 
     # --- Statistics, spec compilation and tool manifest (slice 015) ----------
 
@@ -250,6 +272,7 @@ class WorkflowManager:
         spec: Optional[Dict[str, Any]] = None,
         *,
         workflow_id: Optional[int] = None,
+        budget_chars: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Compile a declarative wf-spec into a workflow graph, or project one.
 
@@ -264,6 +287,11 @@ class WorkflowManager:
         with an ``issues`` list — that is the point of the call (the caller
         fixes the spec and asks again), so it is not an exception.
 
+        ``budget_chars`` asks the projection to compact BY REFERENCE to that
+        character budget (slice 031): the answer then carries ``compacted`` and,
+        when even the referenced form does not fit, a ``sectionIndex`` instead of
+        ``projected``.
+
         REST API: `POST /api/workflows/compile-spec`
         """
         if (spec is None) == (workflow_id is None):
@@ -273,6 +301,8 @@ class WorkflowManager:
             body["spec"] = spec
         if workflow_id is not None:
             body["workflowId"] = int(workflow_id)
+        if budget_chars is not None:
+            body["budgetChars"] = int(budget_chars)
         response_data = self.client.post(f"{self.base_url}/compile-spec", json=body)
         return response_data if isinstance(response_data, dict) else {}
 

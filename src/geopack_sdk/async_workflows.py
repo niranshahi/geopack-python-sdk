@@ -93,10 +93,16 @@ class AsyncWorkflowManager:
         )
         return Workflow(**response_data)
 
-    async def delete(self, workflow_id: int) -> bool:
-        """Async twin of :meth:`WorkflowManager.delete`."""
-        await self.client.delete(f"{self.base_url}/{workflow_id}")
-        return True
+    async def delete(self, workflow_id: int, with_runs: bool = False) -> Dict[str, Any]:
+        """Async twin of :meth:`WorkflowManager.delete` (run cascade opt-in)."""
+        endpoint = f"{self.base_url}/{workflow_id}"
+        if with_runs:
+            response_data = await self.client.delete(
+                endpoint, params={"withRuns": "true"}
+            )
+        else:
+            response_data = await self.client.delete(endpoint)
+        return response_data if isinstance(response_data, dict) else {}
 
     # --- Statistics, spec compilation and tool manifest (slice 015) ----------
 
@@ -110,6 +116,7 @@ class AsyncWorkflowManager:
         spec: Optional[Dict[str, Any]] = None,
         *,
         workflow_id: Optional[int] = None,
+        budget_chars: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Async twin of :meth:`WorkflowManager.compile_spec` (read-only)."""
         if (spec is None) == (workflow_id is None):
@@ -119,6 +126,8 @@ class AsyncWorkflowManager:
             body["spec"] = spec
         if workflow_id is not None:
             body["workflowId"] = int(workflow_id)
+        if budget_chars is not None:
+            body["budgetChars"] = int(budget_chars)
         response_data = await self.client.post(
             f"{self.base_url}/compile-spec", json=body
         )
