@@ -30,3 +30,22 @@ def wait_for_task(
         quiet=True,
     )
     return sanitize_task_payload(to_jsonable(result))
+
+
+def cancel_task(client: GeopackClient, task_id: str) -> Dict[str, Any]:
+    """Request cancellation of a running task (best effort — 202, not a kill).
+
+    No batch, no "cancel everything": a task is cancelled by id, after the
+    caller confirmed it (slice 021 §2). The record is NOT deleted
+    (``delete_task_record`` stays SDK-only, D7).
+    """
+    payload = client.tasks.cancel_task(task_id)
+    answer: Dict[str, Any] = dict(payload) if isinstance(payload, dict) else {}
+    answer["taskId"] = task_id
+    answer["cancelRequested"] = True
+    answer["hint"] = (
+        "Cancellation was requested, not guaranteed: the worker may finish the step it "
+        "is on. Poll geopack_sdk_get_task or geopack_sdk_wait_for_task — 'canceled' is "
+        "terminal there and already-completed work stays."
+    )
+    return answer

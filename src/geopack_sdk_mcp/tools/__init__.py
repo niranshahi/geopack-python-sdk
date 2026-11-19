@@ -1,4 +1,4 @@
-"""Register Geopack SDK MCP tools (v0 read-only + v1 export/download + read lanes)."""
+"""Register Geopack SDK MCP tools (reads, read lanes and the two write lanes)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ def register_all_tools(mcp: Any) -> None:
     from . import (
         analysis,
         datasets,
+        edits,
         generated_files,
         geocoding,
         policy,
@@ -27,3 +28,4 @@ def register_all_tools(mcp: Any) -> None:
     workflow_runs.register(mcp)
     generated_files.register(mcp)
     quotas.register(mcp)
+    edits.register(mcp)

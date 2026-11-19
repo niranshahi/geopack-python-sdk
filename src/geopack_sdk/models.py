@@ -383,13 +383,17 @@ class RelationshipDescriptor(BaseModel):
     def _fill_name_and_raw(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-        raw = dict(data)
-        raw.setdefault("raw", raw)
-        if not raw.get("name"):
-            raw["name"] = raw.get("relationshipName")
-        if not raw.get("relationshipName"):
-            raw["relationshipName"] = raw.get("name")
-        return raw
+        inner = dict(data)
+        if not inner.get("name"):
+            inner["name"] = inner.get("relationshipName")
+        if not inner.get("relationshipName"):
+            inner["relationshipName"] = inner.get("name")
+        # Snapshot AFTER the name fill (callers read raw["name"]) but BEFORE the
+        # assignment: inserting the dict into itself makes the model undumpable
+        # (pydantic: "Circular reference detected").
+        if not isinstance(inner.get("raw"), dict):
+            inner["raw"] = dict(inner)
+        return inner
 
 
 class RelatedRecordsResult(BaseModel):
@@ -1276,10 +1280,15 @@ class EditResult(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _capture_raw(cls, data: Any) -> Any:
+        # ``raw`` keeps the whole wire answer, but it must NOT be inserted into
+        # itself: that makes the model undumpable (pydantic rejects the cycle
+        # with "Circular reference detected"). Copy first, then attach.
         if isinstance(data, dict):
             raw = dict(data)
-            raw.setdefault("raw", raw)
-            return raw
+            if not isinstance(raw.get("raw"), dict):
+                data = dict(data)
+                data["raw"] = raw
+            return data
         return data
 
     @property

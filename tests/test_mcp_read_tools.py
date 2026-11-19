@@ -2,8 +2,9 @@
 
 Handler-level tests use REAL SDK models (the 2026-11-02 lesson: a mocked
 ``model_dump()`` hides contract drift) and a ``MagicMock`` client that returns
-them. The registration test asserts the whole 26-tool surface and the policy
-registry, so a name collision or a missing policy entry fails here.
+them. The registration test asserts the whole 28-tool surface and the policy
+registry, so a name collision or a missing policy entry fails here. (Slice 021
+grew the surface to 28; the seven names below are this slice's.)
 """
 
 from __future__ import annotations
@@ -76,6 +77,19 @@ EXPECTED_TOOL_NAMES = {
     "geopack_sdk_list_analysis_tools",
     "geopack_sdk_run_analysis",
     "geopack_sdk_get_analysis_result",
+    "geopack_sdk_submit_edit_document",
+    "geopack_sdk_cancel_task",
+}
+
+#: The seven tools this slice added (slice 021 added two more).
+READ_LANES = {
+    "geopack_sdk_get_dataset_schema",
+    "geopack_sdk_aggregate_dataset",
+    "geopack_sdk_get_dataset_relationships",
+    "geopack_sdk_get_related_records",
+    "geopack_sdk_get_quota_summary",
+    "geopack_sdk_list_workflow_runs",
+    "geopack_sdk_list_generated_files",
 }
 
 DATASET_DETAILS = {
@@ -641,31 +655,22 @@ class ToolSurfaceTest(unittest.TestCase):
 
         cls.tools = {tool.name: tool for tool in mcp._tool_manager.list_tools()}  # noqa: SLF001
 
-    def test_surface_is_twenty_six_tools(self):
-        self.assertEqual(len(self.tools), 26)
+    def test_surface_is_twenty_eight_tools(self):
+        self.assertEqual(len(self.tools), 28)
         self.assertEqual(set(self.tools), EXPECTED_TOOL_NAMES)
 
     def test_no_tool_name_collides(self):
         names = [tool.name for tool in self.tools.values()]
         self.assertEqual(len(names), len(set(names)))
 
-    def test_every_read_lane_has_a_policy_entry(self):
-        read_lanes = {
-            "geopack_sdk_get_dataset_schema",
-            "geopack_sdk_aggregate_dataset",
-            "geopack_sdk_get_dataset_relationships",
-            "geopack_sdk_get_related_records",
-            "geopack_sdk_get_quota_summary",
-            "geopack_sdk_list_workflow_runs",
-            "geopack_sdk_list_generated_files",
-        }
-        self.assertEqual(set(TOOL_POLICY), read_lanes)
-        for name, entry in TOOL_POLICY.items():
-            self.assertIn(name, self.tools)
-            self.assertFalse(entry["mutating"], name)
+    def test_every_tool_is_classified_by_the_policy_registry(self):
+        self.assertEqual(set(TOOL_POLICY), EXPECTED_TOOL_NAMES)
+        for name in READ_LANES:
+            self.assertIn(name, TOOL_POLICY)
+            self.assertFalse(TOOL_POLICY[name]["mutating"], name)
 
     def test_new_tools_carry_use_when_descriptions(self):
-        for name in TOOL_POLICY:
+        for name in READ_LANES:
             description = self.tools[name].description or ""
             self.assertGreater(len(description), 80, f"{name} description is too thin")
 

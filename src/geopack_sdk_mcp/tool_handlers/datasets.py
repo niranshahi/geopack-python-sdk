@@ -189,21 +189,12 @@ def export_dataset(
     return sanitize_async_task_start(to_jsonable(task))
 
 
-def delete_dataset(
-    client: GeopackClient,
-    dataset_id: int,
-) -> Dict[str, Any]:
-    """
-    Delete a dataset by ID. This is a destructive operation.
-    
-    REST API: `DELETE /api/datasets/{id}`
-    """
-    client.datasets.delete(dataset_id)
-    return {
-        "success": True,
-        "message": f"Dataset #{dataset_id} deleted successfully.",
-        "datasetId": dataset_id,
-    }
+# Deletes are intentionally not exposed; see docs/09-sdk/mcp-design/mcp-safety.md.
+#
+# ``delete_dataset`` used to live here with no registration: one line away from
+# being wired up by a future contributor. The policy is now *stated* —
+# ``tools/policy.py::UNAVAILABLE_OPERATIONS`` lists the operations MCP refuses
+# and ``tests/test_mcp_write_tools.py`` asserts the surface matches it.
 
 
 # --- Read lanes (slice 020) -------------------------------------------------

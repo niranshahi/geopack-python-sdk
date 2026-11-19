@@ -1,7 +1,7 @@
 """Tests for the analysis-tool SDK manager, its MCP handlers and the sanitizer."""
 
 import unittest
-from typing import Any, Dict, List
+from typing import Any, Dict
 from unittest.mock import MagicMock
 
 from geopack_sdk.analysis_tools import AnalysisToolManager
@@ -26,7 +26,6 @@ from geopack_sdk_mcp.tool_handlers.analysis import (
     list_analysis_tools,
     run_analysis,
 )
-from geopack_sdk_mcp.tools import policy as policy_tools
 
 CATALOG: Dict[str, Any] = {
     "items": [
@@ -289,13 +288,25 @@ class TestAnalysisSanitizer(unittest.TestCase):
 
 class TestAnalysisPolicy(unittest.TestCase):
     def test_run_analysis_is_declared_mutating(self):
-        mcp = _FakeMCP()
-        policy_tools.register(mcp)
-        policy: Dict[str, Any] = mcp.tools["geopack_sdk_get_mcp_safety_policy"]()
+        from geopack_sdk_mcp.tools.policy import build_policy_payload
 
-        mutating: List[str] = list(policy["mutating_tools_require_host_consent"])
+        policy: Dict[str, Any] = build_policy_payload(None)
+
+        mutating: Dict[str, Any] = policy["mutatingTools"]
         self.assertIn("geopack_sdk_run_analysis", mutating)
-        self.assertIn("consent", policy["mutating_tools_require_host_consent"]["geopack_sdk_run_analysis"].lower())
+        self.assertTrue(mutating["geopack_sdk_run_analysis"]["mutating"])
+        self.assertEqual(mutating["geopack_sdk_run_analysis"]["consent"], "explicit")
+
+    def test_the_policy_registry_is_versioned_and_stated(self):
+        from geopack_sdk_mcp.tools.policy import build_policy_payload
+
+        policy: Dict[str, Any] = build_policy_payload(None)
+
+        self.assertEqual(policy["version"], 2)
+        self.assertIn("delete_dataset", policy["unavailable"])
+        self.assertIn("geopack_sdk_get_dataset_thumbnail", policy["localWrites"])
+        # No client → the upload caps degrade instead of failing the tool.
+        self.assertTrue(policy["uploadLimits"]["unavailable"])
 
     def test_the_surface_adds_exactly_three_tools(self):
         from geopack_sdk_mcp.tools import analysis as analysis_tools

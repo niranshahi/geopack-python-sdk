@@ -320,6 +320,28 @@ AnalysisTimeoutSeconds = Annotated[
     ),
 ]
 
+# --- Record edits (EditDoc) ---
+
+EditDocumentPayload = Annotated[
+    Dict[str, Any],
+    Field(
+        description=(
+            "EditDoc envelope: {version: '1.0', editRef?: uuid, options?: {...}, changes: [...]}. "
+            "changes[] is the portal's edit grammar (operation + dataset + records); the SDK never "
+            "re-derives it. Always send the SAME document to validate, preview and apply."
+        )
+    ),
+]
+EditMode = Annotated[
+    str,
+    Field(
+        description=(
+            "Ladder step: validate (default, plans only) | preview (plans + simulated per-op result) "
+            "| apply (WRITES, one transaction, needs consent and an editRef)."
+        )
+    ),
+]
+
 # --- Generated files ---
 
 GeneratedFileId = Annotated[
