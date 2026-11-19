@@ -8,6 +8,8 @@ from .models import (
     DatasetAcl,
     DatasetsApiResponse,
     CreateDatasetDto,
+    CreateVirtualDatasetDto,
+    CreateVirtualSqlDatasetDto,
     UpdateDatasetDto,
     FeatureCollection,
     FilterStatistics,
@@ -596,6 +598,132 @@ class DatasetManager:
         payload = dataset_data.model_dump(exclude_unset=True) if isinstance(dataset_data, UpdateDatasetDto) else dataset_data
         response_data = self.client.put(f"/datasets/{dataset_id}", json=payload)
         return Dataset(**response_data)
+
+    # --- Virtual datasets (slice 013) ----------------------------------------
+    #
+    # Both lanes are AUTHORING contracts: the request shape is normative and the
+    # answer is a normal Dataset. The SDK composes nothing — no DSL merging, no
+    # SQL checking — because the server owns both and evaluates them against the
+    # caller's own base filter/RLS at read time.
+
+    def create_virtual_dataset(
+        self, payload: Union[CreateVirtualDatasetDto, Dict[str, Any]]
+    ) -> Dataset:
+        """Create a persisted virtual dataset view (filter or relationship).
+
+        ``kind`` defaults to ``virtualFilter``; the relationship kinds
+        (``virtualRelate`` / ``virtualJoin`` / ``virtualGraph``) need an ESRI
+        geodatabase store and a 400 naming the store type is the expected
+        answer anywhere else. Requires ``dataset:create``.
+
+        REST API: `POST /api/datasets/virtual`
+        """
+        if isinstance(payload, CreateVirtualDatasetDto):
+            body = payload.model_dump(exclude_none=True)
+        else:
+            body = dict(payload or {})
+        response_data = self.client.post("/datasets/virtual", json=body)
+        return Dataset(**(response_data or {}))
+
+    def create_virtual_dataset_from_filter(
+        self,
+        *,
+        name: str,
+        data_store_id: int,
+        workgroup_id: int,
+        root_dataset_id: int,
+        query_dsl: Dict[str, Any],
+        description: Optional[str] = None,
+        keywords: Optional[str] = None,
+    ) -> Dataset:
+        """Sugar for the common case: a filter-only virtual dataset.
+
+        Sends ``kind="virtualFilter"`` explicitly rather than relying on the
+        server default. ``query_dsl`` stays root-scoped — do not pre-compose
+        the caller's base filter into it.
+        """
+        payload = CreateVirtualDatasetDto(
+            name=name,
+            dataStoreId=data_store_id,
+            workgroupId=workgroup_id,
+            rootDatasetId=root_dataset_id,
+            queryDsl=query_dsl,
+            kind="virtualFilter",
+            description=description,
+            keywords=keywords,
+        )
+        return self.create_virtual_dataset(payload)
+
+    def create_virtual_esri_dataset(
+        self, payload: Union[CreateVirtualDatasetDto, Dict[str, Any]]
+    ) -> Dataset:
+        """DEPRECATED alias of :meth:`create_virtual_dataset` (calls ``/virtual``).
+
+        ``POST /datasets/virtual-esri`` is kept server-side for older clients
+        only; this method exists for signature compatibility with earlier SDK
+        releases and always targets ``/virtual``. New code must call
+        :meth:`create_virtual_dataset`.
+        """
+        return self.create_virtual_dataset(payload)
+
+    def preview_sql(self, data_store_id: int, sql: str) -> Dict[str, Any]:
+        """Dry-run an ad-hoc SQL body and return its discovered schema.
+
+        The MANDATORY first step of the SQL lane: the answer carries
+        ``fields`` (plus ``geometryColumns``, ``primaryKeyCandidates`` and
+        ``spatialReference``), and ``virtual-sql`` then requires exactly that
+        field list. Requires ``dataset:create_virtual_sql``; nothing is
+        persisted and nothing is executed for the caller.
+
+        REST API: `POST /api/datasets/sql-preview`
+        """
+        if not isinstance(sql, str) or not sql.strip():
+            raise ValueError("sql must be a non-empty string.")
+        response_data = self.client.post(
+            "/datasets/sql-preview",
+            json={"dataStoreId": int(data_store_id), "sql": sql},
+        )
+        return response_data if isinstance(response_data, dict) else {}
+
+    def create_virtual_sql_dataset(
+        self, payload: Union[CreateVirtualSqlDatasetDto, Dict[str, Any]]
+    ) -> Dataset:
+        """Create an ad-hoc SQL virtual dataset.
+
+        Requires ``dataset:create_virtual_sql`` (a restricted capability): a
+        403 here is expected behaviour, not a bug, and retrying will not help.
+        ``fields`` must come from :meth:`preview_sql`.
+
+        REST API: `POST /api/datasets/virtual-sql`
+        """
+        if isinstance(payload, CreateVirtualSqlDatasetDto):
+            body = payload.model_dump(exclude_none=True)
+        else:
+            body = dict(payload or {})
+        response_data = self.client.post("/datasets/virtual-sql", json=body)
+        return Dataset(**(response_data or {}))
+
+    def update_virtual_sql_dataset(
+        self,
+        dataset_id: int,
+        payload: Union[CreateVirtualSqlDatasetDto, Dict[str, Any]],
+    ) -> Dataset:
+        """Update an ad-hoc SQL virtual dataset (every key optional).
+
+        Gated by BOTH ``dataset:update`` and ``dataset:create_virtual_sql`` —
+        the elevated capability is required even to edit an existing view. A
+        403 names the missing capability and must not be retried.
+
+        REST API: `PUT /api/datasets/{id}/virtual-sql`
+        """
+        if isinstance(payload, CreateVirtualSqlDatasetDto):
+            body = payload.model_dump(exclude_none=True)
+        else:
+            body = dict(payload or {})
+        response_data = self.client.put(
+            f"/datasets/{dataset_id}/virtual-sql", json=body
+        )
+        return Dataset(**(response_data or {}))
 
     def export(
         self,

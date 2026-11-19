@@ -7,6 +7,7 @@ from urllib3.util.retry import Retry
 from .auth import AuthManager
 from .datastores import DataStoreManager
 from .datasets import DatasetManager
+from .computed_columns import ComputedColumnManager
 from .edits import EditDocumentManager
 from .tasks import TaskManager
 from .workflows import WorkflowManager
@@ -99,6 +100,7 @@ class GeopackClient:
         self.datastores = DataStoreManager(self)
         self.datasets = DatasetManager(self)
         self.edit_documents = EditDocumentManager(self)
+        self.computed_columns = ComputedColumnManager(self)
         self.tasks = TaskManager(self)
         self.workflows = WorkflowManager(self)
         self.analysis_tools = AnalysisToolManager(self)

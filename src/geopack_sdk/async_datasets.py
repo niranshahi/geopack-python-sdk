@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Union
 
 from .datasets import (
     _build_aggregate_payload,
@@ -15,6 +15,8 @@ from .datasets import (
 from .models import (
     AggregateResult,
     ColumnBounds,
+    CreateVirtualDatasetDto,
+    CreateVirtualSqlDatasetDto,
     Dataset,
     DatasetAcl,
     DatasetsApiResponse,
@@ -445,3 +447,86 @@ class AsyncDatasetManager:
             },
         )
         return response_data if isinstance(response_data, dict) else {}
+
+    # --- Virtual datasets (slice 013) ----------------------------------------
+
+    async def create_virtual_dataset(
+        self, payload: Union[CreateVirtualDatasetDto, Dict[str, Any]]
+    ) -> Dataset:
+        """Async twin of :meth:`DatasetManager.create_virtual_dataset`."""
+        if isinstance(payload, CreateVirtualDatasetDto):
+            body = payload.model_dump(exclude_none=True)
+        else:
+            body = dict(payload or {})
+        response_data = await self.client.post("/datasets/virtual", json=body)
+        return Dataset(**(response_data or {}))
+
+    async def create_virtual_dataset_from_filter(
+        self,
+        *,
+        name: str,
+        data_store_id: int,
+        workgroup_id: int,
+        root_dataset_id: int,
+        query_dsl: Dict[str, Any],
+        description: Optional[str] = None,
+        keywords: Optional[str] = None,
+    ) -> Dataset:
+        """Async twin of :meth:`DatasetManager.create_virtual_dataset_from_filter`."""
+        payload = CreateVirtualDatasetDto(
+            name=name,
+            dataStoreId=data_store_id,
+            workgroupId=workgroup_id,
+            rootDatasetId=root_dataset_id,
+            queryDsl=query_dsl,
+            kind="virtualFilter",
+            description=description,
+            keywords=keywords,
+        )
+        return await self.create_virtual_dataset(payload)
+
+    async def create_virtual_esri_dataset(
+        self, payload: Union[CreateVirtualDatasetDto, Dict[str, Any]]
+    ) -> Dataset:
+        """DEPRECATED alias of :meth:`create_virtual_dataset` (calls ``/virtual``)."""
+        return await self.create_virtual_dataset(payload)
+
+    async def preview_sql(
+        self, data_store_id: int, sql: str
+    ) -> Dict[str, Any]:
+        """Async twin of :meth:`DatasetManager.preview_sql`."""
+        if not isinstance(sql, str) or not sql.strip():
+            raise ValueError("sql must be a non-empty string.")
+        response_data = await self.client.post(
+            "/datasets/sql-preview",
+            json={"dataStoreId": int(data_store_id), "sql": sql},
+        )
+        return response_data if isinstance(response_data, dict) else {}
+
+    async def create_virtual_sql_dataset(
+        self, payload: Union[CreateVirtualSqlDatasetDto, Dict[str, Any]]
+    ) -> Dataset:
+        """Async twin of :meth:`DatasetManager.create_virtual_sql_dataset`."""
+        if isinstance(payload, CreateVirtualSqlDatasetDto):
+            body = payload.model_dump(exclude_none=True)
+        else:
+            body = dict(payload or {})
+        response_data = await self.client.post(
+            "/datasets/virtual-sql", json=body
+        )
+        return Dataset(**(response_data or {}))
+
+    async def update_virtual_sql_dataset(
+        self,
+        dataset_id: int,
+        payload: Union[CreateVirtualSqlDatasetDto, Dict[str, Any]],
+    ) -> Dataset:
+        """Async twin of :meth:`DatasetManager.update_virtual_sql_dataset`."""
+        if isinstance(payload, CreateVirtualSqlDatasetDto):
+            body = payload.model_dump(exclude_none=True)
+        else:
+            body = dict(payload or {})
+        response_data = await self.client.put(
+            f"/datasets/{dataset_id}/virtual-sql", json=body
+        )
+        return Dataset(**(response_data or {}))

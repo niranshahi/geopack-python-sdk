@@ -1319,6 +1319,129 @@ class FieldRestriction(BaseModel):
 
 
 # ============================================================================
+# --- VIRTUAL DATASET / COMPUTED COLUMN MODELS (slice 013) ---
+# ============================================================================
+
+
+class VirtualField(BaseModel):
+    """One field of an ad-hoc SQL result set (``name`` + ``type``).
+
+    Comes from ``POST /datasets/sql-preview``; the SDK never synthesizes the
+    type — ``virtual-sql`` requires exactly the discovered shape.
+    """
+
+    name: str
+    type: str
+
+    model_config = ConfigDict(extra="allow")
+
+
+class CreateVirtualDatasetDto(BaseModel):
+    """Body of ``POST /datasets/virtual`` (authoring-time contract).
+
+    ``kind`` defaults to ``virtualFilter`` server-side; send it explicitly.
+    ``queryDsl`` is the ROOT-scoped DSL: it is composed with the caller's own
+    base filter/RLS at read time, so nothing is pre-composed here.
+    """
+
+    name: str = Field(..., min_length=1)
+    dataStoreId: int = Field(..., ge=1)
+    workgroupId: int = Field(..., ge=1)
+    rootDatasetId: int = Field(..., ge=1)
+    queryDsl: Dict[str, Any]
+    kind: Optional[
+        Literal["virtualRelate", "virtualJoin", "virtualGraph", "virtualFilter"]
+    ] = None
+    description: Optional[str] = None
+    keywords: Optional[str] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class CreateVirtualSqlDatasetDto(BaseModel):
+    """Body of ``POST /datasets/virtual-sql`` (ad-hoc SQL; restricted).
+
+    ``fields`` must be the discovered list from ``sql-preview`` — inventing a
+    field type is how a stored view drifts from the real result set.
+    """
+
+    name: str = Field(..., min_length=1)
+    dataStoreId: int = Field(..., ge=1)
+    workgroupId: int = Field(..., ge=1)
+    sql: str = Field(..., min_length=1)
+    fields: List[VirtualField] = Field(..., min_length=1)
+    primaryKey: Optional[str] = None
+    geometryColumn: Optional[str] = None
+    hasZ: Optional[bool] = None
+    # Discovery echoes: ``sql-preview`` answers these, ``virtual-sql`` stores
+    # them. Sending them back keeps the stored view identical to the probe.
+    shapeType: Optional[str] = None
+    detectedShapeType: Optional[str] = None
+    detectedHasZ: Optional[bool] = None
+    spatialReference: Optional[Dict[str, Any]] = None
+    description: Optional[str] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ComputedColumnPreview(BaseModel):
+    """Answer of ``POST /datasets/computed-column/preview``.
+
+    The wire shape is FLAT: the compiled SQL rides ``expression`` and a
+    rejection rides ``code`` + ``message`` in a 200 (not an ``error`` object) —
+    a rejected expression is a normal authoring answer and must not raise.
+    :attr:`compiled_sql`, :attr:`error` and :attr:`catalog` are convenience
+    views over those fields.
+
+    This is a TEXT compile only: nothing is executed, and the authoritative
+    validation re-runs on dataset save against the stored schema.
+    """
+
+    ok: bool = False
+    dialect: Optional[str] = None
+    expression: Optional[str] = None
+    resultType: Optional[str] = None
+    isWindow: bool = False
+    code: Optional[str] = None
+    message: Optional[str] = None
+    templates: List[Any] = Field(default_factory=list)
+    measures: List[Any] = Field(default_factory=list)
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _capture_raw(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            raw = dict(data)
+            raw.setdefault("raw", raw)
+            return raw
+        return data
+
+    @property
+    def compiled_sql(self) -> Optional[str]:
+        """The compiled SQL text (``None`` when the expression was rejected)."""
+        return self.expression if self.ok else None
+
+    @property
+    def error(self) -> Optional[Dict[str, Any]]:
+        """``{code, message}`` when the expression was rejected, else ``None``."""
+        if self.ok or not (self.code or self.message):
+            return None
+        return {"code": self.code, "message": self.message}
+
+    @property
+    def catalog(self) -> Dict[str, Any]:
+        """The dialect's authoring catalog, as returned beside the compile."""
+        return {
+            "dialect": self.dialect,
+            "templates": self.templates,
+            "measures": self.measures,
+        }
+
+
+# ============================================================================
 # --- API RESPONSE WRAPPERS ---
 # ============================================================================
 
