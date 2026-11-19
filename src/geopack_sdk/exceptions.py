@@ -238,9 +238,14 @@ class DatasetReadOnly(_CodedAPIError):
 
 
 class EditConflict(_CodedAPIError):
-    """409 on the edits lane — ``conflicts`` lists the losing operations."""
+    """409 on the edits lane — the server names the losing operations.
 
-    _extras = ("conflicts",)
+    The edits controller reports the offending operations as ``issues`` (and
+    echoes ``editRef`` / ``precheckId``); ``conflicts`` is accepted too so a
+    future response can carry it without an SDK change.
+    """
+
+    _extras = ("issues", "conflicts", "edit_ref", "precheck_id")
 
 
 class PublicationStateConflict(_CodedAPIError):

@@ -1,4 +1,5 @@
 from .client import GeopackClient
+from .edits import build_edit_document, new_edit_ref
 from .exceptions import (
     AggregationInvalidArgs,
     AggregationUnsupported,
@@ -54,6 +55,8 @@ __all__ = [
     "EditDocumentVersionError",
     "PublicationStateConflict",
     "RelationshipCatalogUnavailable",
+    "new_edit_ref",
+    "build_edit_document",
     "TaskMessageInfo",
     "inspect_workflow_run_outcome",
     "task_log_entries_needing_review",

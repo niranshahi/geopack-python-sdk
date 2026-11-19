@@ -16,6 +16,7 @@ from .async_auth import AsyncAuthManager
 from .async_analysis_tools import AsyncAnalysisToolManager
 from .async_datastores import AsyncDataStoreManager
 from .async_datasets import AsyncDatasetManager
+from .async_edits import AsyncEditDocumentManager
 from .async_generated_files import AsyncGeneratedFileManager
 from .async_quotas import AsyncQuotaManager
 from .async_resources import (
@@ -94,6 +95,7 @@ class AsyncGeopackClient:
         self.auth = AsyncAuthManager(self)
         self.datastores = AsyncDataStoreManager(self)
         self.datasets = AsyncDatasetManager(self)
+        self.edit_documents = AsyncEditDocumentManager(self)
         self.tasks = AsyncTaskManager(self)
         self.workflows = AsyncWorkflowManager(self)
         self.analysis_tools = AsyncAnalysisToolManager(self)
@@ -221,6 +223,14 @@ class AsyncGeopackClient:
         **kwargs: Any,
     ) -> Any:
         return await self._request("PUT", endpoint, json=json, **kwargs)
+
+    async def patch(
+        self,
+        endpoint: str,
+        json: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> Any:
+        return await self._request("PATCH", endpoint, json=json, **kwargs)
 
     async def delete(self, endpoint: str, **kwargs: Any) -> Any:
         return await self._request("DELETE", endpoint, **kwargs)

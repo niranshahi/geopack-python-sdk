@@ -1239,6 +1239,86 @@ class DatasetDiscoverResponse(BaseModel):
 
 
 # ============================================================================
+# --- EDIT DOCUMENT / FIELD-ACCESS MODELS (slice 012) ---
+# ============================================================================
+
+
+class EditResult(BaseModel):
+    """Answer of ``POST /datasets/{id}/edits``, whatever the mode was.
+
+    ``validate``/``preview`` answer ``applied=False`` with a ``plan`` (and
+    ``previews`` for ``preview``) and put their findings in ``issues``;
+    ``apply`` answers ``applied=True`` with ``counts`` and ``identities``.
+    Use :attr:`notes` when you do not care which key the mode used, and
+    :attr:`ok` to tell an accepted document from an applied one.
+    """
+
+    edit_ref: Optional[str] = Field(default=None, alias="editRef")
+    mode: Optional[str] = None
+    applied: bool = False
+    plan: Any = None
+    previews: List[Any] = Field(default_factory=list)
+    issues: List[Any] = Field(default_factory=list)
+    warnings: List[Any] = Field(default_factory=list)
+    counts: Optional[Dict[str, Any]] = None
+    identities: Any = None
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _capture_raw(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            raw = dict(data)
+            raw.setdefault("raw", raw)
+            return raw
+        return data
+
+    @property
+    def ok(self) -> bool:
+        """Accepted by the server — ``apply`` must actually have applied."""
+        if self.mode == "apply":
+            return self.applied
+        return self.mode in ("validate", "preview")
+
+    @property
+    def notes(self) -> List[Any]:
+        """``issues`` + ``warnings`` — the server names them per mode."""
+        return [*self.issues, *self.warnings]
+
+
+class FieldRestriction(BaseModel):
+    """One standalone field-deny overlay (slice 012 §2.3).
+
+    A restriction SUBTRACTS ``denied_fields`` for one principal. It never
+    grants table access and never changes ACL uniqueness. ``PUT`` answers the
+    saved overlay, ``GET`` the list, and neither echoes ``grantedById`` yet —
+    every field is optional so a shape change cannot break parsing.
+    """
+
+    id: Optional[int] = None
+    dataset_id: Optional[int] = Field(default=None, alias="datasetId")
+    principal_type: Optional[str] = Field(default=None, alias="principalType")
+    principal_id: Optional[int] = Field(default=None, alias="principalId")
+    denied_fields: List[str] = Field(default_factory=list, alias="deniedFields")
+    updated_at: Optional[str] = Field(default=None, alias="updatedAt")
+    granted_by_id: Optional[int] = Field(default=None, alias="grantedById")
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _capture_raw(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            raw = dict(data)
+            raw.setdefault("raw", raw)
+            return raw
+        return data
+
+
+# ============================================================================
 # --- API RESPONSE WRAPPERS ---
 # ============================================================================
 

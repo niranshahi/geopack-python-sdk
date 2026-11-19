@@ -7,6 +7,7 @@ from urllib3.util.retry import Retry
 from .auth import AuthManager
 from .datastores import DataStoreManager
 from .datasets import DatasetManager
+from .edits import EditDocumentManager
 from .tasks import TaskManager
 from .workflows import WorkflowManager
 from .analysis_tools import AnalysisToolManager
@@ -97,6 +98,7 @@ class GeopackClient:
         self.auth = AuthManager(self)
         self.datastores = DataStoreManager(self)
         self.datasets = DatasetManager(self)
+        self.edit_documents = EditDocumentManager(self)
         self.tasks = TaskManager(self)
         self.workflows = WorkflowManager(self)
         self.analysis_tools = AnalysisToolManager(self)
@@ -187,6 +189,9 @@ class GeopackClient:
 
     def put(self, endpoint, json=None, **kwargs):
         return self._request("PUT", endpoint, json=json, **kwargs)
+
+    def patch(self, endpoint, json=None, **kwargs):
+        return self._request("PATCH", endpoint, json=json, **kwargs)
 
     def delete(self, endpoint, **kwargs):
         return self._request("DELETE", endpoint, **kwargs)

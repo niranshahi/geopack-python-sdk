@@ -15,6 +15,7 @@ from .models import (
     DatasetStatsByStore,
     DatasetStatsByGeomType,
     DatasetDiscoverResponse,
+    FieldRestriction,
     MintedUrl,
     PagedFeatureCollection,
     RelatedRecordsResult,
@@ -1201,3 +1202,167 @@ class DatasetManager:
         REST API: `DELETE /api/datasets/{id}/acl/{aclId}`
         """
         self.client.delete(f"/datasets/{dataset_id}/acl/{acl_id}")
+
+    def update_acl_row_filter(
+        self,
+        dataset_id: int,
+        acl_id: int,
+        row_filter: Optional[Dict[str, Any]],
+    ) -> DatasetAcl:
+        """Set or clear the row-level filter on ONE ACL entry (slice 012 §2.3).
+
+        ``row_filter=None`` CLEARS the filter: the key is sent with a null
+        value, so the server can tell "clear" from "unchanged". The filter
+        uses the same DSL node shape as ``filter`` / ``spatialFilter``; a
+        malformed filter comes back as a 400 whose message is kept verbatim.
+
+        REST API: `PATCH /api/datasets/{id}/acl/{aclId}/row-filter`
+        """
+        response_data = self.client.patch(
+            f"/datasets/{dataset_id}/acl/{acl_id}/row-filter",
+            json={"rowFilter": row_filter},
+        )
+        return DatasetAcl(**(response_data or {}))
+
+    def get_field_restrictions(self, dataset_id: int) -> List[FieldRestriction]:
+        """List the standalone field-deny overlays for a dataset.
+
+        A restriction SUBTRACTS fields for one principal; it never grants
+        table access and never changes ACL uniqueness. Requires
+        ``dataset:share`` (or ``admin:dataset:manage_permissions``).
+
+        REST API: `GET /api/datasets/{id}/field-restrictions`
+        """
+        response_data = self.client.get(
+            f"/datasets/{dataset_id}/field-restrictions"
+        )
+        if isinstance(response_data, list):
+            return [FieldRestriction(**entry) for entry in response_data]
+        return []
+
+    def upsert_field_restrictions(
+        self,
+        dataset_id: int,
+        principal_type: str,
+        principal_id: int,
+        denied_fields: Sequence[str],
+    ) -> FieldRestriction:
+        """Create or replace the deny overlay of ONE principal.
+
+        ``denied_fields`` replaces the stored list (it is not additive). The
+        server validates it against the protected-field list and answers a
+        coded 400 (``FIELD_POLICY_PROTECTED_FIELD`` / ``FIELD_POLICY_INVALID``)
+        which surfaces as :class:`~geopack_sdk.exceptions.FieldPolicyError`.
+
+        REST API: `PUT /api/datasets/{id}/field-restrictions`
+        """
+        if principal_type not in ("USER", "GROUP"):
+            raise ValueError("principal_type must be 'USER' or 'GROUP'.")
+        payload = {
+            "principalType": principal_type,
+            "principalId": int(principal_id),
+            "deniedFields": list(denied_fields or []),
+        }
+        response_data = self.client.put(
+            f"/datasets/{dataset_id}/field-restrictions", json=payload
+        )
+        return FieldRestriction(**(response_data or {}))
+
+    def delete_field_restrictions(
+        self, dataset_id: int, principal_type: str, principal_id: int
+    ) -> Dict[str, Any]:
+        """Remove the deny overlay of one principal.
+
+        The principal rides in the QUERY STRING (the server calls it the
+        primary form; the body is only a fallback) — the SDK always uses the
+        query form. Answers ``{"deleted": <count>}``; deleting an overlay
+        that does not exist is a 200 with ``deleted: 0``, not an error.
+
+        REST API: `DELETE /api/datasets/{id}/field-restrictions`
+        """
+        if principal_type not in ("USER", "GROUP"):
+            raise ValueError("principal_type must be 'USER' or 'GROUP'.")
+        response_data = self.client.delete(
+            f"/datasets/{dataset_id}/field-restrictions",
+            params={
+                "principalType": principal_type,
+                "principalId": int(principal_id),
+            },
+        )
+        return response_data if isinstance(response_data, dict) else {}
+
+    # --- Legacy feature CRUD (slice 012 §2.2) --------------------------------
+    #
+    # These are NOT transactional across relationships and they cannot link or
+    # unlink records: prefer ``client.edit_documents`` for anything beyond a
+    # simple scripted write. A partial patch is unsupported — PUT replaces the
+    # whole feature.
+
+    def create_feature(
+        self, dataset_id: int, feature: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Insert one GeoJSON Feature; answers ``{"ids": [...]}``.
+
+        The endpoint takes an ARRAY of features, so a single feature is sent
+        wrapped in a one-element list.
+
+        REST API: `POST /api/datasets/{datasetId}/features`
+        """
+        if not isinstance(feature, dict) or not feature:
+            raise ValueError("feature must be a non-empty GeoJSON Feature dict.")
+        response_data = self.client.post(
+            f"/datasets/{dataset_id}/features", json=[feature]
+        )
+        return response_data if isinstance(response_data, dict) else {}
+
+    def update_feature(
+        self, dataset_id: int, feature_id: Any, feature: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Replace one feature with the supplied GeoJSON Feature.
+
+        The lane has no partial patch: send the whole feature (use
+        ``edit_documents`` for attribute-only changes). The server answers an
+        empty 200, so the SDK returns an empty dict.
+
+        REST API: `PUT /api/datasets/{datasetId}/features/{featureId}`
+        """
+        if not isinstance(feature, dict) or not feature:
+            raise ValueError("feature must be a non-empty GeoJSON Feature dict.")
+        response_data = self.client.put(
+            f"/datasets/{dataset_id}/features/{feature_id}", json=feature
+        )
+        return response_data if isinstance(response_data, dict) else {}
+
+    def delete_feature(self, dataset_id: int, feature_id: Any) -> None:
+        """Delete one feature (204 No Content; a missing id is also a 204).
+
+        REST API: `DELETE /api/datasets/{datasetId}/features/{featureId}`
+        """
+        self.client.delete(f"/datasets/{dataset_id}/features/{feature_id}")
+
+    def apply_feature_edits(
+        self,
+        dataset_id: int,
+        *,
+        adds: Optional[List[Dict[str, Any]]] = None,
+        updates: Optional[List[Dict[str, Any]]] = None,
+        deletes: Optional[List[Any]] = None,
+    ) -> Dict[str, int]:
+        """Apply a batch of legacy feature edits; answers per-kind counts.
+
+        The body keys are ``adds`` / ``updates`` / ``deletes`` and the answer
+        is ``{"added", "updated", "deleted"}``. This lane is transactional for
+        the batch but relationship-blind: use ``edit_documents`` when a change
+        spans relationships.
+
+        REST API: `POST /api/datasets/{datasetId}/features/applyEdits`
+        """
+        payload = {
+            "adds": list(adds or []),
+            "updates": list(updates or []),
+            "deletes": list(deletes or []),
+        }
+        response_data = self.client.post(
+            f"/datasets/{dataset_id}/features/applyEdits", json=payload
+        )
+        return response_data if isinstance(response_data, dict) else {}

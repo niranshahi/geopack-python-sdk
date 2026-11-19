@@ -16,8 +16,10 @@ from .models import (
     AggregateResult,
     ColumnBounds,
     Dataset,
+    DatasetAcl,
     DatasetsApiResponse,
     FeatureCollection,
+    FieldRestriction,
     MintedUrl,
     PagedFeatureCollection,
     RelatedRecordsResult,
@@ -337,3 +339,109 @@ class AsyncDatasetManager:
         """Async twin of :meth:`DatasetManager.get_access_context`."""
         response_data = await self.client.get(f"/datasets/{dataset_id}/access-context")
         return response_data or {}
+
+    # --- Field-level access / legacy feature CRUD (slice 012) ----------------
+
+    async def update_acl_row_filter(
+        self,
+        dataset_id: int,
+        acl_id: int,
+        row_filter: Optional[Dict[str, Any]],
+    ) -> DatasetAcl:
+        """Async twin of :meth:`DatasetManager.update_acl_row_filter`."""
+        response_data = await self.client.patch(
+            f"/datasets/{dataset_id}/acl/{acl_id}/row-filter",
+            json={"rowFilter": row_filter},
+        )
+        return DatasetAcl(**(response_data or {}))
+
+    async def get_field_restrictions(
+        self, dataset_id: int
+    ) -> List[FieldRestriction]:
+        """Async twin of :meth:`DatasetManager.get_field_restrictions`."""
+        response_data = await self.client.get(
+            f"/datasets/{dataset_id}/field-restrictions"
+        )
+        if isinstance(response_data, list):
+            return [FieldRestriction(**entry) for entry in response_data]
+        return []
+
+    async def upsert_field_restrictions(
+        self,
+        dataset_id: int,
+        principal_type: str,
+        principal_id: int,
+        denied_fields: Sequence[str],
+    ) -> FieldRestriction:
+        """Async twin of :meth:`DatasetManager.upsert_field_restrictions`."""
+        if principal_type not in ("USER", "GROUP"):
+            raise ValueError("principal_type must be 'USER' or 'GROUP'.")
+        response_data = await self.client.put(
+            f"/datasets/{dataset_id}/field-restrictions",
+            json={
+                "principalType": principal_type,
+                "principalId": int(principal_id),
+                "deniedFields": list(denied_fields or []),
+            },
+        )
+        return FieldRestriction(**(response_data or {}))
+
+    async def delete_field_restrictions(
+        self, dataset_id: int, principal_type: str, principal_id: int
+    ) -> Dict[str, Any]:
+        """Async twin of :meth:`DatasetManager.delete_field_restrictions`."""
+        if principal_type not in ("USER", "GROUP"):
+            raise ValueError("principal_type must be 'USER' or 'GROUP'.")
+        response_data = await self.client.delete(
+            f"/datasets/{dataset_id}/field-restrictions",
+            params={
+                "principalType": principal_type,
+                "principalId": int(principal_id),
+            },
+        )
+        return response_data if isinstance(response_data, dict) else {}
+
+    async def create_feature(
+        self, dataset_id: int, feature: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Async twin of :meth:`DatasetManager.create_feature`."""
+        if not isinstance(feature, dict) or not feature:
+            raise ValueError("feature must be a non-empty GeoJSON Feature dict.")
+        response_data = await self.client.post(
+            f"/datasets/{dataset_id}/features", json=[feature]
+        )
+        return response_data if isinstance(response_data, dict) else {}
+
+    async def update_feature(
+        self, dataset_id: int, feature_id: Any, feature: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Async twin of :meth:`DatasetManager.update_feature`."""
+        if not isinstance(feature, dict) or not feature:
+            raise ValueError("feature must be a non-empty GeoJSON Feature dict.")
+        response_data = await self.client.put(
+            f"/datasets/{dataset_id}/features/{feature_id}", json=feature
+        )
+        return response_data if isinstance(response_data, dict) else {}
+
+    async def delete_feature(self, dataset_id: int, feature_id: Any) -> None:
+        """Async twin of :meth:`DatasetManager.delete_feature`."""
+        await self.client.delete(f"/datasets/{dataset_id}/features/{feature_id}")
+
+    async def apply_feature_edits(
+        self,
+        dataset_id: int,
+        *,
+        adds: Optional[List[Dict[str, Any]]] = None,
+        updates: Optional[List[Dict[str, Any]]] = None,
+        deletes: Optional[List[Any]] = None,
+    ) -> Dict[str, int]:
+        """Async twin of :meth:`DatasetManager.apply_feature_edits`."""
+        response_data = await self.client.post(
+            f"/datasets/{dataset_id}/features/applyEdits",
+            json={
+                "adds": list(adds or []),
+                "updates": list(updates or []),
+                "deletes": list(deletes or []),
+            },
+        )
+        return response_data if isinstance(response_data, dict) else {}
