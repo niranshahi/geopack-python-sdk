@@ -4,6 +4,24 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+# Tool policy registry (slice 020 §10 step 4).
+#
+# Every tool that touches state declares its mode here, so "what may change" is
+# a written contract rather than the absence of a handler. The seven read lanes
+# below never write anything: no portal record, no local file. Slice 021
+# promotes this registry into the machine-readable payload returned by
+# ``geopack_sdk_get_mcp_safety_policy``; until then the mapping is the source
+# the payload is generated from.
+TOOL_POLICY: Dict[str, Dict[str, Any]] = {
+    "geopack_sdk_get_dataset_schema": {"mutating": False},
+    "geopack_sdk_aggregate_dataset": {"mutating": False},
+    "geopack_sdk_get_dataset_relationships": {"mutating": False},
+    "geopack_sdk_get_related_records": {"mutating": False},
+    "geopack_sdk_get_quota_summary": {"mutating": False},
+    "geopack_sdk_list_workflow_runs": {"mutating": False},
+    "geopack_sdk_list_generated_files": {"mutating": False},
+}
+
 
 def register(mcp: Any) -> None:
     @mcp.tool(

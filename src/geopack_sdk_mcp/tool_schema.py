@@ -110,6 +110,112 @@ SharingPolicy = Annotated[
     Field(description="Generated file sharing: private (default) or organization."),
 ]
 
+# --- Dataset schema / aggregate / relationships (slice 020 read lanes) ---
+
+IncludeDomainValues = Annotated[
+    bool,
+    Field(
+        description=(
+            "Include coded-value domain values for each field (values are capped at 50). "
+            "Leave false unless the user asks what the codes mean."
+        )
+    ),
+]
+IncludeRelationships = Annotated[
+    bool,
+    Field(
+        description=(
+            "Include the dataset's authored relationship names (target dataset + cardinality). "
+            "Keep true: it lets get_related_records run without another lookup."
+        )
+    ),
+]
+AggregateList = Annotated[
+    Optional[List[Dict[str, Any]]],
+    Field(
+        description=(
+            'Aggregate specs: [{field?, aggregate, alias?, p?}]. aggregate is one of count, '
+            "countDistinct, sum, avg, min, max, stddev, stddevPop, variance, varPop, median, "
+            'percentile. percentile requires p in 0..1. field is required except for count. '
+            'Default [{aggregate: "count"}].'
+        ),
+        default=None,
+    ),
+]
+GroupByList = Annotated[
+    Optional[List[str]],
+    Field(
+        description=(
+            "Field names to group by (max 3). Take the names from geopack_sdk_get_dataset_schema; "
+            "never guess a column."
+        ),
+        default=None,
+    ),
+]
+AggregateOrderBy = Annotated[
+    Optional[List[Dict[str, Any]]],
+    Field(
+        description=(
+            'Bucket ordering: [{key, direction, by?}] max 3. key = a groupBy field or an aggregate '
+            'alias; direction = asc | desc; by = the aggregate alias when ordering a measure.'
+        ),
+        default=None,
+    ),
+]
+AggregateLimit = Annotated[
+    int,
+    Field(description="Max buckets to return (1-50, default 20).", ge=1, le=50),
+]
+FeatureFilter = Annotated[
+    Optional[Dict[str, Any]],
+    Field(
+        description=(
+            "Optional attribute scope as the portal's FeatureQuery DSL filter node. "
+            "Omit it for no attribute filter — an empty value is not the same as 'match all'."
+        ),
+        default=None,
+    ),
+]
+SpatialFilter = Annotated[
+    Optional[Dict[str, Any]],
+    Field(
+        description=(
+            "Optional spatial scope (FeatureQuery DSL spatialFilter node: geometry + spatialRel). "
+            "Omit it for no spatial filter."
+        ),
+        default=None,
+    ),
+]
+RelationshipName = Annotated[
+    str,
+    Field(
+        description=(
+            "Relationship name from geopack_sdk_get_dataset_relationships. Never invent one."
+        )
+    ),
+]
+OriginObjectIds = Annotated[
+    List[int],
+    Field(
+        description=(
+            "Source record OID values (the oidField reported by geopack_sdk_get_dataset_schema). "
+            "At least 1, at most 100 per call."
+        )
+    ),
+]
+RelatedLimit = Annotated[
+    int,
+    Field(description="Max related records to return (1-200, default 50).", ge=1, le=200),
+]
+RelationshipDirection = Annotated[
+    str,
+    Field(
+        description=(
+            'forward (default): origin record -> related records; backward: the reverse leg.'
+        )
+    ),
+]
+
 # --- Tasks ---
 
 TaskId = Annotated[str, Field(description="Background task id (BullMQ job id) from upload/export/workflow submit.")]
@@ -148,6 +254,19 @@ OverrideDatastoreId = Annotated[
     Field(description="Optional datastore override for workflow execution.", default=None),
 ]
 WorkflowRunId = Annotated[int, Field(description="Workflow run id from submit_workflow or wait_for_task results.")]
+WorkflowIdOptional = Annotated[
+    Optional[int],
+    Field(description="Optional workflow definition id filter (from list_workflows).", default=None),
+]
+RunStatusFilter = Annotated[
+    Optional[str],
+    Field(
+        description=(
+            "Optional run status filter: queued, running, canceling, succeeded, failed or canceled."
+        ),
+        default=None,
+    ),
+]
 ArtifactId = Annotated[int, Field(description="Artifact id from geopack_sdk_get_workflow_run artifacts[].")]
 
 # --- Analysis tools (workflow-as-tool surface, portal slice 030) ---

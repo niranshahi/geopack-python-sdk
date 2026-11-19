@@ -1036,8 +1036,15 @@ class WorkflowRun(BaseModel):
 
 
 class WorkflowRunListResponse(BaseModel):
-    """Response from GET /api/workflow-runs"""
+    """Response from GET /api/workflow-runs.
+
+    The server pages with raw ``limit``/``offset`` and answers ``{items, total}``;
+    ``totalItems``/``currentPage``/``totalPages`` are kept for portals that page
+    by page number. Read :attr:`total` first — it is the count that exists.
+    """
+
     items: List[WorkflowRun] = Field(default_factory=list)
+    total: Optional[int] = None
     totalItems: int = 0
     currentPage: int = 1
     totalPages: int = 1
