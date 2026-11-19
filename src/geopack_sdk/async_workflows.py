@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
-from .models import Workflow
+from .models import Workflow, WorkflowParameter
+from .workflows import extract_workflow_params
 
 if TYPE_CHECKING:
     from .async_client import AsyncGeopackClient
@@ -63,6 +64,39 @@ class AsyncWorkflowManager:
 
         response_data = await self.client.get(f"{self.base_url}/{workflow_id}")
         return Workflow(**response_data)
+
+    def extract_params(
+        self, workflow: Union[Workflow, Dict[str, Any]]
+    ) -> List[WorkflowParameter]:
+        """Async twin of :meth:`WorkflowManager.extract_params`.
+
+        Pure computation over the graph blob — there is no I/O, so this is
+        deliberately **not** a coroutine: ``await`` it and you get a TypeError,
+        which is the honest signal that nothing is waiting.
+        """
+        return extract_workflow_params(workflow)
+
+    async def get_operations(self) -> List[Dict[str, Any]]:
+        """Async twin of :meth:`WorkflowManager.get_operations`."""
+        response = await self.client.get(f"{self.base_url}/operations")
+        return response.get("items", [])
+
+    async def create(self, payload: Dict[str, Any]) -> Workflow:
+        """Async twin of :meth:`WorkflowManager.create`."""
+        response_data = await self.client.post(self.base_url, json=payload)
+        return Workflow(**response_data)
+
+    async def update(self, workflow_id: int, payload: Dict[str, Any]) -> Workflow:
+        """Async twin of :meth:`WorkflowManager.update`."""
+        response_data = await self.client.put(
+            f"{self.base_url}/{workflow_id}", json=payload
+        )
+        return Workflow(**response_data)
+
+    async def delete(self, workflow_id: int) -> bool:
+        """Async twin of :meth:`WorkflowManager.delete`."""
+        await self.client.delete(f"{self.base_url}/{workflow_id}")
+        return True
 
     # --- Statistics, spec compilation and tool manifest (slice 015) ----------
 

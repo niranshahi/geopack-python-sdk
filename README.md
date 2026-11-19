@@ -56,6 +56,18 @@ endpoint, and the SDK deliberately adds none: `client.maps` and `client.print_la
 records (documents, template JSON, caller-uploaded thumbnails). Rendering a map image or a printout is
 the consuming agent's job, with its own tools.
 
+**Parity:** every public manager method exists on both clients. `tests/test_async_parity.py`
+enumerates the sync surface and fails when an async twin is missing, when an argument name or
+required/optional status drifts, or when a new async-only helper is not recorded with a reason. Two
+honest exceptions: `AsyncWorkflowManager.extract_params` is a **plain** method (pure computation over
+the graph, no I/O — awaiting it would be a lie) and `AsyncTaskManager.wait_for_tasks` has no sync twin
+(parallel polling is what `asyncio.gather` is for).
+
+**File I/O in async.** `upload`, `download`, `download_artifact` and the generated-file download use
+`httpx.AsyncClient` for the network and `asyncio.to_thread` for every file read/write
+(`AsyncGeopackClient._stream_to_file` is the shared streaming helper). No coroutine ever calls
+`requests`, and a blocking geopandas build runs in a worker thread too.
+
 ## Examples & Notebooks
 
 We provide a collection of Jupyter Notebooks in the `notebooks/` directory to help you get started:

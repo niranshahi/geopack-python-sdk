@@ -42,22 +42,25 @@ class AsyncQuotaManager:
         response_data = await self.client.get(f"/quotas/plans/{plan_id}/limits")
         return response_data if isinstance(response_data, list) else []
 
-    def get_limit(
+    async def get_limit(
         self,
         dimension_key: str,
-        summary: QuotaSummary,
+        summary: Optional[QuotaSummary] = None,
     ) -> Optional[QuotaSummaryLimit]:
+        """Async twin of :meth:`QuotaManager.get_limit` (fetches when omitted)."""
+        summary = summary or await self.my_summary()
         for row in summary.limits:
             if row.dimensionKey == dimension_key:
                 return row
         return None
 
-    def remaining_for(
+    async def remaining_for(
         self,
         dimension_key: str,
-        summary: QuotaSummary,
+        summary: Optional[QuotaSummary] = None,
     ) -> Optional[float]:
-        row = self.get_limit(dimension_key, summary=summary)
+        """Async twin of :meth:`QuotaManager.remaining_for`."""
+        row = await self.get_limit(dimension_key, summary=summary)
         if row is None:
             return None
         return row.remaining
@@ -70,18 +73,20 @@ class AsyncQuotaManager:
         summary = summary or await self.my_summary()
         if not summary.enabled:
             return False
-        row = self.get_limit(dimension_key, summary=summary)
+        row = await self.get_limit(dimension_key, summary=summary)
         if row is None:
             return False
         if row.remaining is None:
             return False
         return row.remaining <= 0
 
-    def warn_limits(
+    async def warn_limits(
         self,
-        summary: QuotaSummary,
+        summary: Optional[QuotaSummary] = None,
         min_percent: float = 80.0,
     ) -> List[QuotaSummaryLimit]:
+        """Async twin of :meth:`QuotaManager.warn_limits` (fetches when omitted)."""
+        summary = summary or await self.my_summary()
         out: List[QuotaSummaryLimit] = []
         for row in summary.limits:
             threshold = row.warnThresholdPercent

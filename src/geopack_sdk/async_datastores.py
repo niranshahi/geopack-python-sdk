@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
 from .datastores import _unwrap_success, parse_datastore_list_response
 from .models import (
+    DataStoreAclEntry,
     DataStoreListResponse,
     DataStoreResponse,
     EsriDiscoverResponse,
@@ -14,6 +15,8 @@ from .models import (
     EsriRegisterResponse,
     EsriSchemaUpdateResponse,
     EsriBulkDeleteResponse,
+    PredefinedDataStore,
+    TestConnectionResponse,
 )
 
 if TYPE_CHECKING:
@@ -31,6 +34,97 @@ class AsyncDataStoreManager:
     async def get(self, data_store_id: int) -> DataStoreResponse:
         response_data = await self.client.get(f"/datastores/{data_store_id}")
         return DataStoreResponse(**response_data)
+
+    # ── CRUD, connection testing and ACLs (slice 016 P4a) ─────────────
+
+    async def list_by_capabilities(
+        self,
+        purpose: Optional[Literal['dataset-creation', 'workflow-output']] = None,
+    ) -> DataStoreListResponse:
+        """Async twin of :meth:`DataStoreManager.list_by_capabilities`."""
+        params: Dict[str, Any] = {}
+        if purpose:
+            params["purpose"] = purpose
+        response_data = await self.client.get(
+            "/datastores/by-capabilities", params=params or None
+        )
+        data = response_data
+        if isinstance(response_data, dict):
+            if "data" in response_data:
+                data = response_data["data"]
+            elif "datastores" in response_data:
+                return DataStoreListResponse(**response_data)
+        if isinstance(data, list):
+            datastores = [DataStoreResponse(**d) for d in data]
+            return DataStoreListResponse(datastores=datastores, totalCount=len(datastores))
+        return DataStoreListResponse(**response_data)
+
+    async def create(self, data_store_input: Dict[str, Any]) -> DataStoreResponse:
+        """Async twin of :meth:`DataStoreManager.create`."""
+        response_data = await self.client.post("/datastores", json=data_store_input)
+        return DataStoreResponse(**response_data)
+
+    async def update(
+        self,
+        data_store_id: int,
+        data_store_input: Dict[str, Any],
+    ) -> DataStoreResponse:
+        """Async twin of :meth:`DataStoreManager.update`."""
+        response_data = await self.client.put(
+            f"/datastores/{data_store_id}", json=data_store_input
+        )
+        return DataStoreResponse(**response_data)
+
+    async def delete(self, data_store_id: int) -> None:
+        """Async twin of :meth:`DataStoreManager.delete`."""
+        await self.client.delete(f"/datastores/{data_store_id}")
+
+    async def test_connection(
+        self, test_input: Dict[str, Any]
+    ) -> TestConnectionResponse:
+        """Async twin of :meth:`DataStoreManager.test_connection`."""
+        response_data = await self.client.post(
+            "/datastores/test-connection", json=test_input
+        )
+        return TestConnectionResponse(**response_data)
+
+    async def list_predefined(self) -> List[PredefinedDataStore]:
+        """Async twin of :meth:`DataStoreManager.list_predefined`."""
+        response_data = await self.client.get("/config/predefined-datastores")
+        if isinstance(response_data, list):
+            return [PredefinedDataStore(**d) for d in response_data]
+        return []
+
+    async def get_acls(self, data_store_id: int) -> List[DataStoreAclEntry]:
+        """Async twin of :meth:`DataStoreManager.get_acls`."""
+        response_data = await self.client.get(f"/datastores/{data_store_id}/acl")
+        if isinstance(response_data, list):
+            return [DataStoreAclEntry(**d) for d in response_data]
+        return []
+
+    async def create_acls(
+        self,
+        data_store_id: int,
+        principals: List[Dict[str, Any]],
+        permissions: List[str],
+        effect: str = "Allow",
+    ) -> List[DataStoreAclEntry]:
+        """Async twin of :meth:`DataStoreManager.create_acls`."""
+        payload = {
+            "principals": principals,
+            "permissions": permissions,
+            "effect": effect,
+        }
+        response_data = await self.client.post(
+            f"/datastores/{data_store_id}/acl", json=payload
+        )
+        if isinstance(response_data, list):
+            return [DataStoreAclEntry(**d) for d in response_data]
+        return []
+
+    async def delete_acl(self, data_store_id: int, acl_id: int) -> None:
+        """Async twin of :meth:`DataStoreManager.delete_acl`."""
+        await self.client.delete(f"/datastores/{data_store_id}/acl/{acl_id}")
 
     # ── Authored (logical) relationships ──────────────────────────────
 

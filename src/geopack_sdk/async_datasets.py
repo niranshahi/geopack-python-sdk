@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Union
 
 from .datasets import (
     _build_aggregate_payload,
     _build_paged_dsl,
     _positive_int,
+    build_geodataframe,
     build_simple_query,
     encode_query_params,
     normalize_feature_query_dsl,
@@ -15,22 +19,36 @@ from .datasets import (
 from .models import (
     AggregateResult,
     ColumnBounds,
+    CreateDatasetDto,
     CreateVirtualDatasetDto,
     CreateVirtualSqlDatasetDto,
     Dataset,
     DatasetAcl,
+    DatasetDiscoverResponse,
+    DatasetStatsByGeomType,
+    DatasetStatsByStore,
+    DatasetTimeSeriesPoint,
     DatasetsApiResponse,
     FeatureCollection,
     FieldRestriction,
+    FilterStatistics,
     MintedUrl,
     PagedFeatureCollection,
     RelatedRecordsResult,
     RelationshipDescriptor,
     SchemaPreview,
+    TaskResult,
+    UpdateDatasetDto,
 )
 
 if TYPE_CHECKING:
     from .async_client import AsyncGeopackClient
+
+
+def _read_file_bytes(path: str) -> bytes:
+    """Blocking read used only through ``asyncio.to_thread``."""
+    with open(path, "rb") as handle:
+        return handle.read()
 
 
 class AsyncDatasetManager:
@@ -139,6 +157,292 @@ class AsyncDatasetManager:
 
     async def delete(self, dataset_id: int) -> None:
         await self.client.delete(f"/datasets/{dataset_id}")
+
+    # --- CRUD, stats, features and file lanes (slice 016 P4a) ----------------
+
+    async def get_features(
+        self,
+        dataset_id: int,
+        limit: int = 100,
+        offset: int = 0,
+        bbox: Optional[List[float]] = None,
+        out_srid: Optional[int] = None,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> FeatureCollection:
+        """Async twin of :meth:`DatasetManager.get_features`."""
+        params: Dict[str, Any] = {
+            "limit": limit,
+            "offset": offset,
+        }
+        if bbox and len(bbox) == 4:
+            params["bbox"] = ",".join(map(str, bbox))
+        if out_srid:
+            params["outSRID"] = out_srid
+        if filters:
+            params["filter"] = json.dumps(filters)
+
+        response_data = await self.client.get(
+            f"/datasets/{dataset_id}/features", params=params
+        )
+        return FeatureCollection(**response_data)
+
+    async def to_geodataframe(self, dataset_id: int, limit: int = 1000) -> Any:
+        """Async twin of :meth:`DatasetManager.to_geodataframe`.
+
+        Network calls are awaited; the GeoDataFrame is built in a worker thread
+        through ``asyncio.to_thread`` because geopandas is blocking (slice 016 §3).
+        """
+        metadata = await self.get(dataset_id)
+        if metadata.dataType != 'vector':
+            raise ValueError(
+                f"Dataset {dataset_id} is not a vector dataset "
+                f"(type: {metadata.dataType}). GeoDataFrame only supports vector data."
+            )
+        feature_collection = await self.get_features(dataset_id, limit=limit)
+        return await asyncio.to_thread(
+            build_geodataframe, metadata, feature_collection
+        )
+
+    async def get_statistics(self) -> FilterStatistics:
+        """Async twin of :meth:`DatasetManager.get_statistics`."""
+        response_data = await self.client.get("/datasets/statistics")
+        return FilterStatistics(**response_data)
+
+    async def get_time_series_stats(
+        self, days: Optional[int] = None, data_type: Optional[str] = None
+    ) -> List[DatasetTimeSeriesPoint]:
+        """Async twin of :meth:`DatasetManager.get_time_series_stats`."""
+        params: Dict[str, Any] = {}
+        if days is not None:
+            params["days"] = days
+        if data_type is not None:
+            params["dataType"] = data_type
+        response_data = await self.client.get(
+            "/datasets/stats/time-series", params=encode_query_params(params)
+        )
+        if isinstance(response_data, list):
+            return [DatasetTimeSeriesPoint(**item) for item in response_data]
+        return []
+
+    async def get_stats_by_store(self) -> List[DatasetStatsByStore]:
+        """Async twin of :meth:`DatasetManager.get_stats_by_store`."""
+        response_data = await self.client.get("/datasets/stats/by-store")
+        if isinstance(response_data, list):
+            return [DatasetStatsByStore(**item) for item in response_data]
+        return []
+
+    async def get_stats_by_geom_type(self) -> List[DatasetStatsByGeomType]:
+        """Async twin of :meth:`DatasetManager.get_stats_by_geom_type`."""
+        response_data = await self.client.get("/datasets/stats/by-geom-type")
+        if isinstance(response_data, list):
+            return [DatasetStatsByGeomType(**item) for item in response_data]
+        return []
+
+    async def create(
+        self, dataset_data: Union[CreateDatasetDto, Dict[str, Any]]
+    ) -> Dataset:
+        """Async twin of :meth:`DatasetManager.create`."""
+        payload = (
+            dataset_data.model_dump()
+            if isinstance(dataset_data, CreateDatasetDto)
+            else dataset_data
+        )
+        response_data = await self.client.post("/datasets", json=payload)
+        return Dataset(**response_data)
+
+    async def update(
+        self, dataset_id: int, dataset_data: Union[UpdateDatasetDto, Dict[str, Any]]
+    ) -> Dataset:
+        """Async twin of :meth:`DatasetManager.update`."""
+        payload = (
+            dataset_data.model_dump(exclude_unset=True)
+            if isinstance(dataset_data, UpdateDatasetDto)
+            else dataset_data
+        )
+        response_data = await self.client.put(
+            f"/datasets/{dataset_id}", json=payload
+        )
+        return Dataset(**response_data)
+
+    async def export(
+        self,
+        dataset_id: int,
+        workgroup_id: int,
+        format: str,
+        sharing_policy: str = "private",
+        wait: bool = True,
+        polling_interval: int = 2,
+    ) -> TaskResult:
+        """Async twin of :meth:`DatasetManager.export`."""
+        payload = {
+            "taskType": "dataset:export",
+            "workgroupId": workgroup_id,
+            "inputParameters": {
+                "datasetId": dataset_id,
+                "format": format,
+                "options": {"sharingPolicy": sharing_policy},
+            },
+        }
+        task_response = await self.client.tasks.create(payload)
+        if not wait:
+            return task_response
+        return await self.client.tasks.wait(
+            task_response.task_id, interval=polling_interval
+        )
+
+    async def upload(
+        self,
+        file_path: str,
+        data_store_id: int,
+        workgroup_id: int,
+        declared_type: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        wait: bool = True,
+        polling_interval: int = 2,
+    ) -> TaskResult:
+        """Async twin of :meth:`DatasetManager.upload`.
+
+        The file bytes are read in a worker thread and posted as multipart; the
+        task then follows the same ``dataset:upload`` flow as the sync client.
+        """
+        if not await asyncio.to_thread(os.path.exists, file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        filename = os.path.basename(file_path)
+        content = await asyncio.to_thread(_read_file_bytes, file_path)
+        upload_response = await self.client._request(
+            "POST", "/uploads/temp", files={"files": (filename, content)}
+        )
+
+        session_id = upload_response["uploadSessionId"]
+        uploaded_file = upload_response["files"][0]
+        relative_path = uploaded_file["relativePath"]
+
+        input_params: Dict[str, Any] = {
+            "sourceFiles": [
+                {
+                    "type": "tempUpload",
+                    "sessionId": session_id,
+                    "relativePath": relative_path,
+                    "originalName": filename,
+                }
+            ],
+            "dataStoreId": data_store_id,
+        }
+        if declared_type:
+            input_params["declaredType"] = declared_type
+        if metadata is not None:
+            input_params["metadata"] = metadata
+
+        task_response = await self.client.tasks.create(
+            {
+                "taskType": "dataset:upload",
+                "workgroupId": workgroup_id,
+                "inputParameters": input_params,
+            }
+        )
+        if not wait:
+            return task_response
+        return await self.client.tasks.wait(
+            task_response.taskId, interval=polling_interval, quiet=True
+        )
+
+    async def download(
+        self,
+        task_results: Union[TaskResult, Dict[str, Any]],
+        local_path: str,
+        chunk_size: int = 8192,
+    ) -> str:
+        """Async twin of :meth:`DatasetManager.download`.
+
+        Resolves the same ``downloadToken`` / ``artifactPath`` pair from the task
+        results, then streams the body with ``httpx`` and writes it through
+        ``asyncio.to_thread``.
+        """
+        results = (
+            task_results.results
+            if isinstance(task_results, TaskResult)
+            else task_results.get("results")
+        )
+        if not results:
+            raise ValueError("Task is completed but contains no results/output.")
+
+        download_token = results.get("downloadToken")
+        artifact_path = results.get("artifactPath")
+        filename = results.get("originalName") or results.get("fileName") or "exported_data"
+
+        if download_token:
+            endpoint = f"downloads/{download_token}"
+        elif artifact_path:
+            endpoint = f"download/{artifact_path.lstrip('/')}"
+        else:
+            raise ValueError("No download token or artifact path found in task results.")
+
+        return await self.client._stream_to_file(
+            endpoint, local_path, fallback_filename=filename, chunk_size=chunk_size
+        )
+
+    async def discover(
+        self,
+        source_files: List[Dict[str, Any]],
+        data_store_id: int,
+        workgroup_id: int,
+        declared_type: Optional[str] = None,
+        wait: bool = True,
+        polling_interval: int = 2,
+    ) -> Union[DatasetDiscoverResponse, TaskResult]:
+        """Async twin of :meth:`DatasetManager.discover`."""
+        payload: Dict[str, Any] = {
+            "sourceFiles": source_files,
+            "dataStoreId": data_store_id,
+            "workgroupId": workgroup_id,
+        }
+        if declared_type:
+            payload["declaredType"] = declared_type
+
+        response_data = await self.client.post("/datasets/discover", json=payload)
+        result = DatasetDiscoverResponse(**response_data)
+        if not wait or not result.is_background_task:
+            return result
+
+        task_id = result.taskId
+        if not task_id:
+            return result
+
+        return await self.client.tasks.wait_for_task(
+            task_id, interval=polling_interval, quiet=True
+        )
+
+    async def get_acls(self, dataset_id: int) -> List[DatasetAcl]:
+        """Async twin of :meth:`DatasetManager.get_acls`."""
+        response_data = await self.client.get(f"/datasets/{dataset_id}/acl")
+        if isinstance(response_data, list):
+            return [DatasetAcl(**entry) for entry in response_data]
+        return []
+
+    async def create_acls(
+        self,
+        dataset_id: int,
+        principals: List[Dict[str, Any]],
+        permissions: List[str],
+        effect: str = "Allow",
+    ) -> List[DatasetAcl]:
+        """Async twin of :meth:`DatasetManager.create_acls`."""
+        response_data = await self.client.post(
+            f"/datasets/{dataset_id}/acl",
+            json={
+                "principals": principals,
+                "permissions": permissions,
+                "effect": effect,
+            },
+        )
+        if isinstance(response_data, list):
+            return [DatasetAcl(**entry) for entry in response_data]
+        return []
+
+    async def delete_acl(self, dataset_id: int, acl_id: int) -> None:
+        """Async twin of :meth:`DatasetManager.delete_acl`."""
+        await self.client.delete(f"/datasets/{dataset_id}/acl/{acl_id}")
 
     # --- Query lanes (slice 010) --------------------------------------------
 

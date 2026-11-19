@@ -113,6 +113,11 @@ class AsyncTaskManager:
         response_data = await self.client.get(f"/tasks/{task_id}")
         return TaskResult(**response_data)
 
+    async def create(self, task_payload: Dict[str, Any]) -> TaskResult:
+        """Async twin of :meth:`TaskManager.create`."""
+        response_data = await self.client.post("/tasks", json=task_payload)
+        return TaskResult(**response_data)
+
     # --- Types, statistics and control (slice 015) ---------------------------
 
     async def get_types(self) -> List[Dict[str, Any]]:

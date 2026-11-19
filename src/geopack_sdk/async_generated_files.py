@@ -1,4 +1,4 @@
-"""Async generated file manager (list; streaming download use sync client)."""
+"""Async generated file manager."""
 
 from __future__ import annotations
 
@@ -58,6 +58,24 @@ class AsyncGeneratedFileManager:
             if len(resp.items) < page_size:
                 break
             current_page += 1
+
+    async def download(
+        self,
+        file_id: int,
+        local_path: str,
+        chunk_size: int = 8192,
+    ) -> str:
+        """Async twin of :meth:`GeneratedFileManager.download`.
+
+        ``httpx.AsyncClient`` streams the body; the file is written through
+        ``asyncio.to_thread``. Returns the absolute path of the saved file.
+        """
+        return await self.client._stream_to_file(
+            f"{self.base_url}/{file_id}/download",
+            local_path,
+            fallback_filename=f"generated_file_{file_id}",
+            chunk_size=chunk_size,
+        )
 
     async def delete(self, file_id: int) -> None:
 

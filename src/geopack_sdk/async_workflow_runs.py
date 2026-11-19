@@ -164,6 +164,25 @@ class AsyncWorkflowRunManager:
             results.append(WorkflowRunArtifact(**artifact_dict))
         return results
 
+    async def download_artifact(
+        self,
+        run_id: int,
+        artifact_id: int,
+        local_path: str,
+        chunk_size: int = 8192,
+    ) -> str:
+        """Async twin of :meth:`WorkflowRunManager.download_artifact`.
+
+        ``httpx.AsyncClient`` streams the body; the file is written through
+        ``asyncio.to_thread``. Returns the absolute path of the saved file.
+        """
+        return await self.client._stream_to_file(
+            f"{self.base_url}/{run_id}/artifacts/{artifact_id}/download",
+            local_path,
+            fallback_filename=f"artifact_{artifact_id}",
+            chunk_size=chunk_size,
+        )
+
     async def convert_artifact_to_dataset(
         self,
         run_id: int,

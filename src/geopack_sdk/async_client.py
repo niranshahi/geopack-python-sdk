@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import Any, Dict, Optional
-
 import httpx
 
 from .async_auth import AsyncAuthManager
@@ -134,6 +133,50 @@ class AsyncGeopackClient:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    async def _stream_to_file(
+        self,
+        endpoint: str,
+        local_path: str,
+        fallback_filename: str,
+        chunk_size: int = 8192,
+    ) -> str:
+        """Stream a GET body to disk without blocking the event loop.
+
+        Network reads use ``httpx.AsyncClient``; every file write goes through
+        ``asyncio.to_thread``. A directory ``local_path`` keeps the server's
+        ``Content-Disposition`` filename, otherwise ``local_path`` is the target.
+        Never call ``requests`` inside a coroutine for this (slice 016 §3).
+        """
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        headers = dict(self.default_headers)
+        token = getattr(self.auth, "token", None)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        async with self._client.stream("GET", url, headers=headers) as response:
+            if not response.is_success:
+                await response.aread()
+                raise GeopackAPIError.from_httpx_response(response)
+
+            filename = fallback_filename
+            disposition = response.headers.get("Content-Disposition")
+            if disposition and "filename=" in disposition:
+                filename = disposition.split("filename=")[1].strip('"')
+
+            if os.path.isdir(local_path):
+                target_file = os.path.join(local_path, filename)
+            else:
+                target_file = local_path
+
+            handle = await asyncio.to_thread(open, target_file, "wb")
+            try:
+                async for chunk in response.aiter_bytes(chunk_size):
+                    await asyncio.to_thread(handle.write, chunk)
+            finally:
+                await asyncio.to_thread(handle.close)
+
+        return os.path.abspath(target_file)
 
     async def _request(self, method: str, endpoint: str, **kwargs: Any) -> Any:
         # Sync session headers with centralized TokenRegistry

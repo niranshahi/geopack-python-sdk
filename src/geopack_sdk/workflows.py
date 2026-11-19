@@ -9,6 +9,18 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+
+def extract_workflow_params(
+    workflow: Union["Workflow", Dict[str, Any]],
+) -> List[WorkflowParameter]:
+    """Extract runtime parameters from a workflow graph (no I/O).
+
+    Shared by :meth:`WorkflowManager.extract_params` and the async twin, so the
+    ordering and normalization rules cannot drift between the two clients.
+    """
+    return WorkflowManager(None).extract_params(workflow)
+
+
 class WorkflowManager:
     """Manager for Workflow Definitions and Operations."""
 

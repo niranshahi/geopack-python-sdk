@@ -35,6 +35,73 @@ def _positive_int(value: Any, name: str) -> int:
     return number
 
 
+def build_geodataframe(metadata: Dataset, feature_collection: FeatureCollection) -> Any:
+    """Turn a fetched dataset + FeatureCollection into a GeoPandas GeoDataFrame.
+
+    Pure, blocking work (geopandas/shapely), shared by
+    :meth:`DatasetManager.to_geodataframe` and the async twin, which runs it in
+    a worker thread (slice 016 §3).
+    """
+    try:
+        import geopandas as gpd
+        from shapely.geometry import shape  # noqa: F401  (import guard parity)
+    except ImportError:
+        raise ImportError("geopandas and shapely are required for to_geodataframe()")
+
+    if not feature_collection.features:
+        # Return empty GeoDataFrame if no features
+        return gpd.GeoDataFrame()
+
+    # 3. Convert Pydantic model to dict for GeoPandas
+    geojson_dict = feature_collection.model_dump()
+
+    # 4. Convert to GeoDataFrame
+    gdf = gpd.GeoDataFrame.from_features(geojson_dict['features'])
+
+    # 5. Set CRS with a robust hierarchy
+    # First check if FeatureCollection has CRS
+    if feature_collection.crs:
+        geojson_crs = feature_collection.crs
+    else:
+        geojson_crs = geojson_dict.get('crs')
+
+    norm = metadata.model_dump().get('normalizedDetails', {})
+    sp_ref = norm.get('spatialReference', {})
+
+    # Priority 1: Check if GeoJSON already has CRS info
+    # Priority 2: Use SRID if valid (> 0)
+    srid = sp_ref.get('srid')
+
+    # Priority 3: Use WKT if available (more robust than Proj4)
+    wkt = sp_ref.get('wkt')
+
+    # Priority 4: Use Proj4 if others are missing
+    proj4 = sp_ref.get('proj4')
+
+    if geojson_crs and isinstance(geojson_crs, dict):
+        # GeoJSON CRS standard often uses 'urn:ogc:def:crs:EPSG::32640'
+        crs_name = geojson_crs.get('properties', {}).get('name', '')
+        if 'EPSG::' in crs_name:
+            try:
+                epsg_code = int(crs_name.split('EPSG::')[-1])
+                gdf.set_crs(epsg=epsg_code, inplace=True)
+            except (ValueError, IndexError):
+                pass  # Fallback to metadata if parsing fails
+
+    # If CRS not set by GeoJSON parsing, follow hierarchy
+    if gdf.crs is None:
+        if srid and srid > 0:
+            gdf.set_crs(epsg=srid, inplace=True)
+        elif wkt:
+            gdf.set_crs(wkt, inplace=True)
+        elif proj4:
+            gdf.set_crs(proj4, inplace=True)
+        else:
+            gdf.set_crs(epsg=4326, inplace=True)
+
+    return gdf
+
+
 def _build_paged_dsl(
     query: Optional[Dict[str, Any]] = None,
     *,
@@ -498,75 +565,17 @@ class DatasetManager:
 
     def to_geodataframe(self, dataset_id: int, limit: int = 1000) -> Any:
         """Fetch dataset features and convert to a GeoPandas GeoDataFrame.
-        
+
         Requires `geopandas` to be installed.
         """
-        try:
-            import geopandas as gpd
-            from shapely.geometry import shape
-        except ImportError:
-            raise ImportError("geopandas and shapely are required for to_geodataframe()")
-
         # 1. Fetch metadata to check type and CRS
         metadata = self.get(dataset_id)
         if metadata.dataType != 'vector':
             raise ValueError(f"Dataset {dataset_id} is not a vector dataset (type: {metadata.dataType}). GeoDataFrame only supports vector data.")
 
-        # 2. Fetch features (now returns FeatureCollection Pydantic model)
+        # 2. Fetch features (returns a FeatureCollection Pydantic model)
         feature_collection = self.get_features(dataset_id, limit=limit)
-        
-        if not feature_collection.features:
-            # Return empty GeoDataFrame if no features
-            return gpd.GeoDataFrame()
-
-        # 3. Convert Pydantic model to dict for GeoPandas
-        geojson_dict = feature_collection.model_dump()
-        
-        # 4. Convert to GeoDataFrame
-        gdf = gpd.GeoDataFrame.from_features(geojson_dict['features'])
-        
-        # 5. Set CRS with a robust hierarchy
-        # First check if FeatureCollection has CRS
-        if feature_collection.crs:
-            geojson_crs = feature_collection.crs
-        else:
-            geojson_crs = geojson_dict.get('crs')
-        
-        norm = metadata.model_dump().get('normalizedDetails', {})
-        sp_ref = norm.get('spatialReference', {})
-        
-        # Priority 1: Check if GeoJSON already has CRS info
-        # Priority 2: Use SRID if valid (> 0)
-        srid = sp_ref.get('srid')
-        
-        # Priority 3: Use WKT if available (more robust than Proj4)
-        wkt = sp_ref.get('wkt')
-        
-        # Priority 4: Use Proj4 if others are missing
-        proj4 = sp_ref.get('proj4')
-
-        if geojson_crs and isinstance(geojson_crs, dict):
-            # GeoJSON CRS standard often uses 'urn:ogc:def:crs:EPSG::32640'
-            crs_name = geojson_crs.get('properties', {}).get('name', '')
-            if 'EPSG::' in crs_name:
-                try:
-                    epsg_code = int(crs_name.split('EPSG::')[-1])
-                    gdf.set_crs(epsg=epsg_code, inplace=True)
-                except (ValueError, IndexError):
-                    pass # Fallback to metadata if parsing fails
-        
-        # If CRS not set by GeoJSON parsing, follow hierarchy
-        if gdf.crs is None:
-            if srid and srid > 0:
-                gdf.set_crs(epsg=srid, inplace=True)
-            elif wkt:
-                gdf.set_crs(wkt, inplace=True)
-            elif proj4:
-                gdf.set_crs(proj4, inplace=True)
-            else:
-                gdf.set_crs(epsg=4326, inplace=True)
-        
-        return gdf
+        return build_geodataframe(metadata, feature_collection)
 
     def create(self, dataset_data: CreateDatasetDto) -> Dataset:
         """Create a new dataset.
