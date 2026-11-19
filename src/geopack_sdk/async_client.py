@@ -17,6 +17,7 @@ from .async_analysis_tools import AsyncAnalysisToolManager
 from .async_datastores import AsyncDataStoreManager
 from .async_datasets import AsyncDatasetManager
 from .async_computed_columns import AsyncComputedColumnManager
+from .async_uploads import AsyncUploadManager
 from .async_edits import AsyncEditDocumentManager
 from .async_generated_files import AsyncGeneratedFileManager
 from .async_quotas import AsyncQuotaManager
@@ -98,6 +99,7 @@ class AsyncGeopackClient:
         self.datasets = AsyncDatasetManager(self)
         self.edit_documents = AsyncEditDocumentManager(self)
         self.computed_columns = AsyncComputedColumnManager(self)
+        self.uploads = AsyncUploadManager(self)
         self.tasks = AsyncTaskManager(self)
         self.workflows = AsyncWorkflowManager(self)
         self.analysis_tools = AsyncAnalysisToolManager(self)

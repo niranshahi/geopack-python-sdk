@@ -1442,6 +1442,30 @@ class ComputedColumnPreview(BaseModel):
 
 
 # ============================================================================
+# --- GOVERNANCE MODELS (slice 015) ---
+# ============================================================================
+
+
+class UploadLimits(BaseModel):
+    """The upload caps the portal enforces (``GET /uploads/limits``).
+
+    The wire carries exactly these two values — there is no allowed-extension
+    or declared-type list on the endpoint, so do not invent one. Read them
+    BEFORE ``upload()`` to fail fast on size instead of collecting a 413.
+    """
+
+    maxFileSizeMb: int
+    maxFilesPerUpload: int
+
+    model_config = ConfigDict(extra="allow")
+
+    @property
+    def max_bytes(self) -> int:
+        """``maxFileSizeMb`` in bytes (the portal's own unit)."""
+        return int(self.maxFileSizeMb) * 1024 * 1024
+
+
+# ============================================================================
 # --- API RESPONSE WRAPPERS ---
 # ============================================================================
 

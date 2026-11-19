@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
-from .datastores import parse_datastore_list_response
+from .datastores import _unwrap_success, parse_datastore_list_response
 from .models import (
     DataStoreListResponse,
     DataStoreResponse,
@@ -31,6 +31,46 @@ class AsyncDataStoreManager:
     async def get(self, data_store_id: int) -> DataStoreResponse:
         response_data = await self.client.get(f"/datastores/{data_store_id}")
         return DataStoreResponse(**response_data)
+
+    # ── Authored (logical) relationships ──────────────────────────────
+
+    async def get_relationships(self, datastore_id: int) -> Dict[str, Any]:
+        """Async twin of :meth:`DataStoreManager.get_relationships`."""
+        response_data = await self.client.get(
+            f"/datastores/{datastore_id}/relationships"
+        )
+        return _unwrap_success(response_data)
+
+    async def create_relationship(
+        self, datastore_id: int, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Async twin of :meth:`DataStoreManager.create_relationship`."""
+        response_data = await self.client.post(
+            f"/datastores/{datastore_id}/relationships", json=payload
+        )
+        return _unwrap_success(response_data)
+
+    async def update_relationship(
+        self,
+        datastore_id: int,
+        relationship_uuid: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Async twin of :meth:`DataStoreManager.update_relationship`."""
+        response_data = await self.client.put(
+            f"/datastores/{datastore_id}/relationships/{relationship_uuid}",
+            json=payload,
+        )
+        return _unwrap_success(response_data)
+
+    async def delete_relationship(
+        self, datastore_id: int, relationship_uuid: str
+    ) -> Dict[str, Any]:
+        """Async twin of :meth:`DataStoreManager.delete_relationship`."""
+        response_data = await self.client.delete(
+            f"/datastores/{datastore_id}/relationships/{relationship_uuid}"
+        )
+        return _unwrap_success(response_data)
 
     async def discover_esri_datasets(
         self,

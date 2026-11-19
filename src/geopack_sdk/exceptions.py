@@ -116,7 +116,7 @@ class GeopackAPIError(GeopackError):
             if stripped:
                 message = stripped[:500]
 
-        if status_code in (401, 403):
+        if status_code in (401, 403) and _error_code_from_details(details) != "QUOTA_EXCEEDED":
             return GeopackAuthError(status_code, message, details, response=response)
 
         typed = _typed_error_class(status_code, details)
@@ -217,7 +217,13 @@ class FieldPolicyError(_CodedAPIError):
 
 
 class QuotaExceeded(_CodedAPIError):
-    """``QUOTA_EXCEEDED`` — carries the dimension, its limit and current usage."""
+    """``QUOTA_EXCEEDED`` — carries the dimension, its limit and current usage.
+
+    The one exception to the "401/403 means auth" rule: a quota refusal answers
+    with one of those statuses but a coded ``QUOTA_EXCEEDED`` body, and it is
+    not an authentication problem. Everything else on 401/403 stays
+    :class:`GeopackAuthError`.
+    """
 
     _extras = ("dimension", "limit", "used")
 

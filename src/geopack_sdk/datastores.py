@@ -26,6 +26,19 @@ def parse_datastore_list_response(response_data: Any) -> DataStoreListResponse:
     return DataStoreListResponse(**response_data)
 
 
+def _unwrap_success(response_data: Any) -> Dict[str, Any]:
+    """Unwrap the relationship routes' ``{success, data}`` envelope.
+
+    Those four handlers always answer ``{success: true, data: <payload>}``;
+    callers here want the payload. Anything already bare is passed through so a
+    future route change does not turn into an ``AttributeError``.
+    """
+    if isinstance(response_data, dict) and "data" in response_data:
+        data = response_data["data"]
+        return data if isinstance(data, dict) else {}
+    return response_data if isinstance(response_data, dict) else {}
+
+
 class DataStoreManager:
     """Manages DataStore resources via the Geopack REST API.
 
@@ -44,6 +57,10 @@ class DataStoreManager:
         GET    /datastores/:id/acl                   — Get ACLs
         POST   /datastores/:id/acl                   — Create ACLs
         DELETE /datastores/:id/acl/:aclId            — Delete ACL
+        GET    /datastores/:id/relationships         — Catalog relationships
+        POST   /datastores/:id/relationships         — Author a relationship
+        PUT    /datastores/:id/relationships/:uuid   — Update an authored one
+        DELETE /datastores/:id/relationships/:uuid   — Delete an authored one
         GET    /datastores/:id/esri/datasets         — Discover ESRI datasets
         POST   /datastores/:id/esri/datasets/register — Register ESRI datasets
         PUT    /datastores/:id/esri/datasets/schemas — Update ESRI schemas
@@ -253,6 +270,82 @@ class DataStoreManager:
         REST API: `DELETE /api/datastores/:id/acl/:aclId`
         """
         self.client.delete(f"/datastores/{data_store_id}/acl/{acl_id}")
+
+    # ── Authored (logical) relationships ──────────────────────────────
+    #
+    # These live in the DataStore's own catalog (``gp_catalog``), NOT in the
+    # database: PostgreSQL/MSSQL own them and can author them; ESRI
+    # relationships are native and stay read-only. Every answer is the
+    # controller's ``{success, data}`` envelope — these helpers return ``data``
+    # (the technical catalog snapshot / the written descriptor).
+
+    def get_relationships(self, datastore_id: int) -> Dict[str, Any]:
+        """Read the catalog relationship snapshot of one DataStore.
+
+        The payload is ``{dataStoreId, datastoreUuid, catalogNamespace,
+        archiveDefinitions, relationships[]}``; each relationship endpoint is
+        resolved to a registered ``datasetId`` when one matches the physical
+        name. A ``409`` means the catalog is disabled or the store type does
+        not support catalog reads — surface it, do not retry.
+
+        REST API: `GET /api/datastores/{id}/relationships`
+        """
+        response_data = self.client.get(f"/datastores/{datastore_id}/relationships")
+        return _unwrap_success(response_data)
+
+    def create_relationship(
+        self, datastore_id: int, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Author a logical relationship in the DataStore catalog.
+
+        Required body keys: ``originDatasetId``, ``destinationDatasetId``,
+        ``name``, ``cardinality`` (``oneToOne``/``oneToMany``/``manyToOne``/
+        ``manyToMany``) and ``keys`` (``[{side: origin|destination, ordinal,
+        fieldName}]``). ``relationshipKind`` is ``foreignKey``|``logical`` and
+        ``managementMode`` may only be ``logical`` today. Physical object names
+        are resolved server-side and must NOT be sent.
+
+        Requires ``admin:datastore:update``. A ``409`` is a catalog or endpoint
+        conflict and is surfaced verbatim.
+
+        REST API: `POST /api/datastores/{id}/relationships`
+        """
+        response_data = self.client.post(
+            f"/datastores/{datastore_id}/relationships", json=payload
+        )
+        return _unwrap_success(response_data)
+
+    def update_relationship(
+        self,
+        datastore_id: int,
+        relationship_uuid: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Rewrite an authored relationship (same body as the create).
+
+        REST API: `PUT /api/datastores/{id}/relationships/{relationshipUuid}`
+        """
+        response_data = self.client.put(
+            f"/datastores/{datastore_id}/relationships/{relationship_uuid}",
+            json=payload,
+        )
+        return _unwrap_success(response_data)
+
+    def delete_relationship(
+        self, datastore_id: int, relationship_uuid: str
+    ) -> Dict[str, Any]:
+        """Delete an authored relationship from the catalog.
+
+        Native/discovered relationships are not mutable through this API: a
+        ``404`` (not found or read-only) is the expected answer there and must
+        not be retried.
+
+        REST API: `DELETE /api/datastores/{id}/relationships/{relationshipUuid}`
+        """
+        response_data = self.client.delete(
+            f"/datastores/{datastore_id}/relationships/{relationship_uuid}"
+        )
+        return _unwrap_success(response_data)
 
     # ── ESRI Geodatabase ──────────────────────────────────────────────
 

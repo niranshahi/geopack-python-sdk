@@ -63,3 +63,36 @@ class AsyncWorkflowManager:
 
         response_data = await self.client.get(f"{self.base_url}/{workflow_id}")
         return Workflow(**response_data)
+
+    # --- Statistics, spec compilation and tool manifest (slice 015) ----------
+
+    async def get_statistics(self) -> Dict[str, Any]:
+        """Async twin of :meth:`WorkflowManager.get_statistics`."""
+        response_data = await self.client.get(f"{self.base_url}/statistics")
+        return response_data if isinstance(response_data, dict) else {}
+
+    async def compile_spec(
+        self,
+        spec: Optional[Dict[str, Any]] = None,
+        *,
+        workflow_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Async twin of :meth:`WorkflowManager.compile_spec` (read-only)."""
+        if (spec is None) == (workflow_id is None):
+            raise ValueError("Provide exactly one of spec= or workflow_id=.")
+        body: Dict[str, Any] = {}
+        if spec is not None:
+            body["spec"] = spec
+        if workflow_id is not None:
+            body["workflowId"] = int(workflow_id)
+        response_data = await self.client.post(
+            f"{self.base_url}/compile-spec", json=body
+        )
+        return response_data if isinstance(response_data, dict) else {}
+
+    async def get_tool_manifest(self, workflow_id: int) -> Dict[str, Any]:
+        """Async twin of :meth:`WorkflowManager.get_tool_manifest` (verbatim)."""
+        response_data = await self.client.get(
+            f"{self.base_url}/{workflow_id}/tool-manifest"
+        )
+        return response_data if isinstance(response_data, dict) else {}

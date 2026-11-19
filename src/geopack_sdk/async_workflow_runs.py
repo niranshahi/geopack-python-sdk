@@ -128,6 +128,10 @@ class AsyncWorkflowRunManager:
         await self.client.post(f"{self.base_url}/{run_id}/cancel", json={})
         return True
 
+    async def delete(self, run_id: int) -> None:
+        """Async twin of :meth:`WorkflowRunManager.delete`."""
+        await self.client.delete(f"{self.base_url}/{run_id}")
+
     async def get_artifacts(self, run_id: int) -> List[WorkflowRunArtifact]:
         response = await self.client.get(f"{self.base_url}/{run_id}/artifacts")
         items = response.get("items", [])

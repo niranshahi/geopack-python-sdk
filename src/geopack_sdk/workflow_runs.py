@@ -282,6 +282,16 @@ class WorkflowRunManager:
         self.client.post(f"{self.base_url}/{run_id}/cancel", json={})
         return True
 
+    def delete(self, run_id: int) -> None:
+        """Delete a workflow run record (controller answers ``{deleted: true}``).
+
+        Distinct from :meth:`cancel`: cancelling stops a RUNNING run, deleting
+        removes a finished record (and its artifacts).
+
+        REST API: `DELETE /api/workflow-runs/:id`
+        """
+        self.client.delete(f"{self.base_url}/{run_id}")
+
     def download_artifact(
         self,
         run_id: int,

@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Dict, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 
 from .exceptions import GeopackTaskError, GeopackTimeoutError
 from .models import ActiveTasksSummary, TaskListResponse, TaskResult
 from .tasks import (
+    _TASK_STATUSES,
     task_log_entries_needing_review,
     task_may_have_hidden_issues,
     task_message_badge_severity,
@@ -111,6 +112,57 @@ class AsyncTaskManager:
     async def get_status(self, task_id: str) -> TaskResult:
         response_data = await self.client.get(f"/tasks/{task_id}")
         return TaskResult(**response_data)
+
+    # --- Types, statistics and control (slice 015) ---------------------------
+
+    async def get_types(self) -> List[Dict[str, Any]]:
+        """Async twin of :meth:`TaskManager.get_types`."""
+        response_data = await self.client.get("/tasks/types")
+        return response_data if isinstance(response_data, list) else []
+
+    async def get_stats_summary(
+        self, *, task_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Async twin of :meth:`TaskManager.get_stats_summary`."""
+        params = {"taskType": task_type} if task_type else None
+        response_data = await self.client.get("/tasks/stats/summary", params=params)
+        return response_data if isinstance(response_data, dict) else {}
+
+    async def get_stats_time_series(
+        self,
+        *,
+        days: Optional[int] = None,
+        status: Optional[str] = None,
+        task_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Async twin of :meth:`TaskManager.get_stats_time_series`."""
+        params: Dict[str, Any] = {}
+        if days is not None:
+            if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 365:
+                raise ValueError("days must be an integer between 1 and 365.")
+            params["days"] = days
+        if status is not None:
+            if status not in _TASK_STATUSES:
+                raise ValueError(
+                    "status must be one of " + ", ".join(_TASK_STATUSES) + "."
+                )
+            params["status"] = status
+        if task_type:
+            params["taskType"] = task_type
+
+        response_data = await self.client.get(
+            "/tasks/stats/time-series", params=params or None
+        )
+        return response_data if isinstance(response_data, list) else []
+
+    async def cancel_task(self, task_id: str) -> Dict[str, Any]:
+        """Async twin of :meth:`TaskManager.cancel_task` (best effort, 202)."""
+        response_data = await self.client.delete(f"/tasks/{task_id}")
+        return response_data if isinstance(response_data, dict) else {}
+
+    async def delete_task_record(self, task_id: str) -> None:
+        """Async twin of :meth:`TaskManager.delete_task_record` (204)."""
+        await self.client.delete(f"/tasks/{task_id}/delete")
 
     async def wait_for_task(
         self,

@@ -218,3 +218,60 @@ class WorkflowManager:
         """
         self.client.delete(f"{self.base_url}/{workflow_id}")
         return True
+
+    # --- Statistics, spec compilation and tool manifest (slice 015) ----------
+
+    def get_statistics(self) -> Dict[str, Any]:
+        """Facet/keyword counts over the workflows the caller can read.
+
+        Answers ``{keywords, workgroups, owners, organizations, dateRange}``.
+        Admins with ``admin:workflow:list_all`` see every workflow; everybody
+        else sees only readable rows (the service scopes it, the SDK does not).
+
+        REST API: `GET /api/workflows/statistics`
+        """
+        response_data = self.client.get(f"{self.base_url}/statistics")
+        return response_data if isinstance(response_data, dict) else {}
+
+    def compile_spec(
+        self,
+        spec: Optional[Dict[str, Any]] = None,
+        *,
+        workflow_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Compile a declarative wf-spec into a workflow graph, or project one.
+
+        Two read-only modes, exactly one per call:
+
+        * ``spec`` — compile it through the single backend compiler and run the
+          save-time validator. Nothing is persisted.
+        * ``workflow_id`` — project that SAVED workflow into the model-facing
+          wf-spec (the raw graph blob never rides this route).
+
+        A spec that is well-formed but not publishable answers ``ok=False``
+        with an ``issues`` list — that is the point of the call (the caller
+        fixes the spec and asks again), so it is not an exception.
+
+        REST API: `POST /api/workflows/compile-spec`
+        """
+        if (spec is None) == (workflow_id is None):
+            raise ValueError("Provide exactly one of spec= or workflow_id=.")
+        body: Dict[str, Any] = {}
+        if spec is not None:
+            body["spec"] = spec
+        if workflow_id is not None:
+            body["workflowId"] = int(workflow_id)
+        response_data = self.client.post(f"{self.base_url}/compile-spec", json=body)
+        return response_data if isinstance(response_data, dict) else {}
+
+    def get_tool_manifest(self, workflow_id: int) -> Dict[str, Any]:
+        """The analysis-tool manifest of ONE workflow, returned verbatim.
+
+        This is the per-workflow view of the same exposure ``analysis_tools``
+        lists. Do not re-derive exposure from it: whether a tool may be run
+        still comes from the runtime ACL (ADR-0019).
+
+        REST API: `GET /api/workflows/{id}/tool-manifest`
+        """
+        response_data = self.client.get(f"{self.base_url}/{workflow_id}/tool-manifest")
+        return response_data if isinstance(response_data, dict) else {}

@@ -7,6 +7,16 @@ from .exceptions import GeopackTaskError, GeopackTimeoutError
 
 logger = logging.getLogger(__name__)
 
+#: The statuses the server accepts as a filter (mirrors ``validateTaskStatsTimeSeries``).
+_TASK_STATUSES = (
+    "pending",
+    "processing",
+    "completed",
+    "failed",
+    "partial_success",
+    "canceled",
+)
+
 
 class TaskMessageInfo(NamedTuple):
     """
@@ -204,6 +214,92 @@ class TaskManager:
         """
         response_data = self.client.post("/tasks", json=task_payload)
         return TaskResult(**response_data)
+
+    # --- Types, statistics and control (slice 015) ---------------------------
+
+    def get_types(self) -> List[Dict[str, Any]]:
+        """The task types this server can run (the create-task catalog).
+
+        Each row carries ``taskType``, ``description``, ``requiredPermission``
+        and ``inputSchemaInfo``. Use it to explain a 403 before creating.
+
+        REST API: `GET /api/tasks/types`
+        """
+        response_data = self.client.get("/tasks/types")
+        return response_data if isinstance(response_data, list) else []
+
+    def get_stats_summary(self, *, task_type: Optional[str] = None) -> Dict[str, Any]:
+        """Aggregate counts by status for the caller's scope (or all, for admins).
+
+        Answers ``{created, completed, failed, canceled, partial_success,
+        total}``; ``created`` equals ``total``. This is NOT ``summary()``
+        (``/tasks/summary`` is the active-task panel) — the two payloads differ.
+
+        REST API: `GET /api/tasks/stats/summary`
+        """
+        params = {"taskType": task_type} if task_type else None
+        response_data = self.client.get("/tasks/stats/summary", params=params)
+        return response_data if isinstance(response_data, dict) else {}
+
+    def get_stats_time_series(
+        self,
+        *,
+        days: Optional[int] = None,
+        status: Optional[str] = None,
+        task_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Per-day task counts for the last ``days`` days (default 30).
+
+        Each bucket is ``{date, created, completed, failed, canceled,
+        partial_success, avgDurationSec}``. ``days`` is 1..365 and ``status``
+        is one of the six task statuses — both are checked here so a typo
+        fails fast instead of collecting a 400.
+
+        REST API: `GET /api/tasks/stats/time-series`
+        """
+        params: Dict[str, Any] = {}
+        if days is not None:
+            if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 365:
+                raise ValueError("days must be an integer between 1 and 365.")
+            params["days"] = days
+        if status is not None:
+            if status not in _TASK_STATUSES:
+                raise ValueError(
+                    "status must be one of " + ", ".join(_TASK_STATUSES) + "."
+                )
+            params["status"] = status
+        if task_type:
+            params["taskType"] = task_type
+
+        response_data = self.client.get(
+            "/tasks/stats/time-series", params=params or None
+        )
+        return response_data if isinstance(response_data, list) else []
+
+    def cancel_task(self, task_id: str) -> Dict[str, Any]:
+        """Request cancellation of a running task (best effort).
+
+        Answers ``202`` with a message; the worker may still finish the step it
+        is on, so this is a REQUEST, not a guarantee. Observe the outcome with
+        :meth:`wait_for_task` (``canceled`` is terminal there) or
+        :meth:`get_status`.
+
+        REST API: `DELETE /api/tasks/{taskId}`
+        """
+        response_data = self.client.delete(f"/tasks/{task_id}")
+        return response_data if isinstance(response_data, dict) else {}
+
+    def delete_task_record(self, task_id: str) -> None:
+        """Delete a TERMINAL task record (``204``).
+
+        Record-only: no dataset, file or artifact is removed, and a running
+        task cannot be deleted this way — use :meth:`cancel_task` for that.
+        The two verbs are deliberately separate names on separate paths
+        (``DELETE /tasks/{id}`` vs ``DELETE /tasks/{id}/delete``).
+
+        REST API: `DELETE /api/tasks/{taskId}/delete`
+        """
+        self.client.delete(f"/tasks/{task_id}/delete")
 
     def wait(self, task_id: str, timeout: int = 300, interval: int = 2, quiet: bool = False) -> TaskResult:
         """

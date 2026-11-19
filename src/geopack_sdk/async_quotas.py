@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .models import QuotaSummary, QuotaSummaryLimit
 
@@ -17,6 +17,30 @@ class AsyncQuotaManager:
     async def my_summary(self) -> QuotaSummary:
         response_data = await self.client.get("/quotas/me/summary")
         return QuotaSummary(**response_data)
+
+    async def get_my_quota_summary(self) -> QuotaSummary:
+        """Async twin of :meth:`QuotaManager.get_my_quota_summary`."""
+        return await self.my_summary()
+
+    async def get_dimensions(self) -> List[Dict[str, Any]]:
+        """Async twin of :meth:`QuotaManager.get_dimensions`."""
+        response_data = await self.client.get("/quotas/dimensions")
+        return response_data if isinstance(response_data, list) else []
+
+    async def get_plans(self) -> List[Dict[str, Any]]:
+        """Async twin of :meth:`QuotaManager.get_plans`."""
+        response_data = await self.client.get("/quotas/plans")
+        return response_data if isinstance(response_data, list) else []
+
+    async def get_plan(self, plan_id: int) -> Dict[str, Any]:
+        """Async twin of :meth:`QuotaManager.get_plan`."""
+        response_data = await self.client.get(f"/quotas/plans/{plan_id}")
+        return response_data if isinstance(response_data, dict) else {}
+
+    async def get_plan_limits(self, plan_id: int) -> List[Dict[str, Any]]:
+        """Async twin of :meth:`QuotaManager.get_plan_limits`."""
+        response_data = await self.client.get(f"/quotas/plans/{plan_id}/limits")
+        return response_data if isinstance(response_data, list) else []
 
     def get_limit(
         self,
