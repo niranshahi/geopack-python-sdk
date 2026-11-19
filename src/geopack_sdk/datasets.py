@@ -1,8 +1,9 @@
 import os
 import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 from .models import (
     AggregateResult,
+    ColumnBounds,
     Dataset,
     DatasetAcl,
     DatasetsApiResponse,
@@ -16,6 +17,9 @@ from .models import (
     DatasetDiscoverResponse,
     MintedUrl,
     PagedFeatureCollection,
+    RelatedRecordsResult,
+    RelationshipDescriptor,
+    SchemaPreview,
     TaskResult,
 )
 
@@ -962,6 +966,147 @@ class DatasetManager:
         """
         response_data = self.client.get(f"/datasets/{dataset_id}/tiles/access-url")
         return MintedUrl(**(response_data or {}))
+
+    # --- Relationships, schema and access context (slice 011) ---------------
+
+    def get_relationships(self, dataset_id: int) -> List[RelationshipDescriptor]:
+        """List the provider-neutral relationships of a dataset.
+
+        REST API: `GET /api/datasets/{datasetId}/relationships`
+
+        ESRI entries are returned with ``read_only=True`` — they are surfaced,
+        never filtered out. Each descriptor keeps its catalog entry under
+        ``raw`` so a provider field addition is not a breaking change.
+
+        Raises:
+            RelationshipCatalogUnavailable: 409 — the catalog is unavailable or
+                unsupported for this store. Treat it as a state: there is no
+                relationship lane for this dataset right now.
+        """
+        response_data = self.client.get(f"/datasets/{dataset_id}/relationships")
+        entries = (response_data or {}).get("relationships") or []
+        return [RelationshipDescriptor(**entry) for entry in entries]
+
+    def get_related_records(
+        self,
+        dataset_id: int,
+        relationship_name: str,
+        origin_object_ids: Sequence[int],
+        *,
+        direction: str = "forward",
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        return_geometry: bool = True,
+        out_srid: Optional[int] = None,
+    ) -> RelatedRecordsResult:
+        """Read the records related to one or more source records.
+
+        REST API: `POST /api/datasets/{datasetId}/related-records`
+
+        Args:
+            dataset_id: Source dataset ID.
+            relationship_name: Catalog entry name (see :meth:`get_relationships`).
+            origin_object_ids: **Source** OID values (``details.oidField``), not
+                arbitrary field values. At least one.
+            direction: ``forward`` (default) or ``backward``.
+            limit: ``queryOptions.limit`` — the paging contract for load-more
+                (``rows == limit`` means "maybe more").
+            offset: ``queryOptions.offset``.
+            return_geometry: ``queryOptions.returnGeometry`` (default True).
+            out_srid: Optional ``queryOptions.outSRID``.
+
+        Notes:
+            The answer carries ONLY the related (target) records — the source
+            leg is stripped server-side. With several origin ids the rows are
+            grouped per source record in ``metadata.groups``; do not flatten it.
+            ``__jct__*`` properties are junction fields: keep them beside the
+            target record, never fused into it.
+
+        Raises:
+            ValueError: the request shape is invalid (nothing was sent).
+            GeopackAPIError: 400 for an unknown relationship or an unregistered
+                related dataset — the message names the field.
+            GeopackAuthError: 403 on the *related* leg.
+        """
+        if not relationship_name:
+            raise ValueError("relationship_name is required")
+        if direction not in ("forward", "backward"):
+            raise ValueError('direction must be "forward" or "backward"')
+
+        oids = [int(oid) for oid in (origin_object_ids or [])]
+        if not oids:
+            raise ValueError("origin_object_ids must contain at least one source OID")
+
+        query_options: Dict[str, Any] = {"returnGeometry": bool(return_geometry)}
+        if limit is not None:
+            query_options["limit"] = _positive_int(limit, "limit")
+        if offset is not None:
+            query_options["offset"] = int(offset)
+        if out_srid is not None:
+            query_options["outSRID"] = int(out_srid)
+
+        payload = {
+            "relationshipName": relationship_name,
+            "direction": direction,
+            "originObjectIds": oids,
+            "queryOptions": query_options,
+        }
+        response_data = self.client.post(
+            f"/datasets/{dataset_id}/related-records",
+            json=payload,
+        )
+        return RelatedRecordsResult(**(response_data or {}))
+
+    def preview_schema(
+        self, dataset_id: int, query_dsl: Dict[str, Any]
+    ) -> SchemaPreview:
+        """Compose the schema of a relationship DSL without executing it.
+
+        REST API: `POST /api/datasets/{datasetId}/schema-preview`
+
+        The DSL must contain a ``relationship`` or ``relationshipJoin`` node — a
+        plain query is rejected by the server (the SDK does not second-guess the
+        node's nesting, the server is the authority). No dataset is created and
+        no row is read: this is the ephemeral-layer lane.
+
+        The payload is returned verbatim: ``fields``, ``relationships`` and the
+        geometry/OID hints are what the caller composes the next hop from.
+        """
+        if not isinstance(query_dsl, dict) or not query_dsl:
+            raise ValueError("query_dsl must be a non-empty dict with a relationship node")
+        response_data = self.client.post(
+            f"/datasets/{dataset_id}/schema-preview",
+            json={"queryDsl": query_dsl},
+        )
+        return SchemaPreview(**(response_data or {}))
+
+    def get_column_bounds(self, dataset_id: int) -> ColumnBounds:
+        """Read live numeric column bounds (min/max) for the dataset.
+
+        REST API: `GET /api/datasets/{datasetId}/column-bounds`
+
+        The values come from the live store, not from the cached ``details``,
+        so they can differ — that is the point of the endpoint.
+        """
+        response_data = self.client.get(f"/datasets/{dataset_id}/column-bounds")
+        return ColumnBounds(**(response_data or {}))
+
+    def get_access_context(self, dataset_id: int) -> Dict[str, Any]:
+        """Read the caller's effective access context for a dataset.
+
+        REST API: `GET /api/datasets/{id}/access-context`
+
+        The payload (row scope + effective field view/edit/deny map) is
+        **opaque and authoritative**: deny-wins is a server rule and a client
+        copy would drift. Returned as a plain dict on purpose — it is a living
+        security surface, not a stable contract.
+
+        Unlike the other reads this one is available to a *would-be editor*: the
+        route accepts ``dataset:read``, ``features:read``, ``features:create``
+        or ``features:update``.
+        """
+        response_data = self.client.get(f"/datasets/{dataset_id}/access-context")
+        return response_data or {}
 
     def discover(
         self,

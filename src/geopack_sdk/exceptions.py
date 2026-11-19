@@ -286,6 +286,11 @@ def _typed_error_class(
             return RelationshipCatalogUnavailable
         return None
 
+    if status_code in (400, 422) and code.startswith("RELATIONSHIP_"):
+        # Coded 400s from the related-records lane (unknown relationship, an
+        # unregistered related dataset): the message names the field.
+        return QueryValidationError
+
     if code == "PAGED_UNSUPPORTED":
         return PagedUnsupported
     if code == "AGGREGATION_UNSUPPORTED":

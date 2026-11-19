@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 
 from .datasets import (
     _build_aggregate_payload,
     _build_paged_dsl,
+    _positive_int,
     build_simple_query,
     encode_query_params,
     normalize_feature_query_dsl,
 )
 from .models import (
     AggregateResult,
+    ColumnBounds,
     Dataset,
     DatasetsApiResponse,
     FeatureCollection,
     MintedUrl,
     PagedFeatureCollection,
+    RelatedRecordsResult,
+    RelationshipDescriptor,
+    SchemaPreview,
 )
 
 if TYPE_CHECKING:
@@ -261,3 +266,74 @@ class AsyncDatasetManager:
         """Async twin of :meth:`DatasetManager.get_tiles_access_url`."""
         response_data = await self.client.get(f"/datasets/{dataset_id}/tiles/access-url")
         return MintedUrl(**(response_data or {}))
+
+    # --- Relationships, schema and access context (slice 011) ---------------
+
+    async def get_relationships(self, dataset_id: int) -> List[RelationshipDescriptor]:
+        """Async twin of :meth:`DatasetManager.get_relationships`."""
+        response_data = await self.client.get(f"/datasets/{dataset_id}/relationships")
+        entries = (response_data or {}).get("relationships") or []
+        return [RelationshipDescriptor(**entry) for entry in entries]
+
+    async def get_related_records(
+        self,
+        dataset_id: int,
+        relationship_name: str,
+        origin_object_ids: Sequence[int],
+        *,
+        direction: str = "forward",
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        return_geometry: bool = True,
+        out_srid: Optional[int] = None,
+    ) -> RelatedRecordsResult:
+        """Async twin of :meth:`DatasetManager.get_related_records`."""
+        if not relationship_name:
+            raise ValueError("relationship_name is required")
+        if direction not in ("forward", "backward"):
+            raise ValueError('direction must be "forward" or "backward"')
+
+        oids = [int(oid) for oid in (origin_object_ids or [])]
+        if not oids:
+            raise ValueError("origin_object_ids must contain at least one source OID")
+
+        query_options: Dict[str, Any] = {"returnGeometry": bool(return_geometry)}
+        if limit is not None:
+            query_options["limit"] = _positive_int(limit, "limit")
+        if offset is not None:
+            query_options["offset"] = int(offset)
+        if out_srid is not None:
+            query_options["outSRID"] = int(out_srid)
+
+        response_data = await self.client.post(
+            f"/datasets/{dataset_id}/related-records",
+            json={
+                "relationshipName": relationship_name,
+                "direction": direction,
+                "originObjectIds": oids,
+                "queryOptions": query_options,
+            },
+        )
+        return RelatedRecordsResult(**(response_data or {}))
+
+    async def preview_schema(
+        self, dataset_id: int, query_dsl: Dict[str, Any]
+    ) -> SchemaPreview:
+        """Async twin of :meth:`DatasetManager.preview_schema`."""
+        if not isinstance(query_dsl, dict) or not query_dsl:
+            raise ValueError("query_dsl must be a non-empty dict with a relationship node")
+        response_data = await self.client.post(
+            f"/datasets/{dataset_id}/schema-preview",
+            json={"queryDsl": query_dsl},
+        )
+        return SchemaPreview(**(response_data or {}))
+
+    async def get_column_bounds(self, dataset_id: int) -> ColumnBounds:
+        """Async twin of :meth:`DatasetManager.get_column_bounds`."""
+        response_data = await self.client.get(f"/datasets/{dataset_id}/column-bounds")
+        return ColumnBounds(**(response_data or {}))
+
+    async def get_access_context(self, dataset_id: int) -> Dict[str, Any]:
+        """Async twin of :meth:`DatasetManager.get_access_context`."""
+        response_data = await self.client.get(f"/datasets/{dataset_id}/access-context")
+        return response_data or {}

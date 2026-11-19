@@ -358,6 +358,131 @@ class MintedUrl(BaseModel):
 
 
 # ============================================================================
+# --- RELATIONSHIP / SCHEMA MODELS (slice 011) ---
+# ============================================================================
+
+
+class RelationshipDescriptor(BaseModel):
+    """One provider-neutral relationship from ``GET /datasets/{id}/relationships``.
+
+    ``raw`` keeps the whole catalog entry: a provider field addition must not
+    break an installed client (slice 011 maintenance note). ``read_only`` is
+    surfaced, never hidden — ESRI relationships are navigable but not editable.
+    """
+
+    name: Optional[str] = None
+    relationship_name: Optional[str] = Field(default=None, alias="relationshipName")
+    direction: Optional[str] = None
+    read_only: bool = Field(default=False, alias="readOnly")
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_name_and_raw(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        raw = dict(data)
+        raw.setdefault("raw", raw)
+        if not raw.get("name"):
+            raw["name"] = raw.get("relationshipName")
+        if not raw.get("relationshipName"):
+            raw["relationshipName"] = raw.get("name")
+        return raw
+
+
+class RelatedRecordsResult(BaseModel):
+    """Target records for one relationship hop.
+
+    ``features`` carries ONLY the related (target) records: the source leg is
+    stripped server-side. ``__jct__*`` properties are junction fields — keep
+    them as-is and do not fuse them into the target record. With several
+    ``originObjectIds`` the response is grouped per source record under
+    ``metadata.groups`` (``{sourceOid: [targetOid, ...]}``); the SDK never
+    synthesizes a flat collection across origins.
+    """
+
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    features: List[Dict[str, Any]] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    crs: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(extra="allow")
+
+    @property
+    def groups(self) -> Dict[str, List[Any]]:
+        """``metadata.groups`` lifted for convenience (empty for one origin)."""
+        groups = self.metadata.get("groups")
+        return groups if isinstance(groups, dict) else {}
+
+    @property
+    def count_hint(self) -> Optional[int]:
+        """``metadata.count`` when the server reported one."""
+        count = self.metadata.get("count")
+        return count if isinstance(count, int) else None
+
+
+class SchemaPreviewSchema(BaseModel):
+    """Composed schema of an ephemeral relationship layer."""
+
+    fields: List[Dict[str, Any]] = Field(default_factory=list)
+    geometry_type: Optional[str] = Field(default=None, alias="geometryType")
+    oid_field: Optional[str] = Field(default=None, alias="oidField")
+    relationships: List[Dict[str, Any]] = Field(default_factory=list)
+    data_type: Optional[str] = Field(default=None, alias="dataType")
+    title: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+
+class SchemaPreview(BaseModel):
+    """``POST /datasets/{id}/schema-preview`` answer, returned verbatim.
+
+    The wire key is literally ``schema``; the field is declared as
+    ``schema_fields`` (alias ``schema``) because a field named ``schema``
+    shadows ``BaseModel.schema`` and makes pydantic emit a ``UserWarning`` on
+    import. Read it through the ``schema`` property; dumping by alias still
+    emits ``schema``.
+    """
+
+    success: bool = True
+    schema_fields: Optional[SchemaPreviewSchema] = Field(
+        default=None, alias="schema", serialization_alias="schema"
+    )
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    @property
+    def schema(self) -> Optional[SchemaPreviewSchema]:
+        """The composed schema (wire key ``schema``)."""
+        return self.schema_fields
+
+
+class ColumnBounds(BaseModel):
+    """Thin wrapper over ``{success, data}`` from the live column-bounds lane.
+
+    The values come from the LIVE store (``getLiveColumnMetaService``), so they
+    can legitimately differ from the cached dataset ``details``.
+    """
+
+    success: bool = True
+    data: Any = None
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _capture_raw(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            raw = dict(data)
+            raw.setdefault("raw", raw)
+            return raw
+        return data
+
+
+# ============================================================================
 # --- TASK MODELS ---
 # ============================================================================
 
