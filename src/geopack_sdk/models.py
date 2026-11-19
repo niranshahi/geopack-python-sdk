@@ -1466,6 +1466,75 @@ class UploadLimits(BaseModel):
 
 
 # ============================================================================
+# --- CONTROL-PLANE STORED RECORDS (slice 014) ---
+# ============================================================================
+
+
+class StoredDocument(BaseModel):
+    """A stored record whose body is an inert, caller-owned JSON document.
+
+    Map documents, publications and print-layout templates are passed through
+    unchanged in ``raw``: the SDK never validates, normalizes or re-serializes
+    their internals (the frontend owns that grammar). Only the identity fields
+    the API guarantees are exposed as typed conveniences.
+    """
+
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="allow")
+
+    @classmethod
+    def from_api(cls, data: Any) -> "StoredDocument":
+        """Wrap a response body; a non-dict answer yields an empty record."""
+        return cls(raw=dict(data) if isinstance(data, dict) else {})
+
+    def _field(self, key: str, default: Any = None) -> Any:
+        return self.raw.get(key, default)
+
+    @property
+    def id(self) -> Optional[int]:
+        return self._field("id")
+
+    @property
+    def name(self) -> Optional[str]:
+        return self._field("name")
+
+    @property
+    def created_at(self) -> Optional[str]:
+        return self._field("createdAt")
+
+    @property
+    def updated_at(self) -> Optional[str]:
+        return self._field("updatedAt")
+
+
+class MapDocument(StoredDocument):
+    """A saved map: ``id``, ``name`` and an opaque ``details`` document."""
+
+
+class Publication(StoredDocument):
+    """A dataset publication record (OGC lifecycle state machine)."""
+
+    @property
+    def status(self) -> Optional[str]:
+        return self._field("status")
+
+
+class PrintLayout(StoredDocument):
+    """A print-layout TEMPLATE definition (never rendered by the SDK)."""
+
+
+class ThumbnailFile(BaseModel):
+    """A thumbnail written to disk — bytes never travel inside JSON."""
+
+    savedPath: str
+    mimeType: str
+    sizeBytes: int
+
+    model_config = ConfigDict(extra="allow")
+
+
+# ============================================================================
 # --- API RESPONSE WRAPPERS ---
 # ============================================================================
 

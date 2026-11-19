@@ -21,6 +21,10 @@ from .async_uploads import AsyncUploadManager
 from .async_edits import AsyncEditDocumentManager
 from .async_generated_files import AsyncGeneratedFileManager
 from .async_quotas import AsyncQuotaManager
+from .async_maps import AsyncMapManager
+from .async_publications import AsyncPublicationManager
+from .async_print_layouts import AsyncPrintLayoutManager
+from .async_external_services import AsyncExternalServiceManager
 from .async_resources import (
     AsyncGroupManager,
     AsyncOrganizationManager,
@@ -106,6 +110,12 @@ class AsyncGeopackClient:
         self.workflow_runs = AsyncWorkflowRunManager(self)
         self.generated_files = AsyncGeneratedFileManager(self)
         self.quotas = AsyncQuotaManager(self)
+
+        # Control plane — stored records, never rendered here (slice 014)
+        self.maps = AsyncMapManager(self)
+        self.publications = AsyncPublicationManager(self)
+        self.print_layouts = AsyncPrintLayoutManager(self)
+        self.external_services = AsyncExternalServiceManager(self)
         self.workgroups = AsyncWorkgroupManager(self)
         self.groups = AsyncGroupManager(self)
         self.users = AsyncUserManager(self)

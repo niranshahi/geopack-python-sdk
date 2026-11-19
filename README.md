@@ -34,6 +34,28 @@ pip install git+https://github.com/niranshahi/geopack-python-sdk.git
 pip install "geopack-sdk[async]"
 ```
 
+## Client surface
+
+Every manager is available on both `GeopackClient` and `AsyncGeopackClient`:
+
+| Manager | What it drives |
+|---------|----------------|
+| `client.datastores` / `client.datasets` | DataStore catalog, datasets, CRUD, query lanes |
+| `client.edit_documents` / `client.computed_columns` | Edit documents, virtual datasets, computed columns |
+| `client.uploads` / `client.tasks` | Upload caps and task control (cancel, stats, wait) |
+| `client.workflows` / `client.workflow_runs` | Workflow specs, runs, statistics |
+| `client.analysis_tools` / `client.generated_files` | Analysis tools, generated-file artifacts |
+| `client.quotas` / `client.users` / `workgroups` / `groups` / `organizations` | Governance and identity |
+| `client.maps` | Saved map DOCUMENTS + thumbnails + ACL (control plane) |
+| `client.publications` | Publication lifecycle: enable/disable/reconcile, styles, render scopes, minted URLs |
+| `client.print_layouts` | Print-layout TEMPLATE registry + thumbnails + ACL |
+| `client.external_services` | External OGC registrations: CRUD, probe, style, map settings |
+
+**Maps and layouts are stored, never produced.** The portal has no render / export / rasterize
+endpoint, and the SDK deliberately adds none: `client.maps` and `client.print_layouts` read and write
+records (documents, template JSON, caller-uploaded thumbnails). Rendering a map image or a printout is
+the consuming agent's job, with its own tools.
+
 ## Examples & Notebooks
 
 We provide a collection of Jupyter Notebooks in the `notebooks/` directory to help you get started:

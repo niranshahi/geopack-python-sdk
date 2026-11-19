@@ -16,6 +16,10 @@ from .analysis_tools import AnalysisToolManager
 from .workflow_runs import WorkflowRunManager
 from .generated_files import GeneratedFileManager
 from .quotas import QuotaManager
+from .maps import MapManager
+from .publications import PublicationManager
+from .print_layouts import PrintLayoutManager
+from .external_services import ExternalServiceManager
 from .resources import WorkgroupManager, GroupManager, UserManager, OrganizationManager
 from .exceptions import GeopackAPIError, GeopackAuthError, GeopackError, GeopackTimeoutError
 
@@ -109,6 +113,12 @@ class GeopackClient:
         self.workflow_runs = WorkflowRunManager(self)
         self.generated_files = GeneratedFileManager(self)
         self.quotas = QuotaManager(self)
+
+        # Control plane — stored records, never rendered here (slice 014)
+        self.maps = MapManager(self)
+        self.publications = PublicationManager(self)
+        self.print_layouts = PrintLayoutManager(self)
+        self.external_services = ExternalServiceManager(self)
         
         # Identity and Access Management
         self.workgroups = WorkgroupManager(self)
