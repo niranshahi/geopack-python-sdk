@@ -12,7 +12,7 @@ from ..annotations import local_write_tool, mutating_tool, read_tool
 from ..auth_bootstrap import AppContext
 from ..bbox import normalize_bbox
 from ..context import get_client
-from ..errors import tool_error_result, tool_result
+from ..errors import tool_error_result, tool_result, tool_result_with_image
 from ..output_schema import AggregateEnvelope, DatasetSchemaEnvelope
 from ..tool_handlers.dataset_upload import upload_dataset
 from ..tool_handlers.datasets import (
@@ -33,6 +33,7 @@ from ..tool_schema import (
     BboxWgs84,
     DataStoreId,
     DataTypeFilter,
+    DatasetFields,
     DatasetId,
     DeclaredType,
     DetailsLevel,
@@ -43,7 +44,9 @@ from ..tool_schema import (
     IncludeDomainValues,
     IncludeRelationships,
     IsoDate,
+    ListOrderBy,
     LocalFilePath,
+    OrderDirection,
     OriginObjectIds,
     OutSrid,
     Page,
@@ -54,10 +57,10 @@ from ..tool_schema import (
     RelationshipDirection,
     RelationshipName,
     ReturnGeometry,
-    SavePath,
     SearchQuery,
     SharingPolicy,
     SpatialFilter,
+    ThumbnailSavePath,
     UploadMetadata,
     WorkgroupId,
     WorkgroupIdOptional,
@@ -68,8 +71,11 @@ def register(mcp: Any) -> None:
     @mcp.tool(
         annotations=read_tool("geopack_sdk_list_datasets"),
         description=(
-            "List datasets (paginated). Use geocode_place then pass bbox for location searches. "
-            "details_level lite | standard | full."
+            "List datasets (paginated). details_level lite (card: no details blob) | standard "
+            "(adds the field list) | full. Use fields to project top-level keys and keep the "
+            "result inside the token budget. order_by defaults to updatedAt desc (newest first), "
+            "so '10 latest' is page_size=10. bbox filters on the STORED dataset extent; use "
+            "geocode_place for a place search."
         ),
     )
     def geopack_sdk_list_datasets(
@@ -82,6 +88,9 @@ def register(mcp: Any) -> None:
         bbox: BboxWgs84 = None,
         start_date: IsoDate = None,
         end_date: IsoDate = None,
+        fields: DatasetFields = None,
+        order_by: ListOrderBy = None,
+        order_direction: OrderDirection = None,
     ) -> CallToolResult:
         try:
             # Normalize bbox to handle both array and string formats from LLM
@@ -97,6 +106,9 @@ def register(mcp: Any) -> None:
                     bbox=normalized_bbox,
                     start_date=start_date,
                     end_date=end_date,
+                    fields=fields,
+                    order_by=order_by,
+                    order_direction=order_direction,
                 )
             )
         except Exception as exc:
@@ -106,14 +118,16 @@ def register(mcp: Any) -> None:
         annotations=read_tool("geopack_sdk_get_dataset"),
         description=(
             "Get one dataset by id. details_level full (default) | standard | lite. "
-            "For field names, types, domains and valid relationship names use "
-            "geopack_sdk_get_dataset_schema instead of reading the details blob."
+            "Use fields to project top-level keys. For field names, types, domains and valid "
+            "relationship names use geopack_sdk_get_dataset_schema instead of reading the "
+            "details blob."
         ),
     )
     def geopack_sdk_get_dataset(
         ctx: Context[ServerSession, AppContext],
         dataset_id: DatasetId,
         details_level: DetailsLevel = "full",
+        fields: DatasetFields = None,
     ) -> CallToolResult:
         try:
             return tool_result(
@@ -121,6 +135,7 @@ def register(mcp: Any) -> None:
                     get_client(ctx),
                     dataset_id,
                     details_level=details_level,
+                    fields=fields,
                 )
             )
         except Exception as exc:
@@ -275,23 +290,27 @@ def register(mcp: Any) -> None:
 
     @mcp.tool(
         annotations=local_write_tool("geopack_sdk_get_dataset_thumbnail"),
-        description=(
-            "Save dataset preview PNG on the MCP host. "
-            "Default: downloads/dataset_{id}_thumbnail.png under process cwd."
+description=(
+            "Return the dataset preview image. INLINE is the official delivery mode: the image "
+            "is returned in the tool result and the host renders it. No file is written unless "
+            "save_path is given, and a sandboxed host that forbids writes answers saved=false "
+            "while the image is still returned inline — no file appearing on disk is expected, "
+            "not an error. No portal state changes."
         ),
     )
     def geopack_sdk_get_dataset_thumbnail(
         ctx: Context[ServerSession, AppContext],
         dataset_id: DatasetId,
-        save_path: SavePath = None,
+        save_path: ThumbnailSavePath = None,
     ) -> CallToolResult:
         try:
-            return tool_result(
-                get_dataset_thumbnail(
-                    get_client(ctx),
-                    dataset_id,
-                    save_path=save_path,
-                )
+            result = get_dataset_thumbnail(
+                get_client(ctx),
+                dataset_id,
+                save_path=save_path,
+            )
+            return tool_result_with_image(
+                result.payload, result.body, result.mime_type
             )
         except Exception as exc:
             return tool_error_result(exc)

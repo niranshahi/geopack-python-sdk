@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from geopack_sdk import GeopackClient
 
+from ..ordering import validate_sort_args
 from ..sanitize.task_results import generated_file_download_path
 
 FILE_DEFAULT_LIMIT = 20
 FILE_MAX_LIMIT = 100
+
+#: Server sort whitelist for ``GET /generated-files`` (``orderBy``).
+ALLOWED_FILE_ORDER_FIELDS = (
+    "createdAt",
+    "fileName",
+    "fileSize",
+    "expiresAt",
+    "sharingPolicy",
+)
 
 
 def _file_row(item: Any) -> Dict[str, Any]:
@@ -31,6 +41,9 @@ def list_generated_files(
     *,
     limit: int = FILE_DEFAULT_LIMIT,
     offset: int = 0,
+    search_query: Optional[str] = None,
+    order_by: Optional[str] = None,
+    order_direction: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List downloadable files; the model then calls download_generated_file.
 
@@ -38,20 +51,33 @@ def list_generated_files(
     fetches one extra page and slices the window — the caller still gets the
     rows it asked for.
     """
+    sort_field, sort_direction = validate_sort_args(
+        order_by,
+        order_direction,
+        allowed=ALLOWED_FILE_ORDER_FIELDS,
+    )
     page_size = max(1, min(int(limit), FILE_MAX_LIMIT))
     effective_offset = max(0, int(offset))
     page = effective_offset // page_size + 1
     start = effective_offset % page_size
 
-    response = client.generated_files.list(page=page, page_size=page_size)
+    list_kwargs: Dict[str, Any] = {"page": page, "page_size": page_size}
+    if search_query:
+        list_kwargs["search_query"] = search_query
+    if sort_field:
+        list_kwargs["order_by"] = sort_field
+    if sort_direction:
+        list_kwargs["order_direction"] = sort_direction
+
+    response = client.generated_files.list(**list_kwargs)
     rows: List[Any] = list(response.items)
     if start and len(rows) == page_size:
-        rows += list(client.generated_files.list(page=page + 1, page_size=page_size).items)
+        rows += list(client.generated_files.list(**{**list_kwargs, "page": page + 1}).items)
     rows = rows[start : start + page_size]
 
     items = [_file_row(item) for item in rows]
     total = getattr(response, "totalItems", 0) or len(items)
-    return {
+    payload: Dict[str, Any] = {
         "items": items,
         "totalItems": total,
         "currentPage": page,
@@ -59,6 +85,10 @@ def list_generated_files(
         "pageSize": page_size,
         "hint": "Pass one of these ids to geopack_sdk_download_generated_file.",
     }
+    if sort_field:
+        payload["orderBy"] = sort_field
+        payload["orderDirection"] = sort_direction or "asc"
+    return payload
 
 
 def download_generated_file(

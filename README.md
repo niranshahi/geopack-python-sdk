@@ -2,7 +2,7 @@
 
 A standalone Python library to interact with the Geopack Geoportal API.
 
-Current release: **0.8.0** — see [CHANGELOG.md](CHANGELOG.md).
+Current release: **0.10.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Naming
 
@@ -158,7 +158,7 @@ client.auth.login(username="my_user", password="my_password")
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks` (`partial_success` is terminal and returned like `completed`).
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (**29 tools** + 2 resource templates, v0.8.0+; read lanes for schema/aggregate/relationships/workflow-spec, workflow execution incl. typed analysis tools, the edit ladder, upload; no create/edit/delete of workflows via MCP, no delete at all).
+- GeoPandas integration; **Geopack SDK MCP** server (**29 tools** + 2 resource templates, v0.10.0+; read lanes for schema/aggregate/relationships/workflow-spec, workflow execution incl. typed analysis tools, the edit ladder, upload; no create/edit/delete of workflows via MCP, no delete at all).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
@@ -221,33 +221,35 @@ Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev 
 
 **Safety:** Dataset/generated-file **delete is not an MCP tool** (use Geoportal UI). **No workflow authoring or deletion over MCP** either — `geopack_sdk_get_workflow_spec` reads a graph, it cannot create, save or delete one. Call `geopack_sdk_get_mcp_safety_policy` for server rules. Upload/workflow: host must get explicit user consent in chat before calling. See [MCP Safety Policy](../docs/09-sdk/mcp-design/mcp-safety.md).
 
-**Tools (29, v0.8.0+):**
+**Thumbnails — inline is the official mode.** `geopack_sdk_get_dataset_thumbnail` returns the image inside the tool result (the host renders it) and **writes no file unless `save_path` is passed**. A sandboxed host that forbids local writes answers `saved:false` (`saveSkipped:true` when no `save_path`) while the image still comes back — **no file appearing on disk is the expected outcome, not a failure**; `save_path` works only where the host permits writes.
+
+**Tools (29, v0.10.0+):**
 
 | Tool | Purpose |
 |------|---------|
 | `geopack_sdk_get_mcp_safety_policy` | Server rules: mutating tools, local writes, refused operations, upload caps |
 | `geopack_sdk_geocode_place` | Place name → WGS84 bbox (Nominatim; use before spatial list) |
-| `geopack_sdk_list_datasets` | Paginated list; `bbox`, `data_type`, dates; `details_level` default `lite` |
-| `geopack_sdk_get_dataset` | One dataset; `details_level` default `full` |
+| `geopack_sdk_list_datasets` | Paginated list; `bbox`, `data_type`, dates; `details_level` default `lite` (compact cards, `fields` to widen); `order_by` on `updatedAt`/`name`/... |
+| `geopack_sdk_get_dataset` | One dataset; `details_level` default `full`; optional `fields` key projection |
 | `geopack_sdk_get_dataset_schema` | Field contract: names, types, domains, field access, relationship names |
 | `geopack_sdk_query_dataset` | Feature query (max 500 features in JSON) |
-| `geopack_sdk_aggregate_dataset` | Counts, sums, distributions, top-N in one call (the answer-first lane) |
+| `geopack_sdk_aggregate_dataset` | Counts, sums, distributions, top-N in one call (the answer-first lane); `order_by` accepts the count (`count`/`aggregate_count`), a group field, or a named aggregate |
 | `geopack_sdk_get_dataset_relationships` | The relationship names valid for this dataset |
 | `geopack_sdk_get_related_records` | One relationship hop from a set of OIDs |
-| `geopack_sdk_get_dataset_thumbnail` | Save preview PNG on MCP host (`save_path` optional) |
+| `geopack_sdk_get_dataset_thumbnail` | Return the preview image **inline** (MCP image content); **nothing is written to disk unless `save_path` is given** (best-effort, never fatal) |
 | `geopack_sdk_get_task` | Task status (sanitized) |
 | `geopack_sdk_cancel_task` | Request cancellation of a running task (best effort) |
 | `geopack_sdk_wait_for_task` | Poll until export/job completes |
 | `geopack_sdk_get_quota_summary` | Caller's quota usage per dimension |
-| `geopack_sdk_list_generated_files` | Downloadable exports/workflow outputs with ids |
+| `geopack_sdk_list_generated_files` | Downloadable exports/workflow outputs with ids; `search_query` by name, `order_by` on `createdAt`/`fileName`/`fileSize`/... |
 | `geopack_sdk_upload_dataset` | Upload local file on MCP host → `dataset:upload`; use `metadata.name` for title |
 | `geopack_sdk_export_dataset` | Start `dataset:export` (returns `taskId`) |
 | `geopack_sdk_download_generated_file` | Save export to local `save_path` on MCP host |
-| `geopack_sdk_list_workflows` | List workflows (no `graphJson` in JSON) |
+| `geopack_sdk_list_workflows` | List workflows (no `graphJson` in JSON); `order_by` on `id`/`name`/`owner.userName`/`updatedAt`/... |
 | `geopack_sdk_get_workflow` | Workflow metadata; `include_params=true` adds `parameters[]` |
 | `geopack_sdk_get_workflow_spec` | The saved graph as a model-facing wf-spec (nodes, operators, config); no canvas positions. Read-only — never creates or saves |
 | `geopack_sdk_submit_workflow` | Start run; returns `workflowRunId` + `taskId` |
-| `geopack_sdk_list_workflow_runs` | Runs you can see (id, status, submitter, timestamps) |
+| `geopack_sdk_list_workflow_runs` | Runs you can see (id, status, submitter, timestamps); `order_by` on `status`/`startedAt`/`finishedAt`/... |
 | `geopack_sdk_get_workflow_run` | Run status + artifacts |
 | `geopack_sdk_download_workflow_artifact` | Save workflow output on MCP host |
 | `geopack_sdk_list_analysis_tools` | The workflows this caller may run, as typed tools; `tool_id` for one manifest |

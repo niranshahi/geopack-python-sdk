@@ -24,14 +24,61 @@ DetailsLevel = Annotated[
 ]
 DataTypeFilter = Annotated[
     Optional[str],
-    Field(description="Filter by data type: vector or raster.", default=None),
+    Field(
+        description=(
+            "Filter by data type: vector, raster, table (or service). Omit to list every "
+            "type; service/leaf rows have no datastore and are still returned."
+        ),
+        default=None,
+    ),
 ]
 BboxWgs84 = Annotated[
     Optional[List[float]],
     Field(
         description=(
             "Spatial extent filter as [west, south, east, north] in WGS84 degrees. "
-            "Use bbox from geopack_sdk_geocode_place before list_datasets when the user names a place."
+            "Filters on the dataset's STORED extent (ext_*), not feature geometry: datasets "
+            "whose stored extent is null (common for rasters) are NOT matched, so a short "
+            "list does not mean 'nothing there'. Use bbox from geopack_sdk_geocode_place "
+            "before list_datasets when the user names a place."
+        ),
+        default=None,
+    ),
+]
+DatasetFields = Annotated[
+    Optional[List[str]],
+    Field(
+        description=(
+            "Optional projection: return only these top-level dataset keys (id is always "
+            'kept). E.g. ["id","name","dataType","createdAt"]. Use it to keep list output '
+            "inside the token budget."
+        ),
+        default=None,
+    ),
+]
+ListOrderBy = Annotated[
+    Optional[str],
+    Field(
+        description=(
+            "Sort field: id | name | dataType | subType | updatedAt | createdAt | "
+            "owner.userName | workgroup.name | dataStore.name | publicationsCount. "
+            "Omitted = the portal default (updatedAt, newest first). Prefer order_by over "
+            "paging everything to find recent items."
+        ),
+        default=None,
+    ),
+]
+OrderDirection = Annotated[
+    Optional[str],
+    Field(description='Sort direction "asc" or "desc" (default asc when order_by is set).', default=None),
+]
+WorkflowOrderBy = Annotated[
+    Optional[str],
+    Field(
+        description=(
+            "Sort field: id | name | owner.userName | updatedAt | createdAt | version. "
+            "Omitted = the portal default (updatedAt, newest first). Prefer it over paging "
+            "everything to find recent workflows."
         ),
         default=None,
     ),
@@ -66,6 +113,19 @@ SavePath = Annotated[
         description=(
             "Local path on the MCP host. Directory or full file path. "
             "Defaults vary by tool (see tool description)."
+        ),
+        default=None,
+    ),
+]
+ThumbnailSavePath = Annotated[
+    Optional[str],
+    Field(
+        description=(
+            "OPTIONAL local write of the PNG. Inline return is the official delivery mode; "
+            "the image always comes back in the tool result. A file is written only when the "
+            "MCP host permits local writes — many sandboxed hosts do not, and then the result "
+            "answers saved=false (saveSkipped when omitted) with the image still inline. "
+            "Omit it unless you specifically need a file on disk."
         ),
         default=None,
     ),
@@ -156,8 +216,11 @@ AggregateOrderBy = Annotated[
     Optional[List[Dict[str, Any]]],
     Field(
         description=(
-            'Bucket ordering: [{key, direction, by?}] max 3. key = a groupBy field or an aggregate '
-            'alias; direction = asc | desc; by = the aggregate alias when ordering a measure.'
+            'Bucket ordering: [{key, direction, by?}] max 3. key = a group_by field name, '
+            'count/aggregate_count, or an aggregate ALIAS (a count aggregate\'s alias is '
+            'accepted and resolved to aggregate_count); direction = asc | desc; by = what '
+            'the key names — "value" (the stored code, default) or "label" (the code\'s '
+            'declared name). An unknown key is refused with the legal key list.'
         ),
         default=None,
     ),
@@ -280,6 +343,17 @@ RunStatusFilter = Annotated[
     ),
 ]
 ArtifactId = Annotated[int, Field(description="Artifact id from geopack_sdk_get_workflow_run artifacts[].")]
+RunOrderBy = Annotated[
+    Optional[str],
+    Field(
+        description=(
+            "Sort field: id | workflow.name | submitter | taskId | status | startedAt | "
+            "finishedAt | createdAt | updatedAt. Omitted = the portal default (createdAt, "
+            "newest first)."
+        ),
+        default=None,
+    ),
+]
 
 # --- Analysis tools (workflow-as-tool surface, portal slice 030) ---
 
@@ -359,6 +433,16 @@ EditMode = Annotated[
 GeneratedFileId = Annotated[
     int,
     Field(description="generatedFileId from wait_for_task results after export or workflow."),
+]
+GeneratedFileOrderBy = Annotated[
+    Optional[str],
+    Field(
+        description=(
+            "Sort field: createdAt | fileName | fileSize | expiresAt | sharingPolicy. "
+            "Omitted = the portal default (createdAt, newest first)."
+        ),
+        default=None,
+    ),
 ]
 
 # --- Geocoding ---

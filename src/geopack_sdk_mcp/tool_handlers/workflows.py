@@ -6,12 +6,24 @@ from typing import Any, Dict, List, Optional
 
 from geopack_sdk import GeopackClient
 
+from ..ordering import validate_sort_args
 from ..sanitize.workflow_payload import (
     sanitize_workflow_for_mcp,
     sanitize_workflow_list_for_mcp,
     strip_graph_ui_keys,
 )
 from ..serialize import to_jsonable
+
+#: Server sort whitelist for ``GET /workflows`` (``sortBy``); an unlisted key is
+#: silently dropped by the portal, so the edge refuses it instead.
+ALLOWED_WORKFLOW_ORDER_FIELDS = (
+    "id",
+    "name",
+    "owner.userName",
+    "updatedAt",
+    "createdAt",
+    "version",
+)
 
 
 def list_workflows(
@@ -20,11 +32,20 @@ def list_workflows(
     page: int = 1,
     page_size: int = 20,
     search_query: Optional[str] = None,
+    order_by: Optional[str] = None,
+    order_direction: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    sort_field, sort_direction = validate_sort_args(
+        order_by,
+        order_direction,
+        allowed=ALLOWED_WORKFLOW_ORDER_FIELDS,
+    )
     items = client.workflows.list(
         page=page,
         page_size=page_size,
         search_query=search_query,
+        order_by=sort_field,
+        order_direction=sort_direction,
     )
     return sanitize_workflow_list_for_mcp(to_jsonable(items))
 

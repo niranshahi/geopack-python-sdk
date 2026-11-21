@@ -21,13 +21,19 @@ class AsyncWorkflowManager:
         page: int = 1,
         page_size: int = 10,
         search_query: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_direction: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Workflow]:
         params = {
             "limit": page_size,
             "offset": (page - 1) * page_size,
-            **(filters or {}),
         }
+        if order_by:
+            params["sortBy"] = order_by
+        if order_direction:
+            params["sortOrder"] = order_direction
+        params.update(filters or {})
         if search_query:
             params["q"] = search_query
 

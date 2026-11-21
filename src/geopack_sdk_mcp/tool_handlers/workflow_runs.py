@@ -7,11 +7,12 @@ from typing import Any, Dict, List, Optional
 
 from geopack_sdk import GeopackClient
 
+from ..ordering import validate_sort_args
 from ..sanitize.workflow_payload import sanitize_workflow_run_for_mcp
 from ..serialize import to_jsonable
 
-# List rows are metadata only: a run carries input/output/logs/artifacts and the
-# model must read those through get_workflow_run, not from the index.
+#: List rows are metadata only: a run carries input/output/logs/artifacts and the
+#: model must read those through get_workflow_run, not from the index.
 _RUN_LIST_KEYS = (
     "id",
     "workflowId",
@@ -27,6 +28,19 @@ _RUN_LIST_KEYS = (
 RUN_DEFAULT_LIMIT = 20
 RUN_MAX_LIMIT = 100
 
+#: Server sort whitelist for ``GET /workflow-runs`` (``sortBy``).
+ALLOWED_RUN_ORDER_FIELDS = (
+    "id",
+    "workflow.name",
+    "submitter",
+    "taskId",
+    "status",
+    "startedAt",
+    "finishedAt",
+    "createdAt",
+    "updatedAt",
+)
+
 
 def _run_row(item: Any) -> Dict[str, Any]:
     row = item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)
@@ -40,8 +54,15 @@ def list_workflow_runs(
     status: Optional[str] = None,
     limit: int = RUN_DEFAULT_LIMIT,
     offset: int = 0,
+    order_by: Optional[str] = None,
+    order_direction: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List the caller's workflow runs (the answer lane for "what did I start")."""
+    sort_field, sort_direction = validate_sort_args(
+        order_by,
+        order_direction,
+        allowed=ALLOWED_RUN_ORDER_FIELDS,
+    )
     page_size = max(1, min(int(limit), RUN_MAX_LIMIT))
     effective_offset = max(0, int(offset))
 
@@ -54,11 +75,17 @@ def list_workflow_runs(
     if status:
         filters["status"] = str(status).strip()
 
-    response = client.workflow_runs.list(page=1, page_size=page_size, filters=filters)
+    response = client.workflow_runs.list(
+        page=1,
+        page_size=page_size,
+        filters=filters,
+        order_by=sort_field,
+        order_direction=sort_direction,
+    )
     items: List[Dict[str, Any]] = [_run_row(item) for item in response.items]
 
     total = response.total if response.total is not None else (response.totalItems or len(items))
-    return {
+    payload: Dict[str, Any] = {
         "items": items,
         "totalItems": total,
         "currentPage": (effective_offset // page_size) + 1,
@@ -69,6 +96,10 @@ def list_workflow_runs(
             "result summary."
         ),
     }
+    if sort_field:
+        payload["orderBy"] = sort_field
+        payload["orderDirection"] = sort_direction or "asc"
+    return payload
 
 
 def get_workflow_run(client: GeopackClient, run_id: int) -> Dict[str, Any]:

@@ -105,16 +105,28 @@ class WorkflowRunManager:
         page: int = 1,
         page_size: int = 10,
         filters: Optional[Dict[str, Any]] = None,
+        order_by: Optional[str] = None,
+        order_direction: Optional[str] = None,
     ) -> WorkflowRunListResponse:
         """List workflow runs.
-        
+
         REST API: `GET /api/workflow-runs`
+
+        Args:
+            order_by: Server sort key (`sortBy`); omit for the portal default
+                (``createdAt``, newest first).
+            order_direction: ``asc``/``desc`` (``sortOrder``); omit for the
+                portal default.
         """
-        params = {
+        params: Dict[str, Any] = {
             "limit": page_size,
             "offset": (page - 1) * page_size,
-            **(filters or {})
+            **(filters or {}),
         }
+        if order_by:
+            params["sortBy"] = order_by
+        if order_direction:
+            params["sortOrder"] = order_direction
         response_data = self.client.get(self.base_url, params=params)
         return WorkflowRunListResponse(**response_data)
 

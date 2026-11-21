@@ -75,7 +75,8 @@ class TestMcpDatasetDetails(unittest.TestCase):
         self.assertEqual(out["display"].get("labelExpression"), "[name]")
         self.assertNotIn("uniqueValueGroups", out["display"])
 
-    def test_list_payload_trims_each_dataset(self):
+    def test_list_payload_lite_drops_details_blob(self):
+        """A LIST lite row is a card: no details blob (F4, live-QA 2026-11-21)."""
         huge = json.dumps(self._sample_vector_details())
         payload = {
             "datasets": [{"id": 1, "name": "x", "details": huge}],
@@ -85,9 +86,38 @@ class TestMcpDatasetDetails(unittest.TestCase):
             "itemsPerPage": 10,
         }
         out = trim_datasets_list_payload(payload)
+        row = out["datasets"][0]
+        self.assertNotIn("details", row)
+        self.assertTrue(row["detailsOmitted"])
+
+    def test_list_payload_standard_keeps_trimmed_details(self):
+        huge = json.dumps(self._sample_vector_details())
+        payload = {"datasets": [{"id": 1, "name": "x", "details": huge}]}
+
+        out = trim_datasets_list_payload(payload, details_level="standard")
+
         details = out["datasets"][0]["details"]
         self.assertIsInstance(details, dict)
         self.assertNotIn("tilejson", details)
+
+    def test_fields_projection_keeps_only_requested_keys(self):
+        payload = {
+            "datasets": [
+                {"id": 1, "name": "x", "dataType": "vector", "ownerUserId": 9, "details": {}}
+            ]
+        }
+
+        out = trim_datasets_list_payload(payload, fields=["name", "dataType"])
+
+        self.assertEqual(set(out["datasets"][0]), {"id", "name", "dataType"})
+
+    def test_fields_projection_refuses_an_unknown_key(self):
+        payload = {"datasets": [{"id": 1, "name": "x"}]}
+
+        with self.assertRaises(ValueError) as ctx:
+            trim_datasets_list_payload(payload, fields=["geometry"])
+
+        self.assertIn("geometry", str(ctx.exception))
 
     def test_raster_get_omits_metadata_blobs(self):
         raw = {

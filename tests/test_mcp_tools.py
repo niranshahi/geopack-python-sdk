@@ -46,6 +46,69 @@ class TestMcpToolHandlers(unittest.TestCase):
         self.assertNotIn("thumbnail", result["datasets"][0])
         self.client.datasets.list.assert_called_once()
 
+    def _dataset_with_details(self):
+        return Dataset(
+            id=4,
+            name="parcels",
+            dataType="vector",
+            ownerUserId=1,
+            workgroupId=1,
+            dataStoreId=3,
+            createdAt="2024-01-01T00:00:00",
+            updatedAt="2024-01-01T00:00:00",
+            details={"tilejson": {"tiles": ["/mvt"]}, "fields": [{"name": "a"}]},
+        )
+
+    def test_list_lite_drops_the_details_blob(self):
+        self.client.datasets.list.return_value = DatasetsApiResponse(
+            datasets=[self._dataset_with_details()], totalCount=1
+        )
+
+        result = list_datasets(self.client, page_size=10)
+
+        row = result["datasets"][0]
+        self.assertNotIn("details", row)
+        self.assertTrue(row["detailsOmitted"])
+
+    def test_list_fields_projects_requested_keys(self):
+        self.client.datasets.list.return_value = DatasetsApiResponse(
+            datasets=[self._dataset_with_details()], totalCount=1
+        )
+
+        result = list_datasets(
+            self.client, page_size=10, fields=["name", "dataType", "createdAt"]
+        )
+
+        self.assertEqual(
+            set(result["datasets"][0]), {"id", "name", "dataType", "createdAt"}
+        )
+
+    def test_list_unknown_field_is_refused(self):
+        with self.assertRaises(ValueError) as ctx:
+            list_datasets(self.client, fields=["not_a_key"])
+
+        self.assertIn("not_a_key", str(ctx.exception))
+        self.client.datasets.list.assert_not_called()
+
+    def test_list_order_is_forwarded_and_validated(self):
+        self.client.datasets.list.return_value = DatasetsApiResponse(datasets=[])
+
+        list_datasets(self.client, page_size=10, order_by="createdAt", order_direction="desc")
+        kwargs = self.client.datasets.list.call_args.kwargs
+        self.assertEqual(kwargs["order_by"], "createdAt")
+        self.assertEqual(kwargs["order_direction"], "desc")
+
+        with self.assertRaises(ValueError):
+            list_datasets(self.client, order_by="password")
+
+    def test_bbox_result_states_the_filter_basis(self):
+        self.client.datasets.list.return_value = DatasetsApiResponse(datasets=[])
+
+        result = list_datasets(self.client, bbox=[51.0, 35.0, 52.0, 36.0])
+
+        self.assertIn("extentFilterNote", result)
+        self.assertIn("STORED", result["extentFilterNote"].upper())
+
     def test_get_task_returns_task_result(self):
         self.client.tasks.get_status.return_value = TaskResult(
             taskId="abc",

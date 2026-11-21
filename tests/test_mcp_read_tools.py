@@ -400,6 +400,72 @@ class AggregateHandlerTest(unittest.TestCase):
         self.assertEqual(payload["key"], "area")
         self.assertIn("get_dataset_schema", payload["hint"])
 
+    def test_count_alias_is_translated_to_aggregate_count(self):
+        """A count aggregate's alias is ignored by the adapter (F3)."""
+        aggregate_dataset(
+            self.client,
+            7,
+            aggregates=[{"aggregate": "count", "alias": "n"}],
+            group_by=["landuse_group"],
+            order_by=[{"key": "n", "direction": "desc"}],
+        )
+
+        order = self.client.datasets.aggregate.call_args.kwargs["aggregation"]["orderBy"]
+        self.assertEqual(order, [{"key": "aggregate_count", "direction": "desc"}])
+
+    def test_measure_alias_and_group_field_are_accepted(self):
+        aggregate_dataset(
+            self.client,
+            7,
+            aggregates=[{"aggregate": "sum", "field": "area_ha", "alias": "total"}],
+            group_by=["zone"],
+            order_by=[{"key": "total", "direction": "desc"}, {"key": "zone"}],
+        )
+
+        order = self.client.datasets.aggregate.call_args.kwargs["aggregation"]["orderBy"]
+        self.assertEqual(order[0]["key"], "total")
+        self.assertEqual(order[1]["key"], "zone")
+
+    def test_unknown_order_key_is_refused_with_the_legal_list(self):
+        with self.assertRaises(ValueError) as ctx:
+            aggregate_dataset(
+                self.client,
+                7,
+                aggregates=[{"aggregate": "count", "alias": "n"}],
+                group_by=["landuse_group"],
+                order_by=[{"key": "bogus"}],
+            )
+
+        message = str(ctx.exception)
+        self.assertIn("bogus", message)
+        self.assertIn("aggregate_count", ctx.exception.hint)
+        self.assertIn("landuse_group", ctx.exception.hint)
+        self.client.datasets.aggregate.assert_not_called()
+
+    def test_order_by_wrong_by_value_is_refused(self):
+        with self.assertRaises(ValueError) as ctx:
+            aggregate_dataset(
+                self.client,
+                7,
+                group_by=["zone"],
+                order_by=[{"key": "zone", "by": "label_name"}],
+            )
+
+        self.assertIn("value", str(ctx.exception))
+        self.assertIn("label", str(ctx.exception))
+        self.client.datasets.aggregate.assert_not_called()
+
+    def test_order_by_by_label_is_forwarded(self):
+        aggregate_dataset(
+            self.client,
+            7,
+            group_by=["zone"],
+            order_by=[{"key": "zone", "by": "Label"}],
+        )
+
+        order = self.client.datasets.aggregate.call_args.kwargs["aggregation"]["orderBy"]
+        self.assertEqual(order, [{"key": "zone", "direction": "asc", "by": "label"}])
+
 
 class RelationshipHandlerTest(unittest.TestCase):
     def setUp(self):

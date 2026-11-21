@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Sequence
 
@@ -21,10 +22,13 @@ from ..bbox import normalize_bbox
 from ..errors import ToolArgumentError
 from ..resource_handlers.datasets import fetch_dataset_thumbnail
 from ..sanitize.dataset_details import (
+    EXTENT_FILTER_NOTE,
     DetailsLevel,
     normalize_details_level,
+    normalize_fields,
     trim_dataset_for_mcp,
     trim_datasets_list_payload,
+    validate_projection_fields,
 )
 from ..sanitize.dataset_schema import build_dataset_schema, build_relationship_rows
 from ..sanitize.query_results import clamp_query_limit, trim_feature_collection_for_mcp
@@ -43,6 +47,21 @@ ExportFormat = Literal[
     "tiff",
 ]
 
+#: Sort fields the portal's dataset list whitelists (datasetService allowedSortMap).
+#: Anything else is a client-side refusal, not a silently-ignored sort.
+ALLOWED_LIST_ORDER_FIELDS = (
+    "id",
+    "name",
+    "dataType",
+    "subType",
+    "updatedAt",
+    "createdAt",
+    "owner.userName",
+    "workgroup.name",
+    "dataStore.name",
+    "publicationsCount",
+)
+
 
 def list_datasets(
     client: GeopackClient,
@@ -55,11 +74,16 @@ def list_datasets(
     bbox: Optional[list | str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    fields: Optional[list | str] = None,
+    order_by: Optional[str] = None,
+    order_direction: Optional[str] = None,
 ) -> Dict[str, Any]:
     level: DetailsLevel = normalize_details_level(details_level, default="lite")
     active_filters: Dict[str, Any] = {}
 
     parsed_bbox = normalize_bbox(bbox)
+    projected_fields = normalize_fields(fields)
+    validate_projection_fields(projected_fields)
 
     if data_type:
         active_filters["dataType"] = data_type
@@ -70,13 +94,57 @@ def list_datasets(
     if end_date:
         active_filters["endDate"] = end_date
 
+    sort_field: Optional[str] = None
+    if order_by:
+        candidate = str(order_by).strip()
+        if candidate not in ALLOWED_LIST_ORDER_FIELDS:
+            raise ToolArgumentError(
+                f"Unknown order_by {candidate!r}",
+                key="order_by",
+                hint=(
+                    "order_by must be one of: " f"{', '.join(ALLOWED_LIST_ORDER_FIELDS)}."
+                ),
+            )
+        sort_field = candidate
+
+    sort_direction: Optional[str] = None
+    if order_direction:
+        normalized_direction = str(order_direction).strip().lower()
+        if normalized_direction not in ("asc", "desc"):
+            raise ToolArgumentError(
+                'order_direction must be "asc" or "desc"',
+                key="order_direction",
+                hint='Pass direction "asc" or "desc" (omitted = the portal default).',
+            )
+        sort_direction = normalized_direction
+
     result = client.datasets.list(
         page=page,
         page_size=page_size,
         search_query=search_query,
+        order_by=sort_field,
+        order_direction=sort_direction,
         active_filters=active_filters or None,
     )
-    return trim_datasets_list_payload(to_jsonable(result), details_level=level)
+    payload = trim_datasets_list_payload(
+        to_jsonable(result),
+        details_level=level,
+        fields=projected_fields,
+    )
+
+    payload["pageSize"] = int(page_size)
+    if sort_field:
+        payload["orderBy"] = sort_field
+        payload["orderDirection"] = sort_direction or "asc"
+    if parsed_bbox is not None:
+        payload["extentFilterNote"] = EXTENT_FILTER_NOTE
+    count = len(payload.get("datasets") or [])
+    if count >= int(page_size):
+        payload["hint"] = (
+            "The page is full (rows == page_size): more datasets may exist. Advance page, "
+            "narrow with search_query/data_type, or project with fields."
+        )
+    return payload
 
 
 def get_dataset(
@@ -84,10 +152,17 @@ def get_dataset(
     dataset_id: int,
     *,
     details_level: Optional[str] = "full",
+    fields: Optional[list | str] = None,
 ) -> Dict[str, Any]:
     level: DetailsLevel = normalize_details_level(details_level, default="full")
     result = client.datasets.get(dataset_id)
-    return trim_dataset_for_mcp(to_jsonable(result), level)
+    projected_fields = normalize_fields(fields)
+    validate_projection_fields(projected_fields)
+    return trim_dataset_for_mcp(
+        to_jsonable(result),
+        level,
+        fields=projected_fields,
+    )
 
 
 def query_dataset(
@@ -128,41 +203,71 @@ def query_dataset(
     return payload
 
 
+@dataclass(frozen=True)
+class ThumbnailResult:
+    """A fetched thumbnail: metadata for JSON, plus the raw bytes for an image block."""
+
+    payload: Dict[str, Any]
+    body: bytes
+    mime_type: str
+
+
 def get_dataset_thumbnail(
     client: GeopackClient,
     dataset_id: int,
     save_path: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Fetch thumbnail PNG to disk on the MCP host (for Cursor Agent chat previews).
+) -> ThumbnailResult:
+    """Fetch a thumbnail PNG/JPEG and hand it back as IMAGE CONTENT.
 
-    Bytes are not returned in tool JSON — only ``savedPath`` and metadata.
+    Bytes travel inline in the tool result (the host renders them), which is the
+    whole feature. A local copy is **opt-in**: with no ``save_path`` nothing is
+    written (``saved: false`` + ``saveSkipped: true``) — inventing a temp path
+    crashed on a sandboxed host whose temp dir is unusable (live-QA 2026-11-21).
+    With ``save_path`` a refused/failed write answers ``saved: false`` +
+    ``saveError`` — never an ``isError`` result — and never echoes the absolute
+    path an ``OSError`` message would otherwise embed.
     """
     body, mime_type = fetch_dataset_thumbnail(client, dataset_id)
 
-    if save_path:
-        target = Path(save_path)
-    else:
-        target = Path("downloads") / f"dataset_{dataset_id}_thumbnail.png"
-
-    if target.suffix == "" or target.is_dir():
-        target = target / f"dataset_{dataset_id}_thumbnail.png"
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(body)
-    resolved = str(target.resolve())
-    from ..context import register_temp_file
-    register_temp_file(resolved)
-
-    return {
-
-
+    payload: Dict[str, Any] = {
         "datasetId": dataset_id,
-        "savedPath": resolved,
         "mimeType": mime_type,
         "sizeBytes": len(body),
         "thumbnailResourceUri": dataset_thumbnail_resource_uri(dataset_id),
     }
+
+    if not save_path:
+        payload["saved"] = False
+        payload["saveSkipped"] = True
+        payload["hint"] = (
+            "The image is delivered inline in this result; nothing was written to disk. "
+            "Pass save_path only if the MCP host permits local writes."
+        )
+        return ThumbnailResult(payload=payload, body=body, mime_type=mime_type)
+
+    try:
+        target = Path(save_path).expanduser()
+        if target.suffix == "" or target.is_dir():
+            target = target / f"dataset_{dataset_id}_thumbnail.png"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+    except (OSError, ValueError) as exc:
+        payload["saved"] = False
+        # Type + errno only: an OSError message embeds the absolute path.
+        payload["saveError"] = f"{type(exc).__name__} (errno {getattr(exc, 'errno', 'n/a')})"
+        payload["hint"] = (
+            "The MCP host refused the local write; the image is returned inline in this "
+            "result, so no file is needed. Do not retry the same path."
+        )
+    else:
+        resolved = str(target.resolve())
+        from ..context import register_temp_file
+
+        register_temp_file(resolved)
+        payload["saved"] = True
+        payload["savedPath"] = resolved
+
+    return ThumbnailResult(payload=payload, body=body, mime_type=mime_type)
 
 
 def export_dataset(
@@ -359,15 +464,74 @@ def _normalize_group_by(group_by: Any) -> List[Dict[str, Any]]:
     return [{"field": name} for name in fields]
 
 
-def _normalize_order_by(order_by: Any) -> List[Dict[str, Any]]:
+def _server_order_keys(
+    aggregates: List[Dict[str, Any]],
+    group_fields: List[str],
+) -> tuple[List[str], Dict[str, str]]:
+    """The ORDER BY keys the adapter will really build, plus alias translations.
+
+    Mirrors ``aggregateSql.buildAggregateSelectParts`` and the feature managers:
+    the legal set is ``count`` / ``aggregate_count``, the ``groupBy`` field names,
+    and each non-count aggregate's alias (or ``aggregate_<kind>_<field>``). The
+    adapter **ignores a count alias** — its column is always ``aggregate_count``
+    — so a count alias is translated to that key instead of passed through
+    (live-QA 2026-11-21: ``order_by key 'n'`` failed while ``aggregate_count``
+    worked).
+    """
+    legal: List[str] = ["count", "aggregate_count", *group_fields]
+    translation: Dict[str, str] = {}
+
+    for spec in aggregates:
+        alias = str(spec.get("alias") or "").strip()
+        kind = spec.get("aggregate")
+        if kind == "count":
+            if alias:
+                # Accepted as input, translated to the key the adapter emits.
+                legal.append(alias)
+                translation[alias.lower()] = "aggregate_count"
+            continue
+        key = alias or (
+            f"aggregate_{kind}_{spec.get('field')}" if spec.get("field") else None
+        )
+        if key:
+            legal.append(key)
+
+    deduped = list(dict.fromkeys(legal))
+    return deduped, translation
+
+
+def _normalize_order_by(
+    order_by: Any,
+    *,
+    aggregates: List[Dict[str, Any]],
+    group_fields: List[str],
+) -> List[Dict[str, Any]]:
+    legal, translation = _server_order_keys(aggregates, group_fields)
+    legal_by_lower = {key.lower(): key for key in legal}
+
     entries: List[Dict[str, Any]] = []
     for index, item in enumerate(order_by or []):
         if not isinstance(item, dict) or not item.get("key"):
             raise ToolArgumentError(
-                'Each order_by entry needs a "key" (a groupBy field or an aggregate alias)',
+                'Each order_by entry needs a "key" (a group_by field or an aggregate alias)',
                 key=f"order_by.{index}.key",
-                hint="Use a group_by field name or an aggregate alias as the order key.",
+                hint=f"Legal order keys: {', '.join(legal)}.",
             )
+
+        raw_key = str(item["key"]).strip()
+        canonical_key = translation.get(raw_key.lower()) or legal_by_lower.get(
+            raw_key.lower()
+        )
+        if canonical_key is None:
+            raise ToolArgumentError(
+                f"Unknown order_by key {raw_key!r}",
+                key=f"order_by.{index}.key",
+                hint=(
+                    f"Legal order keys: {', '.join(legal)}. A count aggregate's key is "
+                    "count/aggregate_count (its alias is accepted and translated)."
+                ),
+            )
+
         direction = str(item.get("direction") or "asc").strip().lower()
         if direction not in ("asc", "desc"):
             raise ToolArgumentError(
@@ -375,10 +539,22 @@ def _normalize_order_by(order_by: Any) -> List[Dict[str, Any]]:
                 key=f"order_by.{index}.direction",
                 hint='Pass direction "asc" (default) or "desc".',
             )
-        entry: Dict[str, Any] = {"key": item["key"], "direction": direction}
-        if item.get("by"):
-            entry["by"] = item["by"]
+
+        entry: Dict[str, Any] = {"key": canonical_key, "direction": direction}
+        if item.get("by") is not None:
+            by = str(item["by"]).strip().lower()
+            if by not in ("value", "label"):
+                raise ToolArgumentError(
+                    'order_by "by" must be "value" or "label"',
+                    key=f"order_by.{index}.by",
+                    hint=(
+                        '"by" selects WHAT the key names: "value" (the stored code, '
+                        'default) or "label" (the code\'s declared name). It is not an alias.'
+                    ),
+                )
+            entry["by"] = by
         entries.append(entry)
+
     if len(entries) > MAX_ORDER_BY:
         raise ToolArgumentError(
             f"order_by accepts at most {MAX_ORDER_BY} entries",
@@ -420,7 +596,11 @@ def aggregate_dataset(
     grouped = _normalize_group_by(group_by)
     if grouped:
         aggregation["groupBy"] = grouped
-    ordered = _normalize_order_by(order_by)
+    ordered = _normalize_order_by(
+        order_by,
+        aggregates=aggregation["aggregates"],
+        group_fields=[entry["field"] for entry in grouped],
+    )
     if ordered:
         aggregation["orderBy"] = ordered
 

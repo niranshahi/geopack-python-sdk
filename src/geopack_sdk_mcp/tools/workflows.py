@@ -20,23 +20,31 @@ from ..tool_handlers.workflows import (
 from ..tool_schema import (
     BudgetChars,
     IncludeWorkflowParams,
+    OrderDirection,
     Page,
     PageSize,
     SearchQuery,
     WorkflowId,
+    WorkflowOrderBy,
 )
 
 
 def register(mcp: Any) -> None:
     @mcp.tool(
         annotations=read_tool("geopack_sdk_list_workflows"),
-        description="List workflow definitions (no graphJson in JSON).",
+        description=(
+            "List workflow definitions (no graphJson in JSON). order_by sorts server-side "
+            "(id, name, owner.userName, updatedAt, createdAt, version); the default is "
+            "updatedAt, newest first. An unknown order_by is refused with the legal list."
+        ),
     )
     def geopack_sdk_list_workflows(
         ctx: Context[ServerSession, AppContext],
         page: Page = 1,
         page_size: PageSize = 20,
         search_query: SearchQuery = None,
+        order_by: WorkflowOrderBy = None,
+        order_direction: OrderDirection = None,
     ) -> CallToolResult:
         try:
             return tool_result(
@@ -45,6 +53,8 @@ def register(mcp: Any) -> None:
                     page=page,
                     page_size=page_size,
                     search_query=search_query,
+                    order_by=order_by,
+                    order_direction=order_direction,
                 )
             )
         except Exception as exc:

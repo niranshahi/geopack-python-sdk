@@ -20,7 +20,7 @@ import os
 import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union, Literal
-from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, Field, ConfigDict, ValidationError, field_validator, model_validator
 
 from .dataset_payload import normalize_dataset_dict
 
@@ -73,26 +73,36 @@ class Organization(BaseModel):
 # ============================================================================
 
 class Dataset(BaseModel):
-    """Complete Dataset entity with all associated data"""
+    """Complete Dataset entity with all associated data.
+
+    The portal stores ``dataType`` as a free string (the column is
+    ``STRING(50)`` with no CHECK) and exposes rows this SDK does not author —
+    notably ``dataType="service"`` (an external-service dataset) and rows with
+    ``dataStoreId`` / ``ownerUserId`` / ``workgroupId`` null. Those are NOT
+    parse failures: a strict ``Literal`` here made a single service row reject
+    the whole page (live-QA 2026-11-21, ``list_datasets`` with no ``data_type``
+    filter). Keep the identity fields optional and the enumerations advisory.
+    """
     id: int
     name: str
     description: Optional[str] = None
-    dataType: Literal['vector', 'table', 'raster']
+    #: Advisory, not a closed enum: vector | table | raster | service | ...
+    dataType: Optional[str] = None
     subType: Optional[str] = None
     keywords: Optional[str] = None
-    
-    # Identity fields
-    ownerUserId: int
-    workgroupId: int
-    dataStoreId: int
-    
+
+    # Identity fields (nullable for service / virtual rows)
+    ownerUserId: Optional[int] = None
+    workgroupId: Optional[int] = None
+    dataStoreId: Optional[int] = None
+
     # Metadata - details can be JSON string or dict
     details: Optional[Union[str, Dict[str, Any]]] = None
     status: str = 'active'
-    
+
     # Timestamps
-    createdAt: datetime
-    updatedAt: datetime
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
     
     # Optional associations (populated by API when requested)
     owner: Optional[Principal] = None
@@ -125,6 +135,23 @@ class Dataset(BaseModel):
         if isinstance(data, dict):
             return normalize_dataset_dict(data)
         return data
+
+    @field_validator('dataType', 'subType', 'status', 'description', 'keywords', mode='before')
+    @classmethod
+    def _coerce_text_field(cls, value: Any) -> Any:
+        """A numerified/misspelled enum must not reject the record."""
+        return None if value is None else str(value)
+
+    @field_validator('ownerUserId', 'workgroupId', 'dataStoreId', mode='before')
+    @classmethod
+    def _coerce_optional_int(cls, value: Any) -> Any:
+        """API sends ``null`` for service rows; a numeric string is accepted."""
+        if value is None or value == '':
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
     
     @property
     def keywords_array(self) -> List[str]:
@@ -145,6 +172,68 @@ class Dataset(BaseModel):
             except json.JSONDecodeError:
                 return {}
         return {}
+
+
+def _repair_dataset_item(raw: Any) -> Any:
+    """Return one list item that is guaranteed to validate as :class:`Dataset`.
+
+    The portal can add a row shape this SDK has never seen. The list lane must
+    never let that reject the whole page (live-QA 2026-11-21): the offending
+    record is degraded to its identity fields, flagged ``validationDegraded``
+    and its untouched payload is kept under ``rawRecord`` — never dropped.
+    """
+    if not isinstance(raw, dict):
+        return raw
+    try:
+        Dataset.model_validate(raw)
+        return raw
+    except ValidationError as exc:
+        errors = [
+            f"{'.'.join(str(part) for part in err.get('loc', ()))}: {err.get('msg')}"
+            for err in exc.errors()[:5]
+        ]
+        # Keep the untouched payload beside the degraded shell — never drop it.
+        degraded: Dict[str, Any] = {
+            "validationDegraded": True,
+            "validationErrors": errors,
+            "rawRecord": dict(raw),
+        }
+        try:
+            degraded["id"] = int(raw.get("id"))
+        except (TypeError, ValueError):
+            degraded["id"] = -1
+        name = raw.get("name")
+        degraded["name"] = name if isinstance(name, str) and name else str(name or "unknown")
+        # Only carry values whose declared type this model can accept.
+        for key in ("description", "dataType", "subType", "keywords", "status"):
+            if isinstance(raw.get(key), str):
+                degraded[key] = raw[key]
+        if isinstance(raw.get("details"), (str, dict)):
+            degraded["details"] = raw["details"]
+        for key in ("ownerUserId", "workgroupId", "dataStoreId"):
+            if raw.get(key) is not None:
+                try:
+                    degraded[key] = int(raw[key])
+                except (TypeError, ValueError):
+                    pass
+        if raw.get("hasThumbnail") is not None:
+            degraded["hasThumbnail"] = bool(raw["hasThumbnail"])
+        for key in ("thumbnailApiPath", "thumbnailMintPath", "thumbnailResourceUri"):
+            if isinstance(raw.get(key), str):
+                degraded[key] = raw[key]
+
+        try:
+            Dataset.model_validate(degraded)
+            return degraded
+        except ValidationError:
+            # Absolute floor: identity only (these two fields always validate).
+            return {
+                "id": degraded["id"],
+                "name": degraded["name"],
+                "validationDegraded": True,
+                "validationErrors": errors,
+                "rawRecord": dict(raw),
+            }
 
 
 class CreateDatasetDto(BaseModel):
@@ -1555,12 +1644,29 @@ class ThumbnailFile(BaseModel):
 # ============================================================================
 
 class DatasetsApiResponse(BaseModel):
-    """Response from GET /api/datasets"""
+    """Response from GET /api/datasets.
+
+    Validation is per-item soft: a record the model cannot parse is degraded
+    (``validationDegraded`` + ``rawRecord``) instead of rejecting the whole
+    page — the discovery lane must survive a row shape this SDK has not seen.
+    """
     datasets: List[Dataset] = Field(default_factory=list)
-    totalCount: int
-    totalPages: int
-    currentPage: int
-    itemsPerPage: int
+    totalCount: int = 0
+    totalPages: int = 1
+    currentPage: int = 1
+    itemsPerPage: int = 0
+
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _repair_dataset_items(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        raw_items = data.get("datasets")
+        if not isinstance(raw_items, list):
+            return data
+        return {**data, "datasets": [_repair_dataset_item(item) for item in raw_items]}
 
 
 class ApiErrorResponse(BaseModel):

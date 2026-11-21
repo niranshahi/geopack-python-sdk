@@ -14,7 +14,15 @@ from ..context import get_client
 from ..errors import tool_error_result, tool_result
 from ..output_schema import PageEnvelope
 from ..tool_handlers.generated_files import download_generated_file, list_generated_files
-from ..tool_schema import GeneratedFileId, PageSize, QueryOffset, SavePathRequired
+from ..tool_schema import (
+    GeneratedFileId,
+    GeneratedFileOrderBy,
+    OrderDirection,
+    PageSize,
+    QueryOffset,
+    SavePathRequired,
+    SearchQuery,
+)
 
 
 def register(mcp: Any) -> None:
@@ -22,18 +30,30 @@ def register(mcp: Any) -> None:
         annotations=read_tool("geopack_sdk_list_generated_files"),
         description=(
             "List downloadable files (exports, workflow outputs) with id, name, size and "
-            "timestamps. Use it instead of guessing a generatedFileId, then call "
-            "download_generated_file with the id."
+            "timestamps. Optional search_query matches the file name; order_by sorts "
+            "server-side (createdAt, fileName, fileSize, expiresAt, sharingPolicy); the "
+            "default is createdAt, newest first. Use it instead of guessing a "
+            "generatedFileId, then call download_generated_file with the id."
         ),
     )
     def geopack_sdk_list_generated_files(
         ctx: Context[ServerSession, AppContext],
         limit: PageSize = 20,
         offset: QueryOffset = 0,
+        search_query: SearchQuery = None,
+        order_by: GeneratedFileOrderBy = None,
+        order_direction: OrderDirection = None,
     ) -> Annotated[CallToolResult, PageEnvelope]:
         try:
             return tool_result(
-                list_generated_files(get_client(ctx), limit=limit, offset=offset)
+                list_generated_files(
+                    get_client(ctx),
+                    limit=limit,
+                    offset=offset,
+                    search_query=search_query,
+                    order_by=order_by,
+                    order_direction=order_direction,
+                )
             )
         except Exception as exc:
             return tool_error_result(exc)

@@ -27,12 +27,18 @@ class AsyncWorkflowRunManager:
         page: int = 1,
         page_size: int = 10,
         filters: Optional[Dict[str, Any]] = None,
+        order_by: Optional[str] = None,
+        order_direction: Optional[str] = None,
     ) -> WorkflowRunListResponse:
-        params = {
+        params: Dict[str, Any] = {
             "limit": page_size,
             "offset": (page - 1) * page_size,
             **(filters or {}),
         }
+        if order_by:
+            params["sortBy"] = order_by
+        if order_direction:
+            params["sortOrder"] = order_direction
         response_data = await self.client.get(self.base_url, params=params)
         return WorkflowRunListResponse(**response_data)
 

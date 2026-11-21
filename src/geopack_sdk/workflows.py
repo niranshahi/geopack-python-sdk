@@ -33,11 +33,19 @@ class WorkflowManager:
         page: int = 1,
         page_size: int = 10,
         search_query: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_direction: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Workflow]:
         """List workflow definitions with type-safe response.
 
         REST API: `GET /api/workflows`
+
+        Args:
+            order_by: Server sort key (`sortBy`); omit for the portal default
+                (``updatedAt``, newest first).
+            order_direction: ``asc``/``desc`` (``sortOrder``); omit for the
+                portal default.
 
         Returns:
             List[Workflow]: Validated workflow models
@@ -45,8 +53,12 @@ class WorkflowManager:
         params = {
             "limit": page_size,
             "offset": (page - 1) * page_size,
-            **(filters or {})
         }
+        if order_by:
+            params["sortBy"] = order_by
+        if order_direction:
+            params["sortOrder"] = order_direction
+        params.update(filters or {})
         if search_query:
             params["q"] = search_query
 

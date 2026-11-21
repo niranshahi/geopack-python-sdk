@@ -24,10 +24,11 @@ absolute host paths outside ``savedPath``.
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any, Dict, List, Optional
 
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult, ImageContent, TextContent
 
 from geopack_sdk.exceptions import (
     AggregationInvalidArgs,
@@ -104,6 +105,9 @@ _CLASS_CODES: Dict[type, str] = {
     GeopackTimeoutError: "TIMEOUT",
     GeopackTaskError: "TASK_FAILED",
     GeopackValidationError: "RESPONSE_VALIDATION_ERROR",
+    # Local-write refusals (the MCP host sandbox: live-QA 2026-11-21).
+    PermissionError: "LOCAL_WRITE_FAILED",
+    OSError: "LOCAL_IO_ERROR",
 }
 _CLASS_CODES_BY_NAME: Dict[str, str] = {
     cls.__name__: code for cls, code in _CLASS_CODES.items()
@@ -183,6 +187,15 @@ _CLASS_HINTS: Dict[type, str] = {
     ),
     GeopackValidationError: (
         "The portal answered with a shape this SDK cannot parse. Report it; do not retry."
+    ),
+    PermissionError: (
+        "The MCP host forbids writing to that location (sandboxed desktop apps often do). "
+        "Use a tool that returns the data inline or pick a writable directory; do not retry "
+        "the same path."
+    ),
+    OSError: (
+        "A local file operation failed on the MCP host. Check the target directory exists, "
+        "is writable and has free space."
     ),
 }
 
@@ -347,11 +360,16 @@ def tool_error_payload(exc: BaseException) -> Dict[str, Any]:
             "message": exc.message,
         }
     else:
+        # Never echo an absolute host path (an OSError message embeds one).
+        if isinstance(exc, OSError):
+            message = f"{type(exc).__name__}: {exc.strerror or 'local file operation failed'}"
+        else:
+            message = str(exc)
         payload = {
             "error": True,
             "type": type(exc).__name__,
             "code": "UNKNOWN_ERROR",
-            "message": str(exc),
+            "message": message,
         }
 
     hint = _hint_for(exc)
@@ -409,3 +427,31 @@ def tool_result(payload: Any) -> CallToolResult:
             structuredContent=payload,
         )
     return CallToolResult(content=[TextContent(type="text", text=_text(payload))])
+
+
+def tool_result_with_image(
+    payload: Dict[str, Any],
+    body: bytes,
+    mime_type: str = "image/png",
+) -> CallToolResult:
+    """A successful read that ALSO delivers bytes as an MCP image block.
+
+    A sandboxed desktop host may forbid every local write (live-QA 2026-11-21:
+    ``get_dataset_thumbnail`` answered ``PermissionError`` on every path). The
+    image is content, not necessarily a file, so it travels inline in the tool
+    result and the host renders it without touching the disk. ``payload`` stays
+    the structured metadata (including ``saved: false`` when a local copy could
+    not be written — a state, never an error).
+    """
+    content: List[Any] = []
+    if body:
+        safe_mime = mime_type if str(mime_type).startswith("image/") else "image/png"
+        content.append(
+            ImageContent(
+                type="image",
+                data=base64.b64encode(body).decode("ascii"),
+                mimeType=safe_mime,
+            )
+        )
+    content.append(TextContent(type="text", text=_text(payload)))
+    return CallToolResult(content=content, structuredContent=payload)

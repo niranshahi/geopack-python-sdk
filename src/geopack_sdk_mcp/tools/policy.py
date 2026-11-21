@@ -114,7 +114,11 @@ TOOL_POLICY: Dict[str, Dict[str, Any]] = {
 _POLICY_NOTE = (
     "Mutating tools require the consent their entry names before they are called. "
     "Client-side validation refusals answer type='invalid_args' with candidates and "
-    "write nothing. Irreversible deletes are excluded from MCP entirely."
+    "write nothing. Irreversible deletes are excluded from MCP entirely. "
+    "Tools listed in localWrites write to the MCP host filesystem only on a best-effort "
+    "basis: a sandboxed host that forbids writes answers saved=false instead of failing, "
+    "and geopack_sdk_get_dataset_thumbnail delivers the image inline regardless (inline is "
+    "the official delivery mode for a thumbnail)."
 )
 
 

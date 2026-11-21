@@ -27,6 +27,100 @@ _GET_RASTER_OMIT_KEYS = frozenset({"metadata_4326", "metadata_3857", "pgisMetada
 
 _SR_STRIP_KEYS = frozenset({"wkt", "proj4", "srsName"})
 
+#: Top-level keys a dataset record may carry. ``fields`` projection refuses a
+#: name outside this set instead of silently answering nothing (live-QA 2026-11-21).
+DATASET_TOP_LEVEL_KEYS = frozenset(
+    {
+        "id",
+        "name",
+        "description",
+        "dataType",
+        "subType",
+        "keywords",
+        "ownerUserId",
+        "workgroupId",
+        "dataStoreId",
+        "details",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "owner",
+        "workgroup",
+        "dataStore",
+        "hasThumbnail",
+        "thumbnailApiPath",
+        "thumbnailMintPath",
+        "thumbnailResourceUri",
+        # present only on a degraded (unparseable) row — kept projectable
+        "validationDegraded",
+        "validationErrors",
+        "rawRecord",
+    }
+)
+
+#: ``bbox`` filters on the stored dataset extent; say so instead of letting a
+#: caller assume it is a geometric intersection (backend fix tracked as BE-009).
+EXTENT_FILTER_NOTE = (
+    "bbox filters on the STORED dataset extent (ext_west/south/east/north), not on "
+    "feature geometry. Datasets whose stored extent is null (common for rasters) are "
+    "not matched — do not read a short list as 'nothing there'."
+)
+
+
+def normalize_fields(fields: Any) -> Optional[List[str]]:
+    """Accept a list (or a comma-separated string) of top-level field names."""
+    if fields is None:
+        return None
+    if isinstance(fields, str):
+        raw = [part.strip() for part in fields.split(",")]
+    elif isinstance(fields, (list, tuple, set)):
+        raw = [str(part).strip() for part in fields]
+    else:
+        raise ToolArgumentError(
+            "fields must be a list of dataset field names (or a comma-separated string).",
+            key="fields",
+            hint="Pass e.g. [\"id\",\"name\",\"dataType\",\"createdAt\"].",
+        )
+    names = [name for name in dict.fromkeys(raw) if name]
+    return names or None
+
+
+def validate_projection_fields(fields: Optional[List[str]]) -> None:
+    """Refuse an unknown projection key up front (even when the page is empty)."""
+    if not fields:
+        return
+    unknown = sorted(name for name in fields if name not in DATASET_TOP_LEVEL_KEYS)
+    if unknown:
+        raise ToolArgumentError(
+            f"Unknown field(s) in fields: {', '.join(unknown)}",
+            key="fields",
+            hint=(
+                "fields may only name top-level dataset keys: "
+                f"{', '.join(sorted(DATASET_TOP_LEVEL_KEYS))}."
+            ),
+        )
+
+
+def project_dataset_keys(
+    record: Dict[str, Any],
+    fields: Optional[List[str]],
+) -> Dict[str, Any]:
+    """Keep only the requested top-level keys (``id`` is always kept).
+
+    An unknown name is a client-side refusal that lists the accepted set — a
+    projection that silently returns nothing is indistinguishable from an empty
+    record.
+    """
+    if not fields or not isinstance(record, dict):
+        return record
+
+    validate_projection_fields(fields)
+
+    projected = {name: record[name] for name in fields if name in record}
+    if "id" in record:
+        projected["id"] = record["id"]
+    return projected
+
 
 def normalize_details_level(
     level: Optional[str],
@@ -245,31 +339,51 @@ def trim_details(details: Any, level: Union[DetailsLevel, DetailsProfile]) -> An
 def trim_dataset_for_mcp(
     dataset: Dict[str, Any],
     level: Union[DetailsLevel, DetailsProfile] = "lite",
+    *,
+    fields: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Apply details trimming to one dataset record (after ``model_dump``)."""
+    """Apply details trimming to one dataset record (after ``model_dump``).
+
+    ``fields`` projects the top-level keys afterwards — a record here is a single
+    ``get_dataset`` answer, so ``lite`` still keeps its (trimmed) ``details``.
+    """
     if not isinstance(dataset, dict):
         return dataset
 
     trimmed = dict(dataset)
     if "details" in trimmed:
         trimmed["details"] = trim_details(trimmed["details"], level)
-    return trimmed
+    return project_dataset_keys(trimmed, fields)
 
 
 def trim_datasets_list_payload(
     payload: Dict[str, Any],
     *,
     details_level: DetailsLevel = "lite",
+    fields: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Trim each dataset in a ``DatasetsApiResponse``-shaped dict."""
+    """Trim each dataset in a ``DatasetsApiResponse``-shaped dict.
+
+    In a LIST, ``lite`` is a true card: the ``details`` blob is dropped (a list
+    of 264 vectors is otherwise ~392 KB). ``standard``/``full`` keep the trimmed
+    details; an explicit ``fields`` including ``details`` keeps it too.
+    """
     if not isinstance(payload, dict):
         return payload
 
     out = dict(payload)
     datasets = out.get("datasets")
     if isinstance(datasets, list):
-        out["datasets"] = [
-            trim_dataset_for_mcp(ds, details_level) if isinstance(ds, dict) else ds
-            for ds in datasets
-        ]
+        normalized: List[Any] = []
+        for ds in datasets:
+            if not isinstance(ds, dict):
+                normalized.append(ds)
+                continue
+            row = trim_dataset_for_mcp(ds, details_level)
+            keep_details = fields is not None and "details" in fields
+            if details_level == "lite" and not keep_details:
+                row.pop("details", None)
+                row["detailsOmitted"] = True
+            normalized.append(project_dataset_keys(row, fields))
+        out["datasets"] = normalized
     return out

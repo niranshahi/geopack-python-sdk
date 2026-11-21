@@ -21,9 +21,11 @@ from ..tool_handlers.workflow_runs import (
 )
 from ..tool_schema import (
     ArtifactId,
+    OrderDirection,
     OverrideDatastoreId,
     PageSize,
     QueryOffset,
+    RunOrderBy,
     RunStatusFilter,
     SavePathRequired,
     WorkflowId,
@@ -66,8 +68,11 @@ def register(mcp: Any) -> None:
         annotations=read_tool("geopack_sdk_list_workflow_runs"),
         description=(
             "List workflow runs you can see (id, workflowId, status, submitter, timestamps), "
-            "optionally filtered by workflow_id or status. Use this to answer 'what did I start' "
-            "instead of guessing a run id; then call get_workflow_run for artifacts and detail."
+            "optionally filtered by workflow_id or status. order_by sorts server-side "
+            "(id, workflow.name, submitter, taskId, status, startedAt, finishedAt, createdAt, "
+            "updatedAt); the default is createdAt, newest first. Use this to answer 'what did I "
+            "start' instead of guessing a run id; then call get_workflow_run for artifacts and "
+            "detail."
         ),
     )
     def geopack_sdk_list_workflow_runs(
@@ -76,6 +81,8 @@ def register(mcp: Any) -> None:
         status: RunStatusFilter = None,
         limit: PageSize = 20,
         offset: QueryOffset = 0,
+        order_by: RunOrderBy = None,
+        order_direction: OrderDirection = None,
     ) -> Annotated[CallToolResult, PageEnvelope]:
         try:
             return tool_result(
@@ -85,6 +92,8 @@ def register(mcp: Any) -> None:
                     status=status,
                     limit=limit,
                     offset=offset,
+                    order_by=order_by,
+                    order_direction=order_direction,
                 )
             )
         except Exception as exc:
