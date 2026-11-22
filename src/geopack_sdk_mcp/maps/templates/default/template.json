@@ -38,6 +38,14 @@
     "opacity": 0.85,
     "radius": 5
   },
+  "layerPalette": [
+    "#3ba776",
+    "#3b7fa7",
+    "#c2703b",
+    "#8b5cf6",
+    "#d1477a",
+    "#2f9e8f"
+  ],
   "layerList": true,
   "legend": true,
   "scale": true,

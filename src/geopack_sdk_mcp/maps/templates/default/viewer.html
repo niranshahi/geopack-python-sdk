@@ -32,6 +32,7 @@ __CSS_VARS__
   #basemap { width: 100%; padding: 4px; }
   #legend .item { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
   #legend .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.3); }
+  #legend .swatch.raster { background: repeating-linear-gradient(45deg, #8a9a93, #8a9a93 3px, #cfd8d4 3px, #cfd8d4 6px); }
   #panel .gp-empty { opacity: .6; font-style: italic; }
   footer { background: #f4f6f5; color: #4b5b54; padding: 5px 14px; font-size: 11px; }
   #banner { position: absolute; left: 10px; top: 10px; z-index: 5; max-width: 60%;
@@ -90,16 +91,37 @@ function xyzTileLoad(imageTile, src) {
   img.src = src;
 }
 
-const style = TEMPLATE.layerStyle || {};
-function vectorStyle() {
-  const stroke = new ol.style.Stroke({ color: style.stroke || '#14532d', width: style.weight || 2 });
-  const fill = new ol.style.Fill({ color: (style.fill || '#3ba776') });
+const BASE_STYLE = TEMPLATE.layerStyle || {};
+const PALETTE = (Array.isArray(TEMPLATE.layerPalette) && TEMPLATE.layerPalette.length)
+  ? TEMPLATE.layerPalette
+  : ['#3ba776', '#3b7fa7', '#c2703b', '#8b5cf6', '#d1477a', '#2f9e8f'];
+
+// Merge the template's base layer style with a layer's own `style`; a missing
+// fill rotates through the palette so several layers are separable. This is the
+// style ACTUALLY applied to vector features — not just the legend swatch.
+function resolveStyle(spec, index) {
+  const perLayer = (spec && spec.style) || {};
+  const merged = Object.assign({}, BASE_STYLE, perLayer);
+  if (!merged.fill) merged.fill = PALETTE[index % PALETTE.length];
+  return merged;
+}
+
+function vectorStyle(layerStyle) {
+  const s = layerStyle || BASE_STYLE;
+  const stroke = new ol.style.Stroke({ color: s.stroke || '#14532d', width: s.weight || 2 });
+  const fill = new ol.style.Fill({ color: s.fill || '#3ba776' });
   return new ol.style.Style({
     stroke: stroke,
     fill: fill,
-    image: new ol.style.Circle({ radius: style.radius || 5,
+    image: new ol.style.Circle({ radius: s.radius || 5,
       stroke: stroke, fill: fill })
   });
+}
+
+// WMS/WMTS/XYZ are images rendered elsewhere: a per-layer `style` cannot recolour
+// them, and the legend must show a raster swatch rather than a vector colour.
+function isRasterRender(render) {
+  return render === 'wms' || render === 'wmts' || render === 'xyz';
 }
 
 function basemapLayer(entry) {
@@ -115,15 +137,16 @@ function basemapLayer(entry) {
   });
 }
 
-function buildLayer(spec) {
+function buildLayer(spec, index) {
   const render = spec.render || (spec.kind === 'portal-publication' ? 'wms' : 'geojson');
+  const resolved = resolveStyle(spec, index);
   let source, layer;
   if (render === 'geojson') {
     source = new ol.source.Vector({ url: withToken(spec.dataUrl), format: new ol.format.GeoJSON() });
-    layer = new ol.layer.Vector({ source: source, style: vectorStyle() });
+    layer = new ol.layer.Vector({ source: source, style: vectorStyle(resolved) });
   } else if (render === 'mvt') {
     source = new ol.source.VectorTile({ format: new ol.format.MVT(), url: withToken(spec.tileUrl) });
-    layer = new ol.layer.VectorTile({ source: source, style: vectorStyle() });
+    layer = new ol.layer.VectorTile({ source: source, style: vectorStyle(resolved) });
   } else if (render === 'wms') {
     source = new ol.source.TileWMS({ url: spec.wmsUrl, params: { t: TOKEN } });
     layer = new ol.layer.Tile({ source: source });
@@ -135,15 +158,17 @@ function buildLayer(spec) {
     layer = new ol.layer.Tile({ source: source });
   } else {
     source = new ol.source.Vector({ url: withToken(spec.dataUrl), format: new ol.format.GeoJSON() });
-    layer = new ol.layer.Vector({ source: source, style: vectorStyle() });
+    layer = new ol.layer.Vector({ source: source, style: vectorStyle(resolved) });
   }
   layer.set('title', spec.title || spec.id);
   layer.set('gpId', spec.id);
-  layer.set('gpStyle', spec.style || null);
+  layer.set('gpRender', render);
+  layer.set('gpStyle', resolved);
+  layer.set('gpRaster', !!spec.raster);
   return layer;
 }
 
-async function wfsLayer(spec) {
+async function wfsLayer(spec, index) {
   const url = withToken(spec.wfsUrl) +
     '&SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&outputFormat=application/json&srsName=EPSG:4326';
   const response = await fetch(url);
@@ -152,7 +177,11 @@ async function wfsLayer(spec) {
   const source = new ol.source.Vector({
     features: new ol.format.GeoJSON().readFeatures(geo, { featureProjection: 'EPSG:3857' })
   });
-  return new ol.layer.Vector({ source: source, style: vectorStyle() });
+  const layer = new ol.layer.Vector({ source: source, style: vectorStyle(resolveStyle(spec, index)) });
+  layer.set('gpRender', 'wfs');
+  layer.set('gpStyle', resolveStyle(spec, index));
+  layer.set('gpRaster', false);
+  return layer;
 }
 
 function renderPanel(map, baseLayers, dataLayers) {
@@ -221,14 +250,23 @@ function renderPanel(map, baseLayers, dataLayers) {
       legendEl.appendChild(empty);
     }
     dataLayers.forEach(function (layer) {
-      const s = layer.get('gpStyle') || TEMPLATE.layerStyle || {};
+      const render = layer.get('gpRender');
+      const s = layer.get('gpStyle') || BASE_STYLE;
       const item = document.createElement('div');
       item.className = 'item';
       const swatch = document.createElement('span');
       swatch.className = 'swatch';
-      swatch.style.background = s.fill || '#3ba776';
       const label = document.createElement('span');
-      label.textContent = layer.get('title');
+      if (isRasterRender(render) || layer.get('gpRaster')) {
+        // An image layer (or a raster dataset) has no meaningful client colour;
+        // show a raster swatch, not a fake vector fill.
+        swatch.classList.add('raster');
+        label.textContent = (layer.get('title') || '') + ' (raster)';
+      } else {
+        swatch.style.background = s.fill || '#3ba776';
+        swatch.style.borderColor = s.stroke || 'rgba(0,0,0,.3)';
+        label.textContent = layer.get('title');
+      }
       item.appendChild(swatch); item.appendChild(label);
       legendEl.appendChild(item);
     });
@@ -284,12 +322,13 @@ async function main() {
   const extent = ol.extent.createEmpty();
   const dataLayers = [];
   for (const spec of (manifest.layers || [])) {
+    const index = dataLayers.length;
     let layer;
     try {
       if ((spec.render || '') === 'wfs' || (spec.kind === 'portal-publication' && spec.render === 'wfs')) {
-        layer = await wfsLayer(spec);
+        layer = await wfsLayer(spec, index);
       } else {
-        layer = buildLayer(spec);
+        layer = buildLayer(spec, index);
       }
     } catch (err) {
       banner('Layer "' + (spec.title || spec.id) + '" failed: ' + err.message);

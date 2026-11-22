@@ -171,6 +171,23 @@ class RenderHtmlTest(unittest.TestCase):
         self.assertNotIn("baseLayers.filter(", html)
         self.assertIn("validWgs84BBox", html)
 
+    def test_per_layer_style_is_applied_to_vector_layers(self):
+        # A layer `style` used to be echoed but never applied; the viewer now
+        # resolves a per-layer style and the legend shows a raster swatch for
+        # image layers instead of a fake vector fill.
+        html = viewer.default_viewer_html()
+        self.assertIn("resolveStyle", html)
+        self.assertIn("layerPalette", html)
+        self.assertIn("isRasterRender", html)
+        self.assertIn("gpRaster", html)
+        self.assertIn("swatch.raster", html)
+        self.assertIn("(raster)", html)
+
+    def test_the_default_template_declares_a_layer_palette(self):
+        palette = viewer.default_template()["layerPalette"]
+        self.assertIsInstance(palette, list)
+        self.assertGreaterEqual(len(palette), 2)
+
 
 class ViewerHtmlTest(unittest.TestCase):
     def test_default_source_when_no_user_page(self):

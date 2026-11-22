@@ -183,6 +183,74 @@ class TestMcpToolHandlers(unittest.TestCase):
         call_kwargs = self.client.datasets.query.call_args.kwargs
         self.assertEqual(call_kwargs["limit"], 50)
 
+    def test_query_dataset_warns_when_geometry_is_projected(self):
+        self.client.datasets.query.return_value = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {},
+                    "geometry": {"type": "Point", "coordinates": [5463069.52, 31409125.08]},
+                }
+            ],
+        }
+
+        result = query_dataset(self.client, 2554, limit=1)
+
+        self.assertIn("crsNote", result)
+        self.assertIn("out_srid=4326", result["crsNote"])
+
+    def test_query_dataset_does_not_warn_for_wgs84(self):
+        self.client.datasets.query.return_value = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {},
+                    "geometry": {"type": "Point", "coordinates": [51.4, 35.7]},
+                }
+            ],
+        }
+
+        result = query_dataset(self.client, 2580, limit=1)
+
+        self.assertNotIn("crsNote", result)
+
+    def test_query_dataset_does_not_warn_when_reprojection_requested(self):
+        # A portal that honours out_srid=4326 returns lon/lat: no warning.
+        self.client.datasets.query.return_value = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {},
+                    "geometry": {"type": "Point", "coordinates": [59.173, 36.587]},
+                }
+            ],
+        }
+
+        result = query_dataset(self.client, 2554, limit=1, out_srid=4326)
+
+        self.assertNotIn("crsNote", result)
+        self.assertEqual(result["outSridApplied"], 4326)
+
+    def test_query_dataset_defaults_to_wgs84(self):
+        self.client.datasets.query.return_value = {"type": "FeatureCollection", "features": []}
+
+        result = query_dataset(self.client, 2554, limit=1)
+
+        call_kwargs = self.client.datasets.query.call_args.kwargs
+        self.assertEqual(call_kwargs["out_srid"], 4326)
+        self.assertEqual(result["outSridApplied"], 4326)
+
+    def test_query_dataset_applies_out_srid_in_the_query_dsl_lane(self):
+        self.client.datasets.query.return_value = {"type": "FeatureCollection", "features": []}
+
+        query_dataset(self.client, 2554, {"pagination": {"limit": 5}})
+
+        dsl = self.client.datasets.query.call_args.args[1]
+        self.assertEqual(dsl["projection"]["outSRID"], 4326)
+
 
 if __name__ == "__main__":
     unittest.main()

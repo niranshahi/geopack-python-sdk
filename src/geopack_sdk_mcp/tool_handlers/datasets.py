@@ -165,6 +165,36 @@ def get_dataset(
     )
 
 
+def _first_position(geometry: Any) -> Optional[tuple]:
+    """The first ``(x, y)`` of a GeoJSON geometry (nested coordinates unwrapped)."""
+    if not isinstance(geometry, dict):
+        return None
+    coords = geometry.get("coordinates")
+    while isinstance(coords, list) and coords and isinstance(coords[0], list):
+        coords = coords[0]
+    if (
+        isinstance(coords, list)
+        and len(coords) >= 2
+        and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in coords[:2])
+    ):
+        return coords[0], coords[1]
+    return None
+
+
+def _geometry_looks_wgs84(payload: Dict[str, Any]) -> Optional[bool]:
+    """``True``/``False`` for the first feature's position, or ``None`` if unknown."""
+    features = payload.get("features")
+    if not isinstance(features, list):
+        return None
+    for feature in features:
+        if isinstance(feature, dict):
+            position = _first_position(feature.get("geometry"))
+            if position is not None:
+                x, y = position
+                return abs(x) <= 180 and abs(y) <= 90
+    return None
+
+
 def query_dataset(
     client: GeopackClient,
     dataset_id: int,
@@ -175,7 +205,13 @@ def query_dataset(
     return_geometry: bool = True,
     out_srid: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Run POST /datasets/{id}/query with MCP-safe limits."""
+    """Run POST /datasets/{id}/query with MCP-safe limits.
+
+    Output geometry defaults to **EPSG:4326** (map-friendly lon/lat): a dataset
+    stored in a projected/native CRS otherwise returns metre coordinates that a
+    WGS84 client plots nowhere. ``out_srid`` overrides the target.
+    """
+    effective_srid = 4326 if out_srid is None else out_srid
     if query is None:
         effective_limit = clamp_query_limit(limit)
         result = client.datasets.query(
@@ -184,7 +220,7 @@ def query_dataset(
             limit=effective_limit,
             offset=offset,
             return_geometry=return_geometry,
-            out_srid=out_srid,
+            out_srid=effective_srid if return_geometry else None,
         )
     else:
         dsl = normalize_feature_query_dsl(dict(query))
@@ -196,10 +232,26 @@ def query_dataset(
         pagination["limit"] = effective_limit
         pagination.setdefault("offset", offset)
         dsl["pagination"] = pagination
+        if return_geometry:
+            # The query-DSL lane used to ignore `out_srid`; apply it (an explicit
+            # projection.outSRID still wins) so both lanes answer in the same CRS.
+            projection = dict(dsl.get("projection") or {})
+            projection.setdefault("outSRID", int(effective_srid))
+            dsl["projection"] = projection
         result = client.datasets.query(dataset_id, dsl)
 
     payload = trim_feature_collection_for_mcp(to_jsonable(result))
     payload["queryLimitApplied"] = effective_limit
+    if return_geometry:
+        payload["outSridApplied"] = int(effective_srid)
+        # Belt-and-suspenders: if the portal could not reproject, say so loudly
+        # instead of letting metre coordinates masquerade as lon/lat.
+        if int(effective_srid) == 4326 and _geometry_looks_wgs84(payload) is False:
+            payload["crsNote"] = (
+                "Geometry coordinates still look projected (not EPSG:4326 lon/lat) after "
+                "requesting out_srid=4326 — the portal could not reproject this dataset. "
+                "Use a portal-publication (WMS) layer, or query the source in its own CRS."
+            )
     return payload
 
 

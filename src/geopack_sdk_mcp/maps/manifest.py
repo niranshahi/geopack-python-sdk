@@ -56,6 +56,11 @@ class MapLayer:
     query: Optional[Dict[str, Any]] = None
     render: Optional[str] = None
     xyz_url: Optional[str] = None
+    #: True when the layer's source is a raster (a raster dataset or a WMS/WMTS
+    #: publication). The viewer shows a raster swatch for these, never a made-up
+    #: vector colour, even when ``render`` is vector (a raster dataset is served
+    #: as vector but shows nothing — the caller is warned).
+    raster: bool = False
 
     def resolved_render(self) -> str:
         """The viewer renderer for this layer (explicit override or inferred)."""
@@ -82,6 +87,8 @@ class MapLayer:
                 payload[key] = f"{base_url}/proxy/publication/{self.publication_id}/{protocol}"
         if self.xyz_url:
             payload["xyzUrl"] = self.xyz_url
+        if self.raster:
+            payload["raster"] = True
         if self.style:
             payload["style"] = self.style
         if self.bbox:

@@ -146,6 +146,63 @@ class TestMcpDatasetDetails(unittest.TestCase):
         self.assertEqual(normalize_details_level("list", default="lite"), "lite")
         self.assertEqual(normalize_details_level("get", default="full"), "full")
 
+    def test_geo_extent_is_a_requestable_projection(self):
+        # details may be a JSON string; geo_extent returns a labelled box without
+        # pulling the whole (large) details blob.
+        ds = {
+            "id": 2554,
+            "name": "parcel",
+            "details": json.dumps(
+                {"geo_extent": [45.115, 25.354, 62.110, 38.067], "fields": [{"name": "a"}]}
+            ),
+        }
+
+        out = trim_dataset_for_mcp(ds, "lite", fields=["id", "geo_extent"])
+
+        self.assertEqual(
+            out["geo_extent"],
+            {
+                "bbox": [45.115, 25.354, 62.110, 38.067],
+                "crs": "EPSG:4326",
+                "axisOrder": "west,south,east,north",
+            },
+        )
+        self.assertNotIn("details", out)
+
+    def test_details_geo_extent_alias_returns_the_same_box(self):
+        ds = {"id": 1, "details": {"geo_extent": [1.0, 2.0, 3.0, 4.0]}}
+
+        out = trim_dataset_for_mcp(ds, "lite", fields=["details.geo_extent"])
+
+        self.assertEqual(out["geo_extent"]["bbox"], [1.0, 2.0, 3.0, 4.0])
+
+    def test_geo_extent_falls_back_to_the_ext_columns(self):
+        ds = {
+            "id": 2304,
+            "details": {},
+            "ext_west": 50.0,
+            "ext_south": 33.0,
+            "ext_east": 51.0,
+            "ext_north": 34.0,
+        }
+
+        out = trim_dataset_for_mcp(ds, "lite", fields=["geo_extent"])
+
+        self.assertEqual(out["geo_extent"]["bbox"], [50.0, 33.0, 51.0, 34.0])
+
+    def test_list_geo_extent_survives_the_lite_details_drop(self):
+        payload = {
+            "datasets": [
+                {"id": 1, "details": json.dumps({"geo_extent": [1.0, 2.0, 3.0, 4.0]})}
+            ]
+        }
+
+        out = trim_datasets_list_payload(payload, fields=["id", "geo_extent"])
+
+        row = out["datasets"][0]
+        self.assertEqual(row["geo_extent"]["bbox"], [1.0, 2.0, 3.0, 4.0])
+        self.assertNotIn("details", row)
+
 
 if __name__ == "__main__":
     unittest.main()

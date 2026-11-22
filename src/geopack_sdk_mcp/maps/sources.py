@@ -11,6 +11,7 @@ Two families:
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse, urlsplit, urlunsplit
@@ -146,11 +147,32 @@ def valid_wgs84_bbox(value: Any) -> Optional[List[float]]:
     return [west, south, east, north]
 
 
+def _as_details(value: Any) -> Dict[str, Any]:
+    """Coerce ``details`` to a dict.
+
+    The portal answers ``details`` as a JSON **string** for most datasets (only
+    some come back as an object), so a dict-only read silently found no extent —
+    the reason a projected dataset produced no ``bbox`` (live-QA 2026-11-22).
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def dataset_info(client: Any, dataset_id: int) -> Dict[str, Any]:
     """Best-effort raw dataset facts for extent hints (never raises).
 
-    Returns ``extent`` (WGS84 ``[W,S,E,N]`` from ``details.geo_extent`` when
-    present/plausible), ``data_type`` and ``srid``.
+    Returns ``extent`` (WGS84 ``[W,S,E,N]``), ``data_type`` and ``srid``. The
+    WGS84 extent comes from ``details.geo_extent`` (object **or** JSON string) and
+    falls back to the stored top-level ``ext_west/south/east/north`` columns, so a
+    layer gets a ``bbox`` for every dataset whose extent is known — regardless of
+    the dataset's own (possibly projected) SRID.
     """
     info: Dict[str, Any] = {}
     try:
@@ -162,44 +184,61 @@ def dataset_info(client: Any, dataset_id: int) -> Dict[str, Any]:
     data_type = raw.get("dataType")
     if data_type is not None:
         info["data_type"] = data_type
-    details = raw.get("details")
-    if isinstance(details, dict):
-        geo = details.get("geo_extent")
-        if geo is None:
-            geo = details.get("geoExtent")
-        extent = valid_wgs84_bbox(geo)
-        if extent is not None:
-            info["extent"] = extent
-        spatial = details.get("spatialReference")
-        if isinstance(spatial, dict):
-            sr_id = spatial.get("srid") or spatial.get("wkid") or spatial.get("latestWkid")
-            if sr_id is not None:
-                info["srid"] = sr_id
-        elif details.get("srid") is not None:
-            info["srid"] = details.get("srid")
+
+    details = _as_details(raw.get("details"))
+    extent = valid_wgs84_bbox(details.get("geo_extent") or details.get("geoExtent"))
+    if extent is None:
+        extent = valid_wgs84_bbox(
+            [
+                raw.get("ext_west"),
+                raw.get("ext_south"),
+                raw.get("ext_east"),
+                raw.get("ext_north"),
+            ]
+        )
+    if extent is not None:
+        info["extent"] = extent
+
+    spatial = details.get("spatialReference")
+    if isinstance(spatial, dict):
+        sr_id = spatial.get("srid") or spatial.get("wkid") or spatial.get("latestWkid")
+        if sr_id is not None:
+            info["srid"] = sr_id
+    elif details.get("srid") is not None:
+        info["srid"] = details.get("srid")
     if "srid" not in info and raw.get("srid") is not None:
         info["srid"] = raw.get("srid")
     return info
 
 
 def publication_dataset_id(publication: Any) -> Optional[int]:
-    """The dataset a publication record belongs to, when the portal reports it."""
+    """The dataset a publication record belongs to, when the portal reports it.
+
+    The SDK's ``Publication`` model dumps as ``{"raw": {...}}`` (the API payload
+    under ``raw``), so the top level is searched **after** unwrapping ``raw`` —
+    otherwise a publication layer could not borrow its source dataset's extent.
+    """
     raw = to_jsonable(publication)
     if not isinstance(raw, dict):
         return None
-    for key in ("datasetId", "dataset_id"):
-        value = raw.get(key)
-        if value is not None:
+    records: List[Dict[str, Any]] = [raw]
+    inner = raw.get("raw")
+    if isinstance(inner, dict):
+        records.insert(0, inner)
+    for record in records:
+        for key in ("datasetId", "dataset_id"):
+            value = record.get(key)
+            if value is not None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return None
+        dataset = record.get("dataset")
+        if isinstance(dataset, dict) and dataset.get("id") is not None:
             try:
-                return int(value)
+                return int(dataset["id"])
             except (TypeError, ValueError):
                 return None
-    dataset = raw.get("dataset")
-    if isinstance(dataset, dict) and dataset.get("id") is not None:
-        try:
-            return int(dataset["id"])
-        except (TypeError, ValueError):
-            return None
     return None
 
 

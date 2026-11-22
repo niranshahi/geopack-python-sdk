@@ -90,6 +90,7 @@ _KINDS = {
     "view": "obj",
     "palette": "obj",
     "layerStyle": "obj",
+    "layerPalette": "arr",
     "layerList": "bool",
     "legend": "bool",
     "scale": "bool",

@@ -57,6 +57,10 @@ DATASET_TOP_LEVEL_KEYS = frozenset(
         "ext_east",
         "ext_north",
         "publicationsSummary",
+        # synthetic, derived from details.geo_extent — request the exact WGS84
+        # box without pulling the whole (large) `details` blob
+        "geo_extent",
+        "details.geo_extent",
         # present only on a degraded (unparseable) row — kept projectable
         "validationDegraded",
         "validationErrors",
@@ -71,6 +75,60 @@ EXTENT_FILTER_NOTE = (
     "feature geometry. Datasets whose stored extent is null (common for rasters) are "
     "not matched — do not read a short list as 'nothing there'."
 )
+
+
+#: ``fields`` names that ask for the derived, labelled WGS84 extent.
+GEO_EXTENT_FIELDS = frozenset({"geo_extent", "details.geo_extent"})
+
+
+def wants_geo_extent(fields: Optional[List[str]]) -> bool:
+    """True when ``fields`` asks for ``geo_extent`` (or ``details.geo_extent``)."""
+    return bool(fields) and any(name in GEO_EXTENT_FIELDS for name in fields)
+
+
+def _as_wgs84_bbox(value: Any) -> Optional[List[float]]:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    try:
+        west, south, east, north = (float(part) for part in value)
+    except (TypeError, ValueError):
+        return None
+    if abs(west) > 180 or abs(east) > 180 or abs(south) > 90 or abs(north) > 90:
+        return None
+    if west >= east or south >= north:
+        return None
+    return [west, south, east, north]
+
+
+def _geo_extent_object(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Derive a labelled WGS84 extent from ``details.geo_extent`` / ``ext_*``.
+
+    ``details`` may be an object or a JSON string (the portal sends a string for
+    most datasets). Returns ``{bbox, crs, axisOrder}`` — the shape agents can use
+    without guessing the axis order.
+    """
+    details = record.get("details")
+    if isinstance(details, str):
+        try:
+            parsed = json.loads(details)
+        except json.JSONDecodeError:
+            parsed = None
+        details = parsed if isinstance(parsed, dict) else {}
+    if not isinstance(details, dict):
+        details = {}
+    bbox = _as_wgs84_bbox(details.get("geo_extent") or details.get("geoExtent"))
+    if bbox is None:
+        bbox = _as_wgs84_bbox(
+            [
+                record.get("ext_west"),
+                record.get("ext_south"),
+                record.get("ext_east"),
+                record.get("ext_north"),
+            ]
+        )
+    if bbox is None:
+        return None
+    return {"bbox": bbox, "crs": "EPSG:4326", "axisOrder": "west,south,east,north"}
 
 
 def normalize_fields(fields: Any) -> Optional[List[str]]:
@@ -122,7 +180,21 @@ def project_dataset_keys(
 
     validate_projection_fields(fields)
 
-    projected = {name: record[name] for name in fields if name in record}
+    wants_geo = wants_geo_extent(fields)
+    source = record
+    if wants_geo and "geo_extent" not in record:
+        derived = _geo_extent_object(record)
+        if derived is not None:
+            source = dict(record)
+            source["geo_extent"] = derived
+
+    projected = {
+        name: source[name]
+        for name in fields
+        if name in source and name not in GEO_EXTENT_FIELDS
+    }
+    if wants_geo and "geo_extent" in source:
+        projected["geo_extent"] = source["geo_extent"]
     if "id" in record:
         projected["id"] = record["id"]
     return projected
@@ -386,7 +458,9 @@ def trim_datasets_list_payload(
                 normalized.append(ds)
                 continue
             row = trim_dataset_for_mcp(ds, details_level)
-            keep_details = fields is not None and "details" in fields
+            keep_details = fields is not None and (
+                "details" in fields or wants_geo_extent(fields)
+            )
             if details_level == "lite" and not keep_details:
                 row.pop("details", None)
                 row["detailsOmitted"] = True

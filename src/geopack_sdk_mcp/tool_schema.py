@@ -50,8 +50,13 @@ DatasetFields = Annotated[
     Field(
         description=(
             "Optional projection: return only these top-level dataset keys (id is always "
-            'kept). E.g. ["id","name","dataType","createdAt"]. Use it to keep list output '
-            "inside the token budget."
+            'kept). E.g. ["id","name","dataType","createdAt"]. Allowed names include the WGS84 '
+            "`ext_west/ext_south/ext_east/ext_north` columns, `publicationsSummary`, and the "
+            "synthetic `geo_extent` (alias `details.geo_extent`), which returns "
+            "{bbox, crs, axisOrder} without pulling the whole `details` blob. To find a "
+            "`publicationId` for show_map, sort with order_by='publicationsCount' and read "
+            "`publicationsSummary[].id` (a dataset id is not a publication id). Use it to keep "
+            "list output inside the token budget."
         ),
         default=None,
     ),
@@ -105,7 +110,14 @@ ReturnGeometry = Annotated[
 ]
 OutSrid = Annotated[
     Optional[int],
-    Field(description="Reproject output geometries to this EPSG code.", default=None),
+    Field(
+        description=(
+            "Output geometry CRS. Defaults to **4326** (WGS84 lon/lat, map-friendly); pass another "
+            "EPSG code to override. Applies to both the simple and query-DSL lanes. If the portal "
+            "cannot reproject, the result is still returned with a `crsNote` (and `outSridApplied`)."
+        ),
+        default=None,
+    ),
 ]
 SavePath = Annotated[
     Optional[str],
@@ -607,7 +619,13 @@ MapLayers = Annotated[
             "map-build. Rasters must use a portal-publication layer (a WMS/WMTS publication); a "
             "portal-dataset raster is served as vector GeoJSON/MVT and warns. `render` "
             "(geojson|mvt|wms|wmts|wfs|xyz) picks the viewer renderer and only changes the output "
-            "for publication layers (dataset layers are vector: GeoJSON data + MVT tiles)."
+            "for publication layers (dataset layers are vector: GeoJSON data + MVT tiles). "
+            "`style` ({fill,stroke,weight,radius}) recolours VECTOR layers only (render geojson | "
+            "mvt | wfs); a WMS/WMTS/XYZ image is rendered by the server and cannot be recoloured "
+            "(use render 'wfs' for a client-styled vector layer). Layers without an explicit fill "
+            "rotate through the template `layerPalette`, so several layers stay distinguishable. "
+            "The manifest additionally marks a raster source with `raster: true` (the legend then "
+            "shows a raster swatch)."
         ),
         default=None,
     ),
@@ -639,10 +657,12 @@ MapTemplate = Annotated[
     Field(
         description=(
             "Per-call template override (deep-merged over the user + default template): any of "
-            "title, subtitle, footer, basemap, basemaps[], view, palette, layerStyle, layerList, "
-            "legend, scale, attribution. `view.center` is [lon, lat] in EPSG:4326; `view.mode` is "
-            "'fit' (fit the declared layer extents) or 'center'. Unknown keys are ignored; a wrong "
-            "type falls back to the default for that key and is listed in templateWarnings."
+            "title, subtitle, footer, basemap, basemaps[], view, palette, layerStyle, "
+            "layerPalette[], layerList, legend, scale, attribution. `view.center` is [lon, lat] in "
+            "EPSG:4326; `view.mode` is 'fit' (fit the declared layer extents) or 'center'; "
+            "`layerPalette` is the rotating fill palette for layers that set no style.fill. "
+            "Unknown keys are ignored; a wrong type falls back to the default for that key and is "
+            "listed in templateWarnings."
         ),
         default=None,
     ),
@@ -652,7 +672,8 @@ MapStyle = Annotated[
     Field(
         description=(
             "Per-call default layer style shorthand: {fill, stroke, weight, opacity, radius}. "
-            "Merged into the template's layerStyle."
+            "Merged into the template's layerStyle and applies to VECTOR layers only (a WMS/WMTS "
+            "image is server-rendered and ignores it)."
         ),
         default=None,
     ),

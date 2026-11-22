@@ -3,6 +3,95 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.3 — 2026-11-22
+
+Fourth live-QA round (slice 033). `query_dataset` now answers in WGS84 by
+default (both query lanes), `geo_extent` is a requestable lightweight field, and
+the docs cover the new manifest/argument fields. No new tool (31), no new
+dependency.
+
+### Changed
+
+- **`query_dataset` defaults to `out_srid=4326`.** A dataset stored in a
+  projected/native CRS used to return metre coordinates unless the caller asked
+  otherwise, so any client plotting them as lon/lat saw nothing. The default is
+  now WGS84 (map-friendly); `out_srid` overrides it. The **query-DSL lane** also
+  applies it now (it used to ignore `out_srid`), while an explicit
+  `projection.outSRID` still wins. The result echoes `outSridApplied`, and if the
+  portal cannot reproject a `crsNote` says so. Verified live: `query_dataset(2554)`
+  returns `59.17, 36.58`.
+- **`geo_extent` is a requestable `fields` projection.** `fields=["geo_extent"]`
+  (alias `"details.geo_extent"`) returns a labelled `{bbox, crs, axisOrder}` built
+  from `details.geo_extent` (object **or** JSON string) with an `ext_*` fallback —
+  no need to pull the whole `details` blob. Works in list and single-get, and
+  survives the list `lite` details drop. Verified live for 2554.
+
+### Docs
+
+- Tool schema and `python-sdk.md` now state: `query_dataset` defaults to 4326;
+  the `geo_extent` field; the manifest `raster: true` flag and `layerPalette`;
+  axis order; and that `style` affects vector layers only (SLD for WMS planned,
+  slice 033 §12).
+
+## 0.12.2 — 2026-11-22
+
+Map-service live-QA follow-up (slice 033), from a third owner/Claude report. Layer
+styling now actually renders, a `bbox` is emitted for every dataset regardless of
+SRID, layers get distinct palette colours, and the legend matches the real layer.
+No new tool (31), no new dependency.
+
+### Fixed
+
+- **`style` now recolours the rendered vector layer.** Previously a per-layer
+  `style` was accepted and echoed (and tinted the legend swatch) but never applied
+  to the OpenLayers vector/MVT/WFS layer, so both layers looked identical. The
+  viewer now resolves `layerStyle` + the layer's own `style` into the style it
+  actually draws, and the legend reports that same fill. A WMS/WMTS/XYZ image is
+  rendered by the server: `style` cannot recolour it, so it is ignored with a
+  warning (use `render:'wfs'` for client styling; SLD-based WMS styling is
+  planned — slice 033 §12).
+- **`bbox` is emitted for every dataset, whatever its SRID.** The portal returns
+  `details` as a JSON **string** for most datasets; `dataset_info` only handled a
+  dict, so it silently found no extent for projected datasets (32640/UTM, SRID-less
+  Iran Lambert) and rasters. It now parses the string and falls back to the stored
+  top-level `ext_west/south/east/north`, so a layer gets a WGS84 `bbox` for
+  2580/2436/2554/2304/2291 alike (verified against the live portal).
+- **Distinct default colours.** Layers without an explicit `style.fill` rotate
+  through a new `layerPalette` (template-configurable), so multiple layers are no
+  longer the same green.
+- **A publication layer borrows its source dataset's extent.** The SDK's
+  `Publication` model serialises as `{"raw": {...}}`, so `publication_dataset_id`
+  never found the dataset and the layer got no `bbox`. It now unwraps `raw` (or
+  reads `raw.dataset.id`) — verified live: pub 60 → dataset 2554, pubs 17/18 →
+  1761.
+- **`query_dataset` warns when its output is not WGS84.** When `out_srid` is
+  omitted and the first geometry looks projected (metres), the result carries
+  `crsNote` telling the caller to pass `out_srid=4326` before drawing it on a
+  WGS84 map (the map path already requests 4326).
+- **Legend matches the layer.** Image layers (WMS/WMTS/XYZ) and raster datasets
+  (`raster: true` in the manifest) show a raster swatch instead of a fake vector
+  colour (e.g. the grey hillshade no longer gets a green box).
+
+### Verified
+
+- `portal-dataset` geometry is requested with `outSRID=4326`; the live portal
+  reprojects projected datasets (2436, 2554) to WGS84, so the map path is not in a
+  native CRS. The plain `query_dataset` tool keeps its own `out_srid` contract.
+
+### Docs
+
+- Tool schema states axis order (`bbox` `[W,S,E,N]`, `view.center` `[lon,lat]`),
+  that `style` affects vector layers only, that `layerPalette` rotates fills, that
+  `fields` accepts the `ext_*` columns and `publicationsSummary`, and that a
+  publication id is discovered with `order_by='publicationsCount'`. The backend
+  extent-contract gap remains **BE-010**.
+
+### Planned (not in this release)
+
+- A portable style model (unique value, class breaks) applied to vector layers and
+  generated as SLD for WMS/WMTS, plus converting a dataset's default portal
+  symbology into that model — slice 033 §12.
+
 ## 0.12.1 — 2026-11-22
 
 Map-service live-QA fixes (slice 033), from a second Claude report. Fail-fast

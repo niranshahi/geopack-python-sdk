@@ -22,6 +22,35 @@ from ..maps.sources import dataset_info, publication_dataset_id, valid_wgs84_bbo
 _WGS84_CRS = "EPSG:4326"
 _AXIS_ORDER = "west,south,east,north"
 
+#: Fallback when a template declares no ``layerPalette``.
+_DEFAULT_LAYER_PALETTE = ("#3ba776", "#3b7fa7", "#c2703b", "#8b5cf6", "#d1477a", "#2f9e8f")
+
+#: Renderers whose image is produced server-side (a per-layer ``style`` cannot
+#: recolour them; only vector renderers honour it).
+_RASTER_RENDERS = frozenset({"wms", "wmts", "xyz"})
+
+
+def _assign_layer_palette(manifest: Any, template_obj: Dict[str, Any]) -> None:
+    """Give each vector layer a distinct fill from the template palette.
+
+    Layers without an explicit ``style.fill`` rotate through ``layerPalette`` so
+    multiple layers are visually separable (one shared default colour made them
+    indistinguishable). Server-rendered raster layers are skipped.
+    """
+    palette = template_obj.get("layerPalette")
+    if not isinstance(palette, list):
+        palette = list(_DEFAULT_LAYER_PALETTE)
+    colors = [c for c in palette if isinstance(c, str) and c.strip()] or list(
+        _DEFAULT_LAYER_PALETTE
+    )
+    for index, layer in enumerate(manifest.layers.values()):
+        if layer.raster or layer.resolved_render() in _RASTER_RENDERS:
+            continue
+        style = dict(layer.style) if isinstance(layer.style, dict) else {}
+        if not style.get("fill"):
+            style["fill"] = colors[index % len(colors)]
+        layer.style = style
+
 
 def _with_token(entry: Dict[str, Any], token: str) -> None:
     data_url = entry.get("dataUrl")
@@ -98,12 +127,14 @@ def _apply_extent(
         layer.bbox_crs = _WGS84_CRS
         layer.bbox_axis_order = _AXIS_ORDER
 
-    if layer.kind == "portal-dataset" and info.get("data_type") == "raster":
-        warnings.append(
-            f"layer '{label}': dataset {layer.dataset_id} is raster; a portal-dataset layer is "
-            "served as vector GeoJSON/MVT and will not show an image — use a portal-publication "
-            "layer (a raster WMS/WMTS publication) instead."
-        )
+    if info.get("data_type") == "raster":
+        layer.raster = True
+        if layer.kind == "portal-dataset":
+            warnings.append(
+                f"layer '{label}': dataset {layer.dataset_id} is raster; a portal-dataset layer is "
+                "served as vector GeoJSON/MVT and will not show an image — use a portal-publication "
+                "layer (a raster WMS/WMTS publication) instead."
+            )
 
 
 def show_map(
@@ -143,8 +174,20 @@ def show_map(
         if layer.kind == "portal-publication":
             publication = _require_publication(client, int(layer.publication_id))
         _apply_extent(client, layer, publication=publication, warnings=warnings)
+        if layer.style and layer.resolved_render() in {"wms", "wmts"}:
+            warnings.append(
+                f"layer '{layer.title or layer.id}': style does not affect a "
+                f"{layer.resolved_render().upper()} image layer (the server renders it); "
+                "use the publication's own symbology, an SLD style (planned), or render 'wfs' "
+                "for a client-styled vector layer."
+            )
         manifest.add_layer(layer)
         added += 1
+
+    # A per-call ``style`` with an explicit fill is a deliberate single style for
+    # every layer; otherwise rotate a palette so layers are separable.
+    if not (isinstance(style, dict) and style.get("fill")):
+        _assign_layer_palette(manifest, template_obj)
 
     manifest.template_warnings = warnings + viewer_warnings
 
