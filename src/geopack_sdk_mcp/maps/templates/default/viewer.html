@@ -32,6 +32,7 @@ __CSS_VARS__
   #basemap { width: 100%; padding: 4px; }
   #legend .item { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
   #legend .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.3); }
+  #panel .gp-empty { opacity: .6; font-style: italic; }
   footer { background: #f4f6f5; color: #4b5b54; padding: 5px 14px; font-size: 11px; }
   #banner { position: absolute; left: 10px; top: 10px; z-index: 5; max-width: 60%;
     background: #b3261e; color: #fff; padding: 6px 10px; border-radius: 6px; display: none; }
@@ -154,7 +155,7 @@ async function wfsLayer(spec) {
   return new ol.layer.Vector({ source: source, style: vectorStyle() });
 }
 
-function renderPanel(map, baseLayers) {
+function renderPanel(map, baseLayers, dataLayers) {
   const panel = document.getElementById('panel');
   let html = '';
   const showList = TEMPLATE.layerList !== false;
@@ -179,9 +180,17 @@ function renderPanel(map, baseLayers) {
     });
   }
 
+  // Every manifest layer (all kinds) is listed here with a visibility toggle and
+  // an opacity slider. Basemaps are the background selector, not listed.
   const listEl = document.getElementById('layers');
   if (listEl) {
-    baseLayers.filter(function (l) { return !l.get('basemap'); }).forEach(function (layer) {
+    if (!dataLayers.length) {
+      const empty = document.createElement('div');
+      empty.className = 'gp-empty';
+      empty.textContent = 'No layers';
+      listEl.appendChild(empty);
+    }
+    dataLayers.forEach(function (layer) {
       const row = document.createElement('div');
       row.className = 'row';
       const check = document.createElement('input');
@@ -200,22 +209,42 @@ function renderPanel(map, baseLayers) {
       listEl.appendChild(row);
     });
   }
+
+  // The legend is drawn AFTER `panel.innerHTML` is set (drawing it earlier was
+  // wiped by the innerHTML reset — why the legend looked empty).
+  const legendEl = document.getElementById('legend');
+  if (legendEl) {
+    if (!dataLayers.length) {
+      const empty = document.createElement('div');
+      empty.className = 'gp-empty';
+      empty.textContent = 'No layers';
+      legendEl.appendChild(empty);
+    }
+    dataLayers.forEach(function (layer) {
+      const s = layer.get('gpStyle') || TEMPLATE.layerStyle || {};
+      const item = document.createElement('div');
+      item.className = 'item';
+      const swatch = document.createElement('span');
+      swatch.className = 'swatch';
+      swatch.style.background = s.fill || '#3ba776';
+      const label = document.createElement('span');
+      label.textContent = layer.get('title');
+      item.appendChild(swatch); item.appendChild(label);
+      legendEl.appendChild(item);
+    });
+  }
 }
 
-function drawLegend(layer) {
-  const legend = document.getElementById('legend');
-  if (!legend) return;
-  if (!legend.querySelector('.gp-live')) legend.innerHTML = '<div class="gp-live"></div>';
-  const s = layer.get('gpStyle') || TEMPLATE.layerStyle || {};
-  const item = document.createElement('div');
-  item.className = 'item';
-  const swatch = document.createElement('span');
-  swatch.className = 'swatch';
-  swatch.style.background = s.fill || '#3ba776';
-  const label = document.createElement('span');
-  label.textContent = layer.get('title');
-  item.appendChild(swatch); item.appendChild(label);
-  legend.querySelector('.gp-live').appendChild(item);
+// A bbox is [west, south, east, north] in EPSG:4326. Reject anything that is not
+// a plausible lon/lat box (e.g. a projected native-CRS extent in metres, or a
+// [lat, lon, ...] mix-up) so auto-fit never zooms to the wrong continent.
+function validWgs84BBox(b) {
+  if (!Array.isArray(b) || b.length !== 4) return null;
+  if (!b.every(function (v) { return typeof v === 'number' && isFinite(v); })) return null;
+  const w = b[0], s = b[1], e = b[2], n = b[3];
+  if (Math.abs(w) > 180 || Math.abs(e) > 180 || Math.abs(s) > 90 || Math.abs(n) > 90) return null;
+  if (w >= e || s >= n) return null;
+  return [w, s, e, n];
 }
 
 async function main() {
@@ -253,6 +282,7 @@ async function main() {
   }
 
   const extent = ol.extent.createEmpty();
+  const dataLayers = [];
   for (const spec of (manifest.layers || [])) {
     let layer;
     try {
@@ -266,9 +296,10 @@ async function main() {
       continue;
     }
     map.addLayer(layer);
-    drawLegend(layer);
-    if (spec.bbox && spec.bbox.length === 4) {
-      ol.extent.extend(extent, ol.proj.transformExtent(spec.bbox, 'EPSG:4326', 'EPSG:3857'));
+    dataLayers.push(layer);
+    const box = validWgs84BBox(spec.bbox);
+    if (box) {
+      ol.extent.extend(extent, ol.proj.transformExtent(box, 'EPSG:4326', 'EPSG:3857'));
     }
     const source = layer.getSource && layer.getSource();
     if (source && source.on) {
@@ -281,7 +312,7 @@ async function main() {
   if (TEMPLATE.view && TEMPLATE.view.mode === 'fit' && !ol.extent.isEmpty(extent)) {
     map.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 17 });
   }
-  renderPanel(map, baseLayers);
+  renderPanel(map, baseLayers, dataLayers);
 }
 
 main();

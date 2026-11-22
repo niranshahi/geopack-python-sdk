@@ -601,8 +601,13 @@ MapLayers = Annotated[
             "local-file {path under GEOPACK_MCP_MAP_ROOT}, or inline-geometry {geojson}. "
             "Optional id/title/style/bbox/render/xyzUrl. Every layer gets a stable dataUrl; portal "
             "layers also get a tileUrl; portal-publication layers also get wmsUrl/wmtsUrl/wfsUrl. "
-            "`render` (geojson|mvt|wms|wmts|wfs|xyz) picks the viewer renderer; it is inferred as "
-            "geojson for dataset/local/inline layers and wms for publication layers."
+            "`bbox` is [west, south, east, north] in EPSG:4326 (when omitted it is read from the "
+            "source dataset's WGS84 geo_extent). `publicationId` must be a real publication id "
+            "(from list_datasets publicationsSummary), not a dataset id — it is validated at "
+            "map-build. Rasters must use a portal-publication layer (a WMS/WMTS publication); a "
+            "portal-dataset raster is served as vector GeoJSON/MVT and warns. `render` "
+            "(geojson|mvt|wms|wmts|wfs|xyz) picks the viewer renderer and only changes the output "
+            "for publication layers (dataset layers are vector: GeoJSON data + MVT tiles)."
         ),
         default=None,
     ),
@@ -635,8 +640,9 @@ MapTemplate = Annotated[
         description=(
             "Per-call template override (deep-merged over the user + default template): any of "
             "title, subtitle, footer, basemap, basemaps[], view, palette, layerStyle, layerList, "
-            "legend, scale, attribution. Unknown keys are ignored; a wrong type falls back to the "
-            "default for that key and is listed in templateWarnings."
+            "legend, scale, attribution. `view.center` is [lon, lat] in EPSG:4326; `view.mode` is "
+            "'fit' (fit the declared layer extents) or 'center'. Unknown keys are ignored; a wrong "
+            "type falls back to the default for that key and is listed in templateWarnings."
         ),
         default=None,
     ),

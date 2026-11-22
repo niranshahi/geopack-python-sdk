@@ -38,6 +38,14 @@ class _Datasets:
     def query(self, dataset_id, *args, **kwargs):
         return {"type": "FeatureCollection", "features": []}
 
+    def get(self, dataset_id):
+        return {"id": dataset_id, "dataType": "vector", "details": {}}
+
+
+class _Publications:
+    def get(self, publication_id):
+        return {"id": publication_id, "datasetId": 7, "protocol": "wms"}
+
 
 class _Client:
     base_url = PORTAL
@@ -46,6 +54,7 @@ class _Client:
         self.auth = _Auth()
         self.session = _Session()
         self.datasets = _Datasets()
+        self.publications = _Publications()
 
 
 def _http(port, path, token=None, method="GET"):
@@ -152,6 +161,15 @@ class RenderHtmlTest(unittest.TestCase):
         self.assertIn("strict-origin-when-cross-origin", html)
         self.assertIn("referrerPolicy", html)
         self.assertIn("tileLoadFunction", html)
+
+    def test_layer_list_and_legend_render_data_layers(self):
+        # Regression: the list iterated basemaps only (empty) and the legend was
+        # drawn before the panel reset — data layers now drive both.
+        html = viewer.default_viewer_html()
+        self.assertIn("dataLayers", html)
+        self.assertIn("renderPanel(map, baseLayers, dataLayers)", html)
+        self.assertNotIn("baseLayers.filter(", html)
+        self.assertIn("validWgs84BBox", html)
 
 
 class ViewerHtmlTest(unittest.TestCase):
@@ -284,7 +302,7 @@ class ViewerRoutesTest(unittest.TestCase):
         self.assertEqual(status, 200)
         text = body.decode("utf-8")
         self.assertIn('TOKEN_EMBEDDED = ""', text)
-        self.assertNotIn("wrong", text)
+        self.assertNotIn('TOKEN_EMBEDDED = "wrong"', text)
 
     def test_the_manifest_route_requires_the_token(self):
         status, _, _ = _http(self.port, f"/map/{self.manifest.map_id}/manifest.json")

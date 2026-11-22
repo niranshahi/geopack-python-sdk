@@ -51,6 +51,12 @@ DATASET_TOP_LEVEL_KEYS = frozenset(
         "thumbnailApiPath",
         "thumbnailMintPath",
         "thumbnailResourceUri",
+        # stored WGS84 extent (may be null for rasters) and per-dataset publications
+        "ext_west",
+        "ext_south",
+        "ext_east",
+        "ext_north",
+        "publicationsSummary",
         # present only on a degraded (unparseable) row — kept projectable
         "validationDegraded",
         "validationErrors",

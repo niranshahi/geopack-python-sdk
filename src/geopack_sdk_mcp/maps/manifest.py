@@ -51,6 +51,8 @@ class MapLayer:
     geojson: Optional[Dict[str, Any]] = None
     style: Optional[Dict[str, Any]] = None
     bbox: Optional[List[float]] = None
+    bbox_crs: Optional[str] = None
+    bbox_axis_order: Optional[str] = None
     query: Optional[Dict[str, Any]] = None
     render: Optional[str] = None
     xyz_url: Optional[str] = None
@@ -84,6 +86,8 @@ class MapLayer:
             payload["style"] = self.style
         if self.bbox:
             payload["bbox"] = self.bbox
+            payload["bboxCrs"] = self.bbox_crs or "EPSG:4326"
+            payload["bboxAxisOrder"] = self.bbox_axis_order or "west,south,east,north"
         return payload
 
 

@@ -41,9 +41,13 @@ def register(mcp: Any) -> None:
             "layer families the portal serves — and is customizable via a template (title, "
             "basemaps, palette, layer style, panels). The page itself is an editable resource file "
             "(`viewerHtmlPath`, a `viewer.html` beside `templatePath`) so advanced users can drop "
-            "in their own page. A page can also reference the URLs directly instead of embedding "
-            "data. Opt-in: requires GEOPACK_MCP_MAP_SERVICE=1. The portal credential never reaches "
-            "the browser. No map image is rendered."
+            "in their own page. `portal-publication` layers need a real publication id (from "
+            "list_datasets publicationsSummary), not a dataset id — it is validated at map-build. "
+            "Rasters and external OGC services must use a portal-publication layer; a raster "
+            "portal-dataset layer is vector-only and warns. Each layer's WGS84 extent is read from "
+            "its source dataset when `bbox` is omitted. A page can also reference the URLs directly "
+            "instead of embedding data. Opt-in: requires GEOPACK_MCP_MAP_SERVICE=1. The portal "
+            "credential never reaches the browser. No map image is rendered."
         ),
     )
     def geopack_sdk_show_map(

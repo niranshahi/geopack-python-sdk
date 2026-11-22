@@ -39,17 +39,37 @@ class _Session:
 
 
 class _Datasets:
+    def __init__(self, details=None, data_type="vector"):
+        self.calls = []
+        self._details = details if details is not None else {}
+        self._data_type = data_type
+
     def query(self, dataset_id, *args, **kwargs):
+        self.calls.append({"dataset_id": dataset_id, "args": args, "kwargs": kwargs})
         return {"type": "FeatureCollection", "features": []}
+
+    def get(self, dataset_id):
+        return {"id": dataset_id, "dataType": self._data_type, "details": self._details}
+
+
+class _Publications:
+    def __init__(self, ids=(60,)):
+        self._ids = set(ids)
+
+    def get(self, publication_id):
+        if publication_id not in self._ids:
+            raise RuntimeError("Publication not found. (HTTP 404)")
+        return {"id": publication_id, "datasetId": 7, "protocol": "wms"}
 
 
 class _Client:
     base_url = PORTAL
 
-    def __init__(self):
+    def __init__(self, publication_ids=(60,), details=None, data_type="vector"):
         self.auth = _Auth()
         self.session = _Session()
-        self.datasets = _Datasets()
+        self.datasets = _Datasets(details=details, data_type=data_type)
+        self.publications = _Publications(publication_ids)
 
 
 def _free_port():
@@ -170,6 +190,72 @@ class ShowMapTest(unittest.TestCase):
         )
 
         self.assertEqual(payload["layers"][0]["title"], "buffer")
+
+    def test_an_unknown_publication_id_fails_fast(self):
+        with self.assertRaises(MapServiceError) as ctx:
+            show_map(
+                _Client(publication_ids=()),
+                layers=[{"kind": "portal-publication", "publicationId": 999}],
+            )
+        self.assertEqual(ctx.exception.key, "publicationId")
+
+    def test_a_known_publication_id_is_accepted(self):
+        payload = show_map(
+            _Client(publication_ids=(60,)),
+            layers=[{"kind": "portal-publication", "publicationId": 60}],
+        )
+        self.assertEqual(payload["layersAdded"], 1)
+        self.assertTrue(payload["layers"][0]["wmsUrl"].endswith("/proxy/publication/60/wms"))
+
+    def test_a_dataset_extent_is_read_and_labelled(self):
+        client = _Client(details={"geo_extent": [45.115, 25.354, 62.110, 38.067]})
+        payload = show_map(client, layers=[{"kind": "portal-dataset", "datasetId": 2554}])
+        layer = payload["layers"][0]
+
+        self.assertEqual(layer["bbox"], [45.115, 25.354, 62.110, 38.067])
+        self.assertEqual(layer["bboxCrs"], "EPSG:4326")
+        self.assertEqual(layer["bboxAxisOrder"], "west,south,east,north")
+
+    def test_a_projected_bbox_is_rejected_not_plotted(self):
+        # A native-CRS (metre) extent would otherwise zoom the viewer to nowhere.
+        payload = show_map(
+            _Client(),
+            layers=[
+                {"kind": "inline-geometry", "geojson": SQUARE,
+                 "bbox": [4218766, 30179983, 5712825, 31589775]}
+            ],
+        )
+        self.assertNotIn("bbox", payload["layers"][0])
+        self.assertTrue(any("bbox" in w for w in payload["templateWarnings"]))
+
+    def test_a_swapped_bbox_is_replaced_by_the_dataset_extent(self):
+        client = _Client(details={"geo_extent": [45.115, 25.354, 62.110, 38.067]})
+        payload = show_map(
+            client,
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 2554,
+                 "bbox": [25.354, 45.115, 38.067, 62.110]}  # lat/lon order — no overlap
+            ],
+        )
+        self.assertEqual(payload["layers"][0]["bbox"], [45.115, 25.354, 62.110, 38.067])
+        self.assertTrue(any("does not overlap" in w for w in payload["templateWarnings"]))
+
+    def test_a_raster_dataset_layer_warns_to_use_a_publication(self):
+        payload = show_map(
+            _Client(data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 1761}],
+        )
+        self.assertTrue(any("raster" in w for w in payload["templateWarnings"]))
+
+    def test_dataset_data_is_reprojected_to_wgs84(self):
+        client = _Client()
+        payload = show_map(client, layers=[{"kind": "portal-dataset", "datasetId": 7}])
+        port = int(payload["serviceUrl"].rsplit(":", 1)[1])
+
+        _get(port, f"/data/{payload['layers'][0]['id']}", payload["accessToken"])
+
+        self.assertTrue(client.datasets.calls)
+        self.assertEqual(client.datasets.calls[-1]["kwargs"].get("out_srid"), 4326)
 
 
 class SurfacePinTest(unittest.TestCase):

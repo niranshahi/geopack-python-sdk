@@ -3,6 +3,38 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.1 — 2026-11-22
+
+Map-service live-QA fixes (slice 033), from a second Claude report. Fail-fast
+publication validation, WGS84 dataset output, self-labelled extents, and a fixed
+layer list/legend. No new tool (31), no new Python dependency.
+
+### Fixed
+
+- **Layer list + legend were empty and layers could not be toggled.** The panel
+  iterated the basemap list (so no data layer appeared) and the legend was drawn
+  before the panel HTML reset (so it was wiped). Both now render from the actual
+  data layers, with visibility toggles and opacity sliders (`viewer.html`).
+- **`portal-dataset` geometry is now served in EPSG:4326.** `/data` requests
+  `outSRID=4326`, so a dataset stored in a projected/native CRS (e.g. Iran
+  Lambert) renders on a WGS84 map instead of plotting metre values as lon/lat.
+- **`publicationId` is validated at map-build** (fail fast with `publicationId`
+  + a hint to use `list_datasets` `publicationsSummary`), not a 404 at tile time.
+- **Extents are self-describing and auto-filled.** `show_map` reads the source
+  dataset's WGS84 `geo_extent` when a layer `bbox` is omitted and emits
+  `bboxCrs`/`bboxAxisOrder`; a projected or lat/lon-swapped `bbox` is rejected
+  (with a warning) in favour of the dataset extent, and the viewer refuses any
+  implausible box so auto-fit cannot land on the wrong continent.
+- **Raster `portal-dataset` layers warn** that they are vector-only and should
+  use a `portal-publication` (WMS/WMTS) instead.
+
+### Changed
+
+- `fields` now accepts `publicationsSummary` and the stored `ext_*` keys.
+- Tool schema states axis order (`bbox` `[W,S,E,N]`; `view.center` `[lon,lat]`),
+  that `render` only changes publication output, and the raster rule. The
+  backend extent-contract gap is tracked as **BE-010**.
+
 ## 0.12.0 — 2026-11-22
 
 Built-in **map viewer** (slice 033, Lane B) with **user-editable templates**. `geopack_sdk_show_map`

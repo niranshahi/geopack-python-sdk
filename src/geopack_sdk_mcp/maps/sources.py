@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse, urlsplit, urlunsplit
 
 from .errors import SERVICE_ERROR, MapServiceError
+from ..serialize import to_jsonable
 
 #: Local file extensions the service may serve.
 LOCAL_EXTENSIONS = frozenset({".geojson", ".json", ".gpkg", ".csv", ".kml", ".zip"})
@@ -98,13 +99,25 @@ def query_dataset_geojson(
     *,
     query: Optional[Dict[str, Any]] = None,
     limit: int = 1000,
+    out_srid: Optional[int] = 4326,
 ) -> Dict[str, Any]:
-    """Fetch a dataset's records as a GeoJSON FeatureCollection (portal auth)."""
+    """Fetch a dataset's records as a GeoJSON FeatureCollection (portal auth).
+
+    ``out_srid`` defaults to **4326** so the browser gets WGS84 geometry. The
+    portal stores many datasets in a projected/native CRS (e.g. Iran Lambert,
+    metres); without this the viewer would plot projection-metre numbers as
+    lon/lat and show nothing.
+    """
     try:
         if query:
-            result = client.datasets.query(dataset_id, query)
+            dsl = dict(query)
+            projection = dict(dsl.get("projection") or {})
+            if out_srid is not None:
+                projection.setdefault("outSRID", int(out_srid))
+            dsl["projection"] = projection
+            result = client.datasets.query(dataset_id, dsl)
         else:
-            result = client.datasets.query(dataset_id, limit=limit)
+            result = client.datasets.query(dataset_id, limit=limit, out_srid=out_srid)
     except MapServiceError:
         raise
     except Exception as exc:  # noqa: BLE001 - sanitize upstream errors
@@ -112,6 +125,82 @@ def query_dataset_geojson(
             SERVICE_ERROR, _safe_message(exc), key="dataset_id"
         ) from exc
     return _as_geojson(result)
+
+
+def valid_wgs84_bbox(value: Any) -> Optional[List[float]]:
+    """Return ``[west, south, east, north]`` when plausible lon/lat, else ``None``.
+
+    Rejects projected extents (metres) and swapped lat/lon boxes so a bad extent
+    never drives the viewer's auto-fit to the wrong continent.
+    """
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    try:
+        west, south, east, north = (float(v) for v in value)
+    except (TypeError, ValueError):
+        return None
+    if abs(west) > 180 or abs(east) > 180 or abs(south) > 90 or abs(north) > 90:
+        return None
+    if west >= east or south >= north:
+        return None
+    return [west, south, east, north]
+
+
+def dataset_info(client: Any, dataset_id: int) -> Dict[str, Any]:
+    """Best-effort raw dataset facts for extent hints (never raises).
+
+    Returns ``extent`` (WGS84 ``[W,S,E,N]`` from ``details.geo_extent`` when
+    present/plausible), ``data_type`` and ``srid``.
+    """
+    info: Dict[str, Any] = {}
+    try:
+        raw = to_jsonable(client.datasets.get(dataset_id))
+    except Exception:  # noqa: BLE001 - a map still works without an extent
+        return info
+    if not isinstance(raw, dict):
+        return info
+    data_type = raw.get("dataType")
+    if data_type is not None:
+        info["data_type"] = data_type
+    details = raw.get("details")
+    if isinstance(details, dict):
+        geo = details.get("geo_extent")
+        if geo is None:
+            geo = details.get("geoExtent")
+        extent = valid_wgs84_bbox(geo)
+        if extent is not None:
+            info["extent"] = extent
+        spatial = details.get("spatialReference")
+        if isinstance(spatial, dict):
+            sr_id = spatial.get("srid") or spatial.get("wkid") or spatial.get("latestWkid")
+            if sr_id is not None:
+                info["srid"] = sr_id
+        elif details.get("srid") is not None:
+            info["srid"] = details.get("srid")
+    if "srid" not in info and raw.get("srid") is not None:
+        info["srid"] = raw.get("srid")
+    return info
+
+
+def publication_dataset_id(publication: Any) -> Optional[int]:
+    """The dataset a publication record belongs to, when the portal reports it."""
+    raw = to_jsonable(publication)
+    if not isinstance(raw, dict):
+        return None
+    for key in ("datasetId", "dataset_id"):
+        value = raw.get(key)
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+    dataset = raw.get("dataset")
+    if isinstance(dataset, dict) and dataset.get("id") is not None:
+        try:
+            return int(dataset["id"])
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def portal_get_bytes(
