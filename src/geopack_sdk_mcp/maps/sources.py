@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlsplit, urlunsplit
 
 from .errors import SERVICE_ERROR, MapServiceError
 
@@ -167,6 +167,22 @@ def mint_publication_url(client: Any, publication_id: int, protocol: str) -> str
 
 def url_host(url: str) -> str:
     return (urlparse(url).hostname or "").lower()
+
+
+def merge_query(url: str, params: Dict[str, Any]) -> str:
+    """Merge ``params`` onto a minted OGC URL (browser params win).
+
+    Used by the viewer's WMS/WFS proxy: the minted URL carries the signed
+    access query, and the browser adds ``GetMap``/``GetFeature`` parameters.
+    """
+    if not params:
+        return url
+    parts = urlsplit(url)
+    merged = parse_qs(parts.query, keep_blank_values=True)
+    for key, value in params.items():
+        merged[key] = list(value) if isinstance(value, (list, tuple)) else [str(value)]
+    query = urlencode(merged, doseq=True)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
 def allowed_upstream(url: str, portal_base: str, extra_hosts: List[str]) -> bool:

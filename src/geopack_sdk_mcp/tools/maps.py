@@ -1,8 +1,9 @@
-"""MCP tool: local map data service (slice 033, Lane A).
+"""MCP tool: local map service + built-in viewer (slice 033, lanes A/B).
 
 ``geopack_sdk_show_map`` creates/updates a localhost-only service that proxies
-portal data (using the MCP's own auth) and serves local files, so a page can
-reference a URL instead of embedding data. No map image is produced.
+portal data (using the MCP's own auth) and serves local files, then returns a
+live **viewer URL** (an OpenLayers page) plus stable data/tile URLs. No map
+image is produced.
 """
 
 from __future__ import annotations
@@ -18,19 +19,31 @@ from ..auth_bootstrap import AppContext
 from ..context import get_client
 from ..errors import tool_error_result, tool_result
 from ..tool_handlers.maps import show_map
-from ..tool_schema import BasemapName, MapIdArg, MapLayers, MapTitle, OpenBrowser
+from ..tool_schema import (
+    BasemapName,
+    MapIdArg,
+    MapLayers,
+    MapStyle,
+    MapTemplate,
+    MapTitle,
+    OpenBrowser,
+)
 
 
 def register(mcp: Any) -> None:
     @mcp.tool(
         annotations=host_service_tool("geopack_sdk_show_map"),
         description=(
-            "Create or update a LOCALHOST-ONLY data service that proxies portal data with the "
-            "MCP's own credentials and serves local files, then declare map layers and return "
-            "stable URLs ({serviceUrl, manifestUrl, layers[].dataUrl/tileUrl, accessToken}). A "
-            "page can reference these URLs instead of embedding data. Opt-in: requires "
-            "GEOPACK_MCP_MAP_SERVICE=1. The portal credential never reaches the browser. No map "
-            "image is rendered (the built-in viewer is a later lane)."
+            "Create or update a LOCALHOST-ONLY map service and return a live **viewer URL** "
+            "(viewerUrl) plus stable data/tile URLs ({serviceUrl, manifestUrl, "
+            "layers[].dataUrl/tileUrl, accessToken}). The built-in viewer is an OpenLayers page "
+            "that draws GeoJSON, MVT vector tiles, WMS/WMTS images and WFS vector data — the same "
+            "layer families the portal serves — and is customizable via a template (title, "
+            "basemaps, palette, layer style, panels). The page itself is an editable resource file "
+            "(`viewerHtmlPath`, a `viewer.html` beside `templatePath`) so advanced users can drop "
+            "in their own page. A page can also reference the URLs directly instead of embedding "
+            "data. Opt-in: requires GEOPACK_MCP_MAP_SERVICE=1. The portal credential never reaches "
+            "the browser. No map image is rendered."
         ),
     )
     def geopack_sdk_show_map(
@@ -40,6 +53,8 @@ def register(mcp: Any) -> None:
         map_id: MapIdArg = None,
         open_browser: OpenBrowser = False,
         basemap: BasemapName = None,
+        template: MapTemplate = None,
+        style: MapStyle = None,
     ) -> CallToolResult:
         try:
             client = get_client(ctx)
@@ -51,6 +66,8 @@ def register(mcp: Any) -> None:
                     map_id=map_id,
                     open_browser=open_browser,
                     basemap=basemap,
+                    template=template,
+                    style=style,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - the error contract renders it

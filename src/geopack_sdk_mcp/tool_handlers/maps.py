@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from ..maps import get_or_start_service, layer_from_spec
+from ..maps import viewer
 from ..maps.errors import SERVICE_ERROR, MapServiceError
 
 
@@ -31,6 +32,8 @@ def show_map(
     map_id: Optional[str] = None,
     open_browser: bool = False,
     basemap: Optional[str] = None,
+    template: Optional[Dict[str, Any]] = None,
+    style: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     service = get_or_start_service(client)
 
@@ -42,8 +45,15 @@ def show_map(
     elif title:
         manifest.title = title
 
+    per_call: Dict[str, Any] = dict(template) if isinstance(template, dict) else {}
+    if style and isinstance(style, dict):
+        per_call["layerStyle"] = {**(per_call.get("layerStyle") or {}), **style}
     if basemap is not None:
-        manifest.options["basemap"] = basemap
+        per_call["basemap"] = basemap
+    template_obj, warnings, source = viewer.load_template(service.templates_dir, per_call)
+    manifest.options = template_obj
+    _, viewer_source, viewer_warnings = viewer.load_viewer_html(service.templates_dir)
+    manifest.template_warnings = warnings + viewer_warnings
 
     added = 0
     for spec in layers or []:
@@ -55,20 +65,26 @@ def show_map(
     for entry in payload.get("layers", []):
         _with_token(entry, service.token)
 
+    viewer_url = f"{base}/map/{manifest.map_id}?t={service.token}"
     payload.update(
         {
             "serviceUrl": base,
-            "manifestUrl": f"{base}/manifest/{manifest.map_id}",
+            "manifestUrl": f"{base}/map/{manifest.map_id}/manifest.json",
+            "viewerUrl": viewer_url,
             "accessToken": service.token,
             "tokenParameter": "t",
             "layersAdded": added,
             "corsEnabled": service.cors,
-            "viewerUrl": None,
+            "basemap": template_obj.get("basemap"),
+            "templatePath": viewer.template_path(service.templates_dir),
+            "templateUsed": source,
+            "viewerHtmlPath": viewer.viewer_html_path(service.templates_dir),
+            "viewerHtmlUsed": viewer_source,
+            "templateWarnings": warnings + viewer_warnings,
             "viewerNote": (
-                "The built-in viewer is Lane B and is deferred in this build. Reference the "
-                "layers' dataUrl/tileUrl from your own page; append ?t=<accessToken> for "
-                "cross-origin fetches when GEOPACK_MCP_MAP_CORS=1 (same-origin pages need no token "
-                "in the URL but still need the header/query on this service)."
+                "Open viewerUrl in a browser on this machine to see the live map. The URL carries "
+                "the local session token (?t=...); if a host or chat client strips it, append " +
+                f"#t={service.token} instead. The portal credential never leaves the MCP process."
             ),
             "credentialNote": (
                 "This is a low-sensitivity local session token, not the portal credential. "
@@ -78,12 +94,10 @@ def show_map(
     )
 
     if open_browser:
-        # There is no viewer page yet (Lane B), so there is nothing to open —
-        # opening the JSON manifest in a browser would be misleading.
-        payload["browserOpened"] = False
-        payload["browserNote"] = (
-            "No browser was opened: the built-in viewer (Lane B) is not in this build, "
-            "so there is no map page to open yet. Fetch serviceUrl/manifestUrl from your "
-            "own page instead."
-        )
+        try:
+            import webbrowser
+
+            payload["browserOpened"] = bool(webbrowser.open(viewer_url))
+        except Exception:  # noqa: BLE001 - best effort, never fatal
+            payload["browserOpened"] = False
     return payload

@@ -11,6 +11,24 @@ LAYER_KINDS = frozenset(
     {"portal-dataset", "portal-publication", "local-file", "inline-geometry"}
 )
 
+#: Viewer renderers a layer spec may request explicitly.
+RENDER_KINDS = frozenset({"geojson", "mvt", "wms", "wmts", "wfs", "xyz"})
+
+
+def _render_or_none(spec: Dict[str, Any]) -> Optional[str]:
+    from .errors import SERVICE_ERROR, MapServiceError
+
+    render = spec.get("render")
+    if render is None:
+        return None
+    if render not in RENDER_KINDS:
+        raise MapServiceError(
+            SERVICE_ERROR,
+            f"unknown render {render!r}; use one of: " + ", ".join(sorted(RENDER_KINDS)),
+            key="render",
+        )
+    return render
+
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
@@ -34,6 +52,18 @@ class MapLayer:
     style: Optional[Dict[str, Any]] = None
     bbox: Optional[List[float]] = None
     query: Optional[Dict[str, Any]] = None
+    render: Optional[str] = None
+    xyz_url: Optional[str] = None
+
+    def resolved_render(self) -> str:
+        """The viewer renderer for this layer (explicit override or inferred)."""
+        if self.render:
+            return self.render
+        if self.xyz_url:
+            return "xyz"
+        if self.kind == "portal-publication":
+            return "wms"
+        return "geojson"
 
     def public(self, base_url: str) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
@@ -41,9 +71,15 @@ class MapLayer:
             "kind": self.kind,
             "title": self.title or self.id,
             "dataUrl": f"{base_url}/data/{self.id}",
+            "render": self.resolved_render(),
         }
         if self.kind in ("portal-dataset", "portal-publication"):
             payload["tileUrl"] = f"{base_url}/tiles/{self.id}/{{z}}/{{x}}/{{y}}.pbf"
+        if self.kind == "portal-publication" and self.publication_id is not None:
+            for protocol, key in (("wms", "wmsUrl"), ("wmts", "wmtsUrl"), ("wfs", "wfsUrl")):
+                payload[key] = f"{base_url}/proxy/publication/{self.publication_id}/{protocol}"
+        if self.xyz_url:
+            payload["xyzUrl"] = self.xyz_url
         if self.style:
             payload["style"] = self.style
         if self.bbox:
@@ -99,6 +135,8 @@ def layer_from_spec(spec: Dict[str, Any]) -> MapLayer:
         style=spec.get("style"),
         bbox=spec.get("bbox"),
         query=spec.get("query"),
+        render=_render_or_none(spec),
+        xyz_url=spec.get("xyzUrl") or spec.get("xyz_url"),
     )
     if kind == "portal-dataset":
         layer.dataset_id = _int_or_none(spec.get("datasetId") or spec.get("dataset_id"))

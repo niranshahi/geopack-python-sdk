@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geopack-sdk"
-version = "0.11.0"
+version = "0.12.0"
 authors = [
   { name="Geopack Team", email="info@geopack.com" },
 ]
@@ -59,3 +59,6 @@ geopack-sdk-mcp = "geopack_sdk_mcp.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+geopack_sdk_mcp = ["maps/templates/**/*"]

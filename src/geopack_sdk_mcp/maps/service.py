@@ -28,14 +28,16 @@ import os
 import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
 from .errors import SERVICE_BLOCKED, SERVICE_ERROR, MapServiceError
 from .manifest import MapLayer, MapManifest, new_id
+from . import viewer
 from .sources import (
     allowed_upstream,
     dataset_tile_url,
+    merge_query,
     mint_publication_url,
     portal_get_bytes,
     query_dataset_geojson,
@@ -46,6 +48,17 @@ logger = logging.getLogger(__name__)
 
 _ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
+#: Content-Security-Policy for the built-in viewer page (local-only page).
+VIEWER_CSP = (
+    "default-src 'none'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "img-src 'self' data: blob: https:; "
+    "connect-src 'self' https://cdn.jsdelivr.net; "
+    "font-src 'self' data: https://cdn.jsdelivr.net; "
+    "worker-src 'self' blob:"
+)
+
 
 def _env_flag(name: str) -> bool:
     return str(os.getenv(name, "")).strip().lower() in {"1", "true", "yes", "on"}
@@ -54,6 +67,26 @@ def _env_flag(name: str) -> bool:
 def service_enabled() -> bool:
     """``GEOPACK_MCP_MAP_SERVICE=1`` opts the process into the local service."""
     return _env_flag("GEOPACK_MCP_MAP_SERVICE")
+
+
+def resolve_assets(
+    assets: Optional[Dict[str, str]] = None,
+) -> Tuple[Dict[str, str], Optional[str]]:
+    """Return ``(asset_urls, vendored_dir)`` for the viewer runtime.
+
+    Default = the pinned OpenLayers CDN (no build step). A directory at
+    ``GEOPACK_MCP_MAP_ASSETS`` (holding ``ol.js`` + ``ol.css``) is served
+    locally instead — the offline/airgapped mode.
+    """
+    if assets is not None:
+        return assets, None
+    configured = (os.getenv("GEOPACK_MCP_MAP_ASSETS") or "").strip()
+    if configured and os.path.isdir(configured):
+        return (
+            {"ol_js": "/viewer/asset/ol.js", "ol_css": "/viewer/asset/ol.css"},
+            os.path.realpath(configured),
+        )
+    return dict(viewer.CDN_ASSETS), None
 
 
 class _Server(ThreadingHTTPServer):
@@ -78,6 +111,8 @@ class LocalService:
         proxy_hosts: Optional[List[str]] = None,
         idle_timeout: Optional[int] = None,
         port: Optional[int] = None,
+        templates_dir: Optional[str] = None,
+        assets: Optional[Dict[str, str]] = None,
     ):
         self.client = client
         self.token = token or secrets.token_urlsafe(32)
@@ -99,6 +134,10 @@ class LocalService:
             except ValueError:
                 port = 0
         self.requested_port = max(0, min(int(port), 65535))
+        self.templates_dir = (
+            templates_dir if templates_dir is not None else viewer.user_templates_dir()
+        )
+        self.assets, self.assets_dir = resolve_assets(assets)
         self.maps: Dict[str, MapManifest] = {}
         self._server: Optional[_Server] = None
         self._thread: Optional[threading.Thread] = None
@@ -221,6 +260,32 @@ class LocalService:
             SERVICE_ERROR, "this layer kind has no tile endpoint.", key="layer"
         )
 
+    # --- viewer assets & templates (Lane B) -------------------------------
+
+    def user_css_url(self) -> Optional[str]:
+        if self.templates_dir and os.path.isfile(
+            os.path.join(self.templates_dir, viewer._USER_CSS_FILE)
+        ):
+            return f"{self.base_url}/viewer/asset/viewer.css"
+        return None
+
+    def viewer_asset(self, name: str) -> Tuple[bytes, str]:
+        """An allow-listed viewer asset: ``ol.js``/``ol.css`` (vendored) or ``viewer.css``."""
+        if name not in {"ol.js", "ol.css", "viewer.css"}:
+            raise MapServiceError(SERVICE_ERROR, "unknown viewer asset.", key="asset")
+        base = self.templates_dir if name == "viewer.css" else self.assets_dir
+        if not base:
+            raise MapServiceError(
+                SERVICE_ERROR, "viewer assets are not vendored locally.", key="asset"
+            )
+        base_real = os.path.realpath(base)
+        path = os.path.realpath(os.path.join(base_real, name))
+        if os.path.commonpath([base_real, path]) != base_real or not os.path.isfile(path):
+            raise MapServiceError(SERVICE_ERROR, "viewer asset not found.", key="asset")
+        content_type = "text/css" if name.endswith(".css") else "text/javascript"
+        with open(path, "rb") as handle:
+            return handle.read(), content_type
+
 
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -238,6 +303,15 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _is_cors_path(self, path: str) -> bool:
         return path.startswith("/data/") or path.startswith("/tiles/")
+
+    def _is_public_path(self, path: str) -> bool:
+        """The viewer shell and its assets carry no secret; the token travels in
+        the URL query (``?t=``, validated and re-embedded by the server) or the
+        fragment (``#t=``) and is used by the page for the token-gated
+        manifest/data calls."""
+        if path.startswith("/viewer/"):
+            return True
+        return path.startswith("/map/") and not path.endswith("/manifest.json")
 
     def _headers_ok(self) -> bool:
         host = (self.headers.get("Host") or "").strip()
@@ -305,11 +379,11 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._headers_ok():
             self._json(403, {"error": True, "code": SERVICE_ERROR, "message": "host not allowed"})
             return
-        if not self._token_ok(query):
+        if not self._is_public_path(parts.path) and not self._token_ok(query):
             self._json(401, {"error": True, "code": SERVICE_ERROR, "message": "missing or invalid token"}, cors=cors)
             return
         try:
-            self._route_get(parts.path, cors)
+            self._route_get(parts.path, cors, query)
         except MapServiceError as exc:
             self._error(exc, cors=cors)
         except Exception:  # noqa: BLE001 - never leak a traceback
@@ -328,8 +402,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._json(404, {"error": True, "code": SERVICE_ERROR, "message": "not found"})
 
-    def _route_get(self, path: str, cors: bool) -> None:
+    def _route_get(self, path: str, cors: bool, query: Optional[Dict[str, List[str]]] = None) -> None:
         service = self.service
+        query = query or {}
         if path == "/" or path == "":
             self._json(
                 200,
@@ -349,6 +424,14 @@ class _Handler(BaseHTTPRequestHandler):
             if manifest is None:
                 raise MapServiceError(SERVICE_ERROR, "unknown map id.")
             self._json(200, manifest.public(service.base_url), cors=cors)
+            return
+
+        if path.startswith("/map/"):
+            self._route_map(path[len("/map/"):], cors, query)
+            return
+
+        if path.startswith("/viewer/"):
+            self._route_viewer_asset(path[len("/viewer/"):])
             return
 
         if path.startswith("/data/"):
@@ -376,10 +459,61 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/proxy/publication/"):
-            self._route_publication(path[len("/proxy/publication/"):], cors)
+            self._route_publication(path[len("/proxy/publication/"):], cors, query)
             return
 
         self._json(404, {"error": True, "code": SERVICE_ERROR, "message": "not found"}, cors=cors)
+
+    def _route_map(self, rest: str, cors: bool,
+                   query: Optional[Dict[str, List[str]]] = None) -> None:
+        service = self.service
+        if rest.endswith("/manifest.json"):
+            manifest = service.find_map(rest[: -len("/manifest.json")])
+            if manifest is None:
+                raise MapServiceError(SERVICE_ERROR, "unknown map id.")
+            self._json(200, manifest.public(service.base_url), cors=cors)
+            return
+        map_id = rest.strip("/")
+        manifest = service.find_map(map_id)
+        if manifest is None:
+            raise MapServiceError(SERVICE_ERROR, "unknown map id.")
+        template = manifest.options or viewer.load_template(service.templates_dir)[0]
+        html_template, _viewer_source, _viewer_warnings = viewer.load_viewer_html(
+            service.templates_dir
+        )
+        # A query token is embedded only when it is VALID (no reflected XSS); this
+        # keeps the viewer working when a host drops the URL fragment.
+        embedded = None
+        supplied = (query.get("t") or [None])[0] if query else None
+        if supplied and hmac.compare_digest(str(supplied), service.token):
+            embedded = str(supplied)
+        html = viewer.render_viewer_html(
+            title=manifest.title or template.get("title") or "Geopack map",
+            manifest_url=f"{service.base_url}/map/{map_id}/manifest.json",
+            template=template,
+            assets=service.assets,
+            user_css=service.user_css_url(),
+            embedded_token=embedded,
+            html_template=html_template,
+        )
+        self._send(
+            200,
+            html.encode("utf-8"),
+            "text/html; charset=utf-8",
+            extra={
+                "Content-Security-Policy": VIEWER_CSP,
+                # Origin-only on cross-origin requests: OSM gets the Referer it
+                # requires while the `?t=` token (path/query) is never sent out.
+                "Referrer-Policy": "strict-origin-when-cross-origin",
+            },
+        )
+
+    def _route_viewer_asset(self, rest: str) -> None:
+        name = rest.strip("/")
+        if name.startswith("asset/"):
+            name = name[len("asset/"):]
+        body, content_type = self.service.viewer_asset(name)
+        self._send(200, body, content_type)
 
     def _route_tiles(self, rest: str, cors: bool) -> None:
         pieces = rest.split("/")
@@ -397,7 +531,8 @@ class _Handler(BaseHTTPRequestHandler):
         status, content_type, body = tile
         self._send(status, body, content_type or "application/vnd.mapbox-vector-tile", cors=cors)
 
-    def _route_publication(self, rest: str, cors: bool) -> None:
+    def _route_publication(self, rest: str, cors: bool,
+                           query: Optional[Dict[str, List[str]]] = None) -> None:
         pieces = rest.split("/")
         if len(pieces) != 2:
             raise MapServiceError(SERVICE_ERROR, "path must be /proxy/publication/{id}/{protocol}")
@@ -407,5 +542,7 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             raise MapServiceError(SERVICE_ERROR, "publication id must be an integer.") from exc
         url = mint_publication_url(self.service.client, pub_id, protocol.lower())
+        forwarded = {k: v for k, v in (query or {}).items() if k != "t"}
+        url = merge_query(url, forwarded)
         status, content_type, body = self.service._proxy(url)
         self._send(status, body, content_type, cors=cors)

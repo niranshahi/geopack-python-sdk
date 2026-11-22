@@ -599,8 +599,10 @@ MapLayers = Annotated[
             "Layers to declare, each an object with a 'kind' (or an inferred one): "
             "portal-dataset {datasetId, query?}, portal-publication {publicationId}, "
             "local-file {path under GEOPACK_MCP_MAP_ROOT}, or inline-geometry {geojson}. "
-            "Optional id/title/style/bbox. Every layer gets a stable dataUrl; portal layers "
-            "also get a tileUrl."
+            "Optional id/title/style/bbox/render/xyzUrl. Every layer gets a stable dataUrl; portal "
+            "layers also get a tileUrl; portal-publication layers also get wmsUrl/wmtsUrl/wfsUrl. "
+            "`render` (geojson|mvt|wms|wmts|wfs|xyz) picks the viewer renderer; it is inferred as "
+            "geojson for dataset/local/inline layers and wms for publication layers."
         ),
         default=None,
     ),
@@ -613,14 +615,41 @@ OpenBrowser = Annotated[
     bool,
     Field(
         description=(
-            "Currently a no-op: the built-in viewer (Lane B) is not shipped, so `show_map` returns "
-            "browserOpened:false and a note. The URLs are always returned for your own page."
+            "Best-effort: open the built-in viewer page in the default browser. Never depended on "
+            "— viewerUrl is always returned and works without spawning a process."
         ),
     ),
 ]
 BasemapName = Annotated[
     Optional[str],
-    Field(description="Recorded basemap preference (e.g. 'osm' or 'blank') for a future viewer.", default=None),
+    Field(
+        description=(
+            "Basemap id to select (must exist in the template's `basemaps`; e.g. 'osm' or 'blank')."
+        ),
+        default=None,
+    ),
+]
+MapTemplate = Annotated[
+    Optional[Dict[str, Any]],
+    Field(
+        description=(
+            "Per-call template override (deep-merged over the user + default template): any of "
+            "title, subtitle, footer, basemap, basemaps[], view, palette, layerStyle, layerList, "
+            "legend, scale, attribution. Unknown keys are ignored; a wrong type falls back to the "
+            "default for that key and is listed in templateWarnings."
+        ),
+        default=None,
+    ),
+]
+MapStyle = Annotated[
+    Optional[Dict[str, Any]],
+    Field(
+        description=(
+            "Per-call default layer style shorthand: {fill, stroke, weight, opacity, radius}. "
+            "Merged into the template's layerStyle."
+        ),
+        default=None,
+    ),
 ]
 
 # --- Return types (geocode only) ---

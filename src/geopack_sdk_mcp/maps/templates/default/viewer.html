@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<link rel="stylesheet" href="__OL_CSS__">
+__USER_CSS_LINK__
+<style>
+  :root {
+    --gp-header: #0b3d2e;
+    --gp-accent: #3ba776;
+    --gp-text: #10221b;
+    --gp-panel: #ffffff;
+__CSS_VARS__
+  }
+   { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 13px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; color: var(--gp-text); }
+  #app { display: flex; flex-direction: column; height: 100%; }
+  header { background: var(--gp-header); color: #fff; padding: 8px 14px; }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  header p { margin: 2px 0 0; font-size: 12px; opacity: .85; }
+  #main { position: relative; flex: 1; min-height: 0; }
+  #map { position: absolute; inset: 0; }
+  #panel { position: absolute; top: 10px; right: 10px; width: 260px; max-height: calc(100% - 20px);
+    overflow: auto; background: var(--gp-panel); border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+  #panel section { padding: 8px 10px; border-bottom: 1px solid rgba(0,0,0,.08); }
+  #panel h2 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; opacity: .7; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .row input[type=range] { flex: 1; }
+  #basemap { width: 100%; padding: 4px; }
+  #legend .item { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  #legend .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.3); }
+  footer { background: #f4f6f5; color: #4b5b54; padding: 5px 14px; font-size: 11px; }
+  #banner { position: absolute; left: 10px; top: 10px; z-index: 5; max-width: 60%;
+    background: #b3261e; color: #fff; padding: 6px 10px; border-radius: 6px; display: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>__TITLE__</h1>
+    <p id="subtitle">__SUBTITLE__</p>
+  </header>
+  <div id="main">
+    <div id="map"></div>
+    <div id="banner"></div>
+    <div id="panel"></div>
+  </div>
+  <footer id="footer">__FOOTER__</footer>
+</div>
+<script src="__OL_JS__"></script>
+<script>
+const TEMPLATE = __TEMPLATE_JSON__;
+const MANIFEST_URL = __MANIFEST_URL__;
+const TOKEN_EMBEDDED = __TOKEN_EMBEDDED__;
+
+function queryToken() {
+  try { return new URLSearchParams(location.search).get('t') || ''; }
+  catch (e) { return ''; }
+}
+function hashToken() {
+  const m = (location.hash || '').match(/[#&]t=([^&]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+// The server embeds a VALID token into the shell; otherwise read ?t= then #t=.
+const TOKEN = TOKEN_EMBEDDED || queryToken() || hashToken();
+function withToken(url) {
+  if (!url) return url;
+  if (/[?&]t=/.test(url)) return url;
+  return url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + encodeURIComponent(TOKEN);
+}
+function banner(message) {
+  const el = document.getElementById('banner');
+  el.textContent = message;
+  el.style.display = 'block';
+}
+
+// XYZ tile loader (OSM basemaps and portal XYZ layers). The shell is served with
+// `Referrer-Policy: no-referrer`, which makes OSM answer every tile with its
+// "access blocked" policy image (a 200 whose body is a policy picture). A
+// per-element referrer policy overrides the document policy, so each tile <img>
+// sends the ORIGIN as Referer — never the path/query, so the session token is
+// not leaked. This mirrors the frontend's OsmWebTileLayer (strict-origin referer).
+function xyzTileLoad(imageTile, src) {
+  const img = imageTile.getImage();
+  img.referrerPolicy = 'strict-origin-when-cross-origin';
+  img.src = src;
+}
+
+const style = TEMPLATE.layerStyle || {};
+function vectorStyle() {
+  const stroke = new ol.style.Stroke({ color: style.stroke || '#14532d', width: style.weight || 2 });
+  const fill = new ol.style.Fill({ color: (style.fill || '#3ba776') });
+  return new ol.style.Style({
+    stroke: stroke,
+    fill: fill,
+    image: new ol.style.Circle({ radius: style.radius || 5,
+      stroke: stroke, fill: fill })
+  });
+}
+
+function basemapLayer(entry) {
+  if (!entry || entry.type === 'none') return null;
+  return new ol.layer.Tile({
+    source: new ol.source.XYZ({
+      url: entry.url,
+      attributions: entry.attribution || undefined,
+      maxZoom: entry.maxZoom || 19,
+      tileLoadFunction: xyzTileLoad
+    }),
+    properties: { basemap: entry.id }
+  });
+}
+
+function buildLayer(spec) {
+  const render = spec.render || (spec.kind === 'portal-publication' ? 'wms' : 'geojson');
+  let source, layer;
+  if (render === 'geojson') {
+    source = new ol.source.Vector({ url: withToken(spec.dataUrl), format: new ol.format.GeoJSON() });
+    layer = new ol.layer.Vector({ source: source, style: vectorStyle() });
+  } else if (render === 'mvt') {
+    source = new ol.source.VectorTile({ format: new ol.format.MVT(), url: withToken(spec.tileUrl) });
+    layer = new ol.layer.VectorTile({ source: source, style: vectorStyle() });
+  } else if (render === 'wms') {
+    source = new ol.source.TileWMS({ url: spec.wmsUrl, params: { t: TOKEN } });
+    layer = new ol.layer.Tile({ source: source });
+  } else if (render === 'wmts') {
+    source = new ol.source.TileWMS({ url: spec.wmtsUrl, params: { t: TOKEN } });
+    layer = new ol.layer.Tile({ source: source });
+  } else if (render === 'xyz') {
+    source = new ol.source.XYZ({ url: spec.xyzUrl, tileLoadFunction: xyzTileLoad });
+    layer = new ol.layer.Tile({ source: source });
+  } else {
+    source = new ol.source.Vector({ url: withToken(spec.dataUrl), format: new ol.format.GeoJSON() });
+    layer = new ol.layer.Vector({ source: source, style: vectorStyle() });
+  }
+  layer.set('title', spec.title || spec.id);
+  layer.set('gpId', spec.id);
+  layer.set('gpStyle', spec.style || null);
+  return layer;
+}
+
+async function wfsLayer(spec) {
+  const url = withToken(spec.wfsUrl) +
+    '&SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&outputFormat=application/json&srsName=EPSG:4326';
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('WFS ' + response.status);
+  const geo = await response.json();
+  const source = new ol.source.Vector({
+    features: new ol.format.GeoJSON().readFeatures(geo, { featureProjection: 'EPSG:3857' })
+  });
+  return new ol.layer.Vector({ source: source, style: vectorStyle() });
+}
+
+function renderPanel(map, baseLayers) {
+  const panel = document.getElementById('panel');
+  let html = '';
+  const showList = TEMPLATE.layerList !== false;
+  const showLegend = TEMPLATE.legend !== false;
+  if (TEMPLATE.basemaps && TEMPLATE.basemaps.length) {
+    html += '<section><h2>Background</h2><select id="basemap">';
+    TEMPLATE.basemaps.forEach(function (entry) {
+      const selected = entry.id === (TEMPLATE.basemap || '');
+      html += '<option value="' + entry.id + '"' + (selected ? ' selected' : '') + '>' +
+        (entry.label || entry.id) + '</option>';
+    });
+    html += '</select></section>';
+  }
+  if (showList) html += '<section><h2>Layers</h2><div id="layers"></div></section>';
+  if (showLegend) html += '<section><h2>Legend</h2><div id="legend"></div></section>';
+  panel.innerHTML = html;
+
+  const select = document.getElementById('basemap');
+  if (select) {
+    select.addEventListener('change', function () {
+      baseLayers.forEach(function (l) { l.setVisible(l.get('basemap') === select.value); });
+    });
+  }
+
+  const listEl = document.getElementById('layers');
+  if (listEl) {
+    baseLayers.filter(function (l) { return !l.get('basemap'); }).forEach(function (layer) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.checked = layer.getVisible();
+      check.addEventListener('change', function () { layer.setVisible(check.checked); });
+      const label = document.createElement('span');
+      label.textContent = layer.get('title');
+      label.style.flex = '1';
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = '0'; slider.max = '1'; slider.step = '0.05';
+      slider.value = String(layer.getOpacity());
+      slider.addEventListener('input', function () { layer.setOpacity(parseFloat(slider.value)); });
+      row.appendChild(check); row.appendChild(label); row.appendChild(slider);
+      listEl.appendChild(row);
+    });
+  }
+}
+
+function drawLegend(layer) {
+  const legend = document.getElementById('legend');
+  if (!legend) return;
+  if (!legend.querySelector('.gp-live')) legend.innerHTML = '<div class="gp-live"></div>';
+  const s = layer.get('gpStyle') || TEMPLATE.layerStyle || {};
+  const item = document.createElement('div');
+  item.className = 'item';
+  const swatch = document.createElement('span');
+  swatch.className = 'swatch';
+  swatch.style.background = s.fill || '#3ba776';
+  const label = document.createElement('span');
+  label.textContent = layer.get('title');
+  item.appendChild(swatch); item.appendChild(label);
+  legend.querySelector('.gp-live').appendChild(item);
+}
+
+async function main() {
+  if (!TOKEN) banner('No access token in the URL. Open the exact viewerUrl returned by show_map ' +
+    '(it carries ?t=...); if a linker dropped it, re-open the full URL.');
+  let manifest;
+  try {
+    const response = await fetch(withToken(MANIFEST_URL));
+    if (!response.ok) throw new Error('manifest HTTP ' + response.status);
+    manifest = await response.json();
+  } catch (err) {
+    banner('Could not load the map manifest: ' + err.message);
+    return;
+  }
+
+  const baseLayers = [];
+  (TEMPLATE.basemaps || []).forEach(function (entry) {
+    const layer = basemapLayer(entry);
+    if (layer) { layer.setVisible(entry.id === (TEMPLATE.basemap || '')); baseLayers.push(layer); }
+  });
+
+  const map = new ol.Map({
+    target: 'map',
+    layers: baseLayers,
+    view: new ol.View({
+      center: ol.proj.fromLonLat((TEMPLATE.view && TEMPLATE.view.center) || [0, 0]),
+      zoom: (TEMPLATE.view && TEMPLATE.view.zoom) || 2
+    })
+  });
+  if (TEMPLATE.scale !== false) { map.addControl(new ol.control.ScaleLine()); }
+  if (TEMPLATE.attribution === false) {
+    map.getControls().forEach(function (c) {
+      if (c instanceof ol.control.Attribution) { map.removeControl(c); }
+    });
+  }
+
+  const extent = ol.extent.createEmpty();
+  for (const spec of (manifest.layers || [])) {
+    let layer;
+    try {
+      if ((spec.render || '') === 'wfs' || (spec.kind === 'portal-publication' && spec.render === 'wfs')) {
+        layer = await wfsLayer(spec);
+      } else {
+        layer = buildLayer(spec);
+      }
+    } catch (err) {
+      banner('Layer "' + (spec.title || spec.id) + '" failed: ' + err.message);
+      continue;
+    }
+    map.addLayer(layer);
+    drawLegend(layer);
+    if (spec.bbox && spec.bbox.length === 4) {
+      ol.extent.extend(extent, ol.proj.transformExtent(spec.bbox, 'EPSG:4326', 'EPSG:3857'));
+    }
+    const source = layer.getSource && layer.getSource();
+    if (source && source.on) {
+      source.on('featuresloadend', function () {
+        if (TEMPLATE.view && TEMPLATE.view.mode === 'fit') { try { map.getView().fit(source.getExtent(), { padding: [40, 40, 40, 40], maxZoom: 17 }); } catch (e) {} }
+      });
+    }
+  }
+
+  if (TEMPLATE.view && TEMPLATE.view.mode === 'fit' && !ol.extent.isEmpty(extent)) {
+    map.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 17 });
+  }
+  renderPanel(map, baseLayers);
+}
+
+main();
+</script>
+</body>
+</html>

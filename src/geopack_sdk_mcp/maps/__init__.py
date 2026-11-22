@@ -13,6 +13,7 @@ from typing import Any, Optional
 from .errors import SERVICE_BLOCKED, MapServiceError
 from .manifest import MapLayer, MapManifest, layer_from_spec
 from .service import LocalService, service_enabled
+from . import viewer
 
 _service: Optional[LocalService] = None
 _lock = threading.Lock()
@@ -28,6 +29,7 @@ __all__ = [
     "stop_service",
     "reset_for_tests",
     "service_enabled",
+    "viewer",
 ]
 
 

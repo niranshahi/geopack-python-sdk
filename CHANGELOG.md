@@ -3,6 +3,64 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.0 — 2026-11-22
+
+Built-in **map viewer** (slice 033, Lane B) with **user-editable templates**. `geopack_sdk_show_map`
+now returns a live `viewerUrl` — an OpenLayers page served from the same loopback origin — instead of
+`viewerUrl:null`. The page draws the manifest's layers and is restyled after install without touching
+the package. No new tool (surface stays **31**), no new Python dependency, no map image.
+
+### Added — the viewer
+
+- **`/map/{mapId}`** serves the viewer shell (token-exempt; it holds no secret). `viewerUrl` carries the
+  low-sensitivity session token as **`?t=...`**, and the server **embeds a validated token into the
+  page** so it works even when a host/chat client strips part of the URL; **`#t=...` is still accepted
+  as a fallback**. The token gates the `/map/{id}/manifest.json`, `/data` and `/tiles` calls. A strict
+  `Content-Security-Policy` and `Referrer-Policy: strict-origin-when-cross-origin` ship with the page
+  (origin-only, so `?t=` never leaks to a third party).
+- **OpenLayers** is the runtime: one lightweight, plugin-free library that renders **GeoJSON, MVT
+  vector tiles, WMS/WMTS images, WFS vector data and XYZ raster** — the portal's layer families —
+  with a layer list (visibility + opacity), basemap switcher, legend and scale line. Distribution is
+  the **pinned CDN by default** (no build step); `GEOPACK_MCP_MAP_ASSETS=<dir>` serves a vendored
+  `ol.js`/`ol.css` for offline/airgapped installs.
+- **The page is an editable resource, not embedded code.** The shipped viewer lives at
+  `maps/templates/default/viewer.html` (read from disk); a user **`viewer.html`** in the Tier-2 dir
+  replaces it — validated to keep the required `__…__` placeholders, else the shipped page is used with
+  a warning. `show_map` returns `viewerHtmlPath` / `viewerHtmlUsed`.
+- **OSM tiles render in-browser.** The shell's `Referrer-Policy` is origin-only and every XYZ tile
+  `<img>` sets a per-element `referrerPolicy: strict-origin-when-cross-origin`, so OSM receives the
+  `Referer` it requires instead of answering with its "access blocked" policy image — the OpenLayers
+  equivalent of the portal frontend's `OsmWebTileLayer`.
+- **Publication layers** now expose `wmsUrl`/`wmtsUrl`/`wfsUrl` (proxied, minted on demand) and a
+  `render` hint (`geojson|mvt|wms|wmts|wfs|xyz`); `/proxy/publication/{id}/{protocol}` forwards the
+  browser's OGC query string (WMS `GetMap`, WFS `GetFeature`) after minting.
+- `open_browser=true` now opens the **viewer** URL (best-effort, never depended on).
+
+### Added — templates (N6, three tiers)
+
+- **Tier 1** shipped default `maps/templates/default/` (`viewer.html` + `template.json`); **Tier 2**
+  user `viewer.html` / `template.json` (and optional `viewer.css`) under `GEOPACK_MCP_MAP_TEMPLATES` or
+  `~/.geopack/mcp/maps/`; **Tier 3** per-call `template` / `style` / `basemap` arguments.
+  `template.json` deep-merges (higher tier wins); `viewer.html` replaces the page wholesale.
+- Editable keys: `title`/`subtitle`/`footer`, `basemaps[]` (named XYZ/none backgrounds),
+  `basemap`, `view` (fit or center/zoom), `palette`, `layerStyle`, `layerList`/`legend`/`scale`/
+  `attribution`. Unknown keys are ignored and a type error falls back to the default **for that
+  key** with a `templateWarnings[]` entry — never a crash.
+- `show_map` returns `viewerUrl`, `templatePath`, `templateUsed`, `viewerHtmlPath`, `viewerHtmlUsed`
+  and `templateWarnings`.
+
+### Changed
+
+- `manifestUrl` is now `/map/{mapId}/manifest.json` (the old `/manifest/{mapId}` still works).
+- **OSM is loaded by the browser**, not proxied by the MCP (the GIS-088 lesson: OSM forbids anonymous
+  proxying; the client sends the required `Referer` via a per-element referrer policy). A template
+  basemap may point at any XYZ service.
+
+### Notes
+
+- Still **no map image** and no portal renderer (D1/D8 unchanged). Lane B's product is a live URL the
+  browser draws.
+
 ## 0.11.0 — 2026-11-22
 
 Local data service + local geometry ops (slice 033, lanes A and C). The MCP can now stand up a

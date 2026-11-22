@@ -90,11 +90,12 @@ class ShowMapTest(unittest.TestCase):
         )
 
         self.assertTrue(payload["serviceUrl"].startswith("http://127.0.0.1:"))
-        self.assertIn("/manifest/", payload["manifestUrl"])
+        self.assertIn("/map/", payload["manifestUrl"])
+        self.assertIn("?t=", payload["viewerUrl"])
         self.assertEqual(len(payload["layers"]), 2)
         self.assertTrue(payload["layers"][0]["dataUrl"].endswith("/data/" + payload["layers"][0]["id"]))
         self.assertTrue(payload["layers"][1]["tileUrl"].endswith("/tiles/" + payload["layers"][1]["id"] + "/{z}/{x}/{y}.pbf"))
-        self.assertIsNone(payload["viewerUrl"])
+        self.assertIsNotNone(payload["viewerUrl"])
         self.assertEqual(payload["layersAdded"], 2)
 
     def test_the_portal_credential_never_appears_in_the_payload(self):
@@ -129,14 +130,22 @@ class ShowMapTest(unittest.TestCase):
         with self.assertRaises(MapServiceError):
             show_map(_Client(), map_id="map_missing")
 
-    def test_a_blocked_browser_spawn_still_returns_the_url(self):
-        with patch("webbrowser.open") as opener:
+    def test_open_browser_opens_the_viewer_url(self):
+        with patch("webbrowser.open", return_value=True) as opener:
             payload = show_map(_Client(), open_browser=True)
 
-        opener.assert_not_called()
-        self.assertTrue(payload["serviceUrl"].startswith("http://127.0.0.1:"))
+        opener.assert_called_once()
+        opened = opener.call_args.args[0]
+        self.assertIn("/map/", opened)
+        self.assertIn("?t=", opened)
+        self.assertTrue(payload["browserOpened"])
+
+    def test_open_browser_failing_is_never_fatal(self):
+        with patch("webbrowser.open", side_effect=RuntimeError("no spawn")):
+            payload = show_map(_Client(), open_browser=True)
+
         self.assertFalse(payload["browserOpened"])
-        self.assertIn("built-in viewer", payload["browserNote"])
+        self.assertIn("?t=", payload["viewerUrl"])
 
     def test_a_fixed_port_is_honoured(self):
         port = _free_port()

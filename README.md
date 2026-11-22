@@ -2,7 +2,7 @@
 
 A standalone Python library to interact with the Geopack Geoportal API.
 
-Current release: **0.11.0** — see [CHANGELOG.md](CHANGELOG.md).
+Current release: **0.12.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Naming
 
@@ -158,7 +158,7 @@ client.auth.login(username="my_user", password="my_password")
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks` (`partial_success` is terminal and returned like `completed`).
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (**31 tools** + 2 resource templates, v0.11.0+; read lanes for schema/aggregate/relationships/workflow-spec, workflow execution incl. typed analysis tools, the edit ladder, upload, a loopback-only local map data service, and local geometry ops; no create/edit/delete of workflows via MCP, no delete at all, no map-image/print export).
+- GeoPandas integration; **Geopack SDK MCP** server (**31 tools** + 2 resource templates, v0.12.0+; read lanes for schema/aggregate/relationships/workflow-spec, workflow execution incl. typed analysis tools, the edit ladder, upload, a loopback-only local map data service with a built-in viewer, and local geometry ops; no create/edit/delete of workflows via MCP, no delete at all, no map-image/print export).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
@@ -169,10 +169,14 @@ Typed REST proxy via MCP — not the in-portal assistant. Credentials stay in th
 ```powershell
 cd python-sdk
 .\venv\Scripts\activate
-pip install -e ".[mcp]"
+pip install -e ".[mcp]" --disable-pip-version-check
 ```
 
 `mcp` is an **optional** dependency in `pyproject.toml` (`[project.optional-dependencies] mcp`) so `pip install geopack-sdk` alone does not pull it in. Install `geopack-sdk[mcp]` or `geopack-sdk[all]` when you need the MCP server.
+
+> **Reinstalling after a code change:** `pip install -e ".[mcp]" --force-reinstall --no-deps --disable-pip-version-check` — skips dependency re-resolution (deps are already installed).
+>
+> **Windows note:** on some machines pip prints `Successfully installed geopack-sdk-X.Y.Z` and then appears to **hang**. This is pip's post-install version self-check writing to a locked `%LOCALAPPDATA%\pip` cache — **not** a package/build problem. The install has already succeeded: stop it (Ctrl+C) and confirm with `pip show geopack-sdk`. Keeping `--disable-pip-version-check` on the command prevents it.
 
 **Testing (API must be running, `.env` in `python-sdk/`):**
 
@@ -238,6 +242,8 @@ host config, **restart the MCP host** — the server reads env once at startup.
 | `GEOPACK_MCP_MAP_CORS` | unset (off) | `"1"` only when an **agent-authored page on another origin** must fetch `/data`·`/tiles`. Same-origin pages need nothing. Keep off otherwise. |
 | `GEOPACK_MCP_MAP_IDLE_TIMEOUT` | `1800` | Seconds of inactivity before the local service stops itself. Raise for long editing sessions; `0` disables the idle stop. |
 | `GEOPACK_MCP_MAP_PORT` | `0` (random) | Pin the loopback port so a client page/script keeps a stable URL across idle restarts. A random port changes every time the service restarts (e.g. after an idle stop). |
+| `GEOPACK_MCP_MAP_TEMPLATES` | `~/.geopack/mcp/maps` | Folder holding the user's `template.json` + optional **`viewer.html`** (the whole page) and `viewer.css`, so the built-in viewer is restyled/rebranded without editing the package. `show_map` returns `templatePath`/`viewerHtmlPath` so you know where to edit. |
+| `GEOPACK_MCP_MAP_ASSETS` | unset (CDN) | Absolute path to a folder with `ol.js` + `ol.css` to serve the viewer runtime **locally** (offline/airgapped). Unset = the pinned OpenLayers CDN, no build step. |
 | `GEOPACK_MCP_PROXY_HOSTS` | unset | Comma-separated **extra** hosts the proxy may reach, besides the portal host. Set it only when minted GeoServer URLs live on a different host than `GEOPACK_API_URL` (otherwise `show_map` tiles answer "host is not allow-listed"). |
 | `GEOPACK_MCP_GEOMETRY_ENGINE` | `shapely` | Selects the local geometry engine. **`shapely` is the only registered engine**; leave it unset unless you are testing a substitute. |
 | `GEOPACK_MCP_SKIP_DOTENV` | unset | `"1"` stops the MCP from auto-loading `python-sdk/.env` — use when the host `env` block is the single source of truth. |
@@ -275,7 +281,7 @@ geometry engine uses `shapely`/`pyproj`, already pulled in by `geopandas`.
 
 **Thumbnails — inline is the official mode.** `geopack_sdk_get_dataset_thumbnail` returns the image inside the tool result (the host renders it) and **writes no file unless `save_path` is passed**. A sandboxed host that forbids local writes answers `saved:false` (`saveSkipped:true` when no `save_path`) while the image still comes back — **no file appearing on disk is the expected outcome, not a failure**; `save_path` works only where the host permits writes.
 
-**Local map data service (v0.11.0+, `geopack_sdk_show_map`).** Opt-in (`GEOPACK_MCP_MAP_SERVICE=1`): the MCP opens a **loopback-only** (`127.0.0.1`, ephemeral port, token-gated) HTTP service that **proxies portal data with the MCP's own credentials** and serves local files, then returns stable URLs (`/data`, `/tiles`, `/manifest`) so a page can reference a **URL instead of embedding data**. The portal credential stays in the MCP process; only a low-sensitivity session token crosses. A host that forbids binding answers `MAP_SERVICE_BLOCKED`. **No map image is produced** — the built-in browser viewer (Lane B) is deferred, so reference the data URLs from your own page.
+**Local map service + built-in viewer (v0.12.0+, `geopack_sdk_show_map`).** Opt-in (`GEOPACK_MCP_MAP_SERVICE=1`): the MCP opens a **loopback-only** (`127.0.0.1`, ephemeral port, token-gated) HTTP service that **proxies portal data with the MCP's own credentials** and serves local files, then returns a live **`viewerUrl`** plus stable data URLs (`/data`, `/tiles`) a page can reference **instead of embedding data**. The viewer is an **OpenLayers** page served from the same origin and draws GeoJSON, MVT vector tiles, WMS/WMTS images, WFS vector data and XYZ raster — the portal's layer families — with a layer list, basemap switcher and legend. It is **themeable without a build**: edit `template.json` under `GEOPACK_MCP_MAP_TEMPLATES` (title, basemaps, palette, layer style, panels), drop in your own **`viewer.html`** (the whole page is an editable resource, not embedded code), or pass per-call `template`/`style`/`basemap` overrides. OSM tiles load in-browser with a per-element referrer policy, so no "access blocked" image. The viewer runtime comes from a pinned CDN by default; set `GEOPACK_MCP_MAP_ASSETS` to a local `ol.js`/`ol.css` for offline installs. The portal credential stays in the MCP process; only a low-sensitivity session token crosses (`?t=` in `viewerUrl`, embedded into the page by the server; `#t=` also works when a host strips the query). A host that forbids binding answers `MAP_SERVICE_BLOCKED`. **No map image is produced** — the browser draws the live map.
 
 **Local geometry ops (v0.11.0+, `geopack_sdk_geometry_op`).** A **local** compute lane (shapely/pyproj behind a GeoJSON-only engine port) — **no portal call**: `buffer`, `overlay` (`union|intersection|difference|xor|clip`), `convex_hull`, `envelope`, `dissolve`, `simplify`, `validate`, `fix`, `convert`, `project`, `measure`, `distance`, `nearest`, `line_between`, `point_on_surface`, `smooth`, `create`, `describe`. Metric ops auto-project to a local UTM; results carry provenance (`engine`/`methodUsed`/`crsUsed`). Geodesic buffer is not available in v1 (honest code).
 
@@ -312,7 +318,7 @@ geometry engine uses `shapely`/`pyproj`, already pulled in by `geopandas`.
 | `geopack_sdk_run_analysis` | Run one by `tool_id` + `params`; waits by default. **Mutating** — consent first |
 | `geopack_sdk_get_analysis_result` | Result summary (scalars, datasets, artifacts) — never records |
 | `geopack_sdk_submit_edit_document` | EditDoc ladder `validate` → `preview` → `apply`. **Mutating** — `apply` writes records |
-| `geopack_sdk_show_map` | Start/update the **loopback-only** local data service and declare layers; returns `serviceUrl`/`manifestUrl`/layer `dataUrl`·`tileUrl` + a low-sensitivity session token. Opt-in (`GEOPACK_MCP_MAP_SERVICE=1`). Holds the portal credential server-side; produces **no map image** |
+| `geopack_sdk_show_map` | Start/update the **loopback-only** local map service, declare layers and return a live **`viewerUrl`** (OpenLayers page) plus layer `dataUrl`·`tileUrl`·`wmsUrl`/`wmtsUrl`/`wfsUrl` and a low-sensitivity session token; themeable via `template`/`style`/`basemap` and a user `template.json`. Opt-in (`GEOPACK_MCP_MAP_SERVICE=1`). Holds the portal credential server-side; produces **no map image** |
 | `geopack_sdk_geometry_op` | Run one **local** geometry op (buffer, overlay, hull, envelope, dissolve, simplify, validate/fix, convert, project, measure, distance, nearest, line_between, point_on_surface, smooth, create, describe). No portal call; WGS84 output with provenance |
 
 **Error contract (v0.7.0+):** a failed call answers `isError: true` with `structuredContent` = `{error, code, type, statusCode, message, hint, invalidArgs?}`. `code` is the server's coded error when it sends one, otherwise derived from the exception class (`DATASET_READ_ONLY`, `AGGREGATION_UNSUPPORTED`, `EDIT_CONFLICT`, `QUOTA_EXCEEDED`, …). `hint` names the next tool to call; `invalidArgs` lists the arguments a client-side validator refused before any network call. `get_dataset_relationships` still degrades to `catalogUnavailable: true` with `isError: false` (a state, not a failure); `get_mcp_safety_policy` never fails.

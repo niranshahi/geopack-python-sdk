@@ -31,6 +31,11 @@ wheels/
 pip-log.txt
 pip-delete-this-directory.txt
 
+# pip build temp dirs left behind when the Windows post-install self-check hangs
+# after "Successfully installed" (safe to delete; see AGENTS.md build notes)
+pip-*
+tmp*.build-temp
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

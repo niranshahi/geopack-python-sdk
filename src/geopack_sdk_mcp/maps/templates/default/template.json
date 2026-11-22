@@ -1,0 +1,45 @@
+{
+  "templateVersion": 1,
+  "title": "Geopack map",
+  "subtitle": "",
+  "footer": "Geopack · served by the MCP local map service",
+  "basemap": "osm",
+  "basemaps": [
+    {
+      "id": "osm",
+      "label": "OpenStreetMap",
+      "type": "xyz",
+      "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "attribution": "© OpenStreetMap contributors",
+      "maxZoom": 19
+    },
+    {
+      "id": "blank",
+      "label": "Blank",
+      "type": "none"
+    }
+  ],
+  "view": {
+    "mode": "fit",
+    "center": [0, 0],
+    "zoom": 2,
+    "padding": 40
+  },
+  "palette": {
+    "header": "#0b3d2e",
+    "accent": "#3ba776",
+    "text": "#10221b",
+    "panel": "#ffffff"
+  },
+  "layerStyle": {
+    "fill": "#3ba776",
+    "stroke": "#14532d",
+    "weight": 2,
+    "opacity": 0.85,
+    "radius": 5
+  },
+  "layerList": true,
+  "legend": true,
+  "scale": true,
+  "attribution": true
+}
