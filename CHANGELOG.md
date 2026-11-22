@@ -3,6 +3,75 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.11.0 — 2026-11-22
+
+Local data service + local geometry ops (slice 033, lanes A and C). The MCP can now stand up a
+**loopback-only data service** that proxies portal data with its own credentials and serves local
+files, so a page can reference a **URL instead of embedding data**, and it can run **local spatial
+tools** with no Geoportal dependency. **No map image is produced** and **no portal renderer is added**
+(the D8 boundary is unchanged; the built-in viewer is Lane B and remains deferred). Surface **29 → 31
+tools** (`geopack_sdk_show_map`, `geopack_sdk_geometry_op`).
+
+### Added — Lane A: local map data service
+
+- **`geopack_sdk_show_map`** starts/updates a `ThreadingHTTPServer` bound to `127.0.0.1` on an
+  ephemeral port, declares layers, and returns `{serviceUrl, manifestUrl, layers[].dataUrl/tileUrl,
+  accessToken}`. It is **opt-in** (`GEOPACK_MCP_MAP_SERVICE=1`), token-gated, `Host`-checked
+  (anti-DNS-rebinding), and the **portal credential never crosses to the browser** — only a
+  low-sensitivity per-process session token does. A host that forbids binding answers
+  `MAP_SERVICE_BLOCKED`; `open_browser` is accepted but opens nothing until a viewer page exists
+  (Lane B), and says so.
+- **Endpoints:** `/data/{layerId}` (GeoJSON for a portal dataset or inline geometry; a local file for
+  `local-file`), `/tiles/{layerId}/{z}/{x}/{y}.pbf` (portal-native MVT or minted publication tiles),
+  `/local/{layerId}` (allow-listed local file), `/proxy/publication/{id}/{protocol}` (minted
+  WMS/WMTS/MVT/WFS passthrough), `/manifest/{mapId}`, `/shutdown`.
+- **Local files** are limited to `GEOPACK_MCP_MAP_ROOT` with realpath containment, an extension
+  allow-list and a size cap. **Upstreams** are allow-listed to the portal host plus
+  `GEOPACK_MCP_PROXY_HOSTS`. Scoped CORS is **off by default** (`GEOPACK_MCP_MAP_CORS=1` enables it on
+  `/data` and `/tiles` only).
+
+### Added — Lane C: local geometry ops
+
+- **`geopack_sdk_geometry_op`** — one family tool with an `op` argument over a **shapely/pyproj** engine
+  (already dependencies via geopandas; **no new dependency**): `buffer`, `overlay`
+  (`union|intersection|difference|xor|clip`), `convex_hull`, `envelope`, `dissolve`, `simplify`,
+  `validate`, `fix`, `convert` (GeoJSON↔WKT), `project`, `measure`, `distance`, `nearest`,
+  `line_between`, `point_on_surface`, `smooth`, `create`, `describe`. **No portal call.**
+- GeoJSON-dict-only **engine port** (`geometry/engine.py`) with a swap-enforcement test: only
+  `shapely_engine.py` may import shapely/pyproj/geopandas. Metric ops auto-project WGS84 to a local
+  UTM (or an explicit `wkid`) and project back with the `crs` member; every result echoes provenance
+  (`engine`/`methodUsed`/`crsUsed`/`unitsUsed`).
+- New coded refusals (additive): `GEOMETRY_UNSUPPORTED_OP`, `GEOMETRY_EMPTY_RESULT`,
+  `GEOMETRY_ENGINE_FAILED`; unknown units/args stay `INVALID_ARGS`. **Geodesic buffer is not
+  available in v1** — it answers an honest code instead of faking it.
+
+### Changed
+
+- New policy bucket **`hostServices`** names `geopack_sdk_show_map` in `get_mcp_safety_policy`;
+  `geopack_sdk_geometry_op` is a pure read.
+- New env vars: `GEOPACK_MCP_MAP_SERVICE`, `GEOPACK_MCP_MAP_ROOT`, `GEOPACK_MCP_MAP_CORS`,
+  `GEOPACK_MCP_MAP_IDLE_TIMEOUT`, `GEOPACK_MCP_MAP_PORT`, `GEOPACK_MCP_PROXY_HOSTS`,
+  `GEOPACK_MCP_GEOMETRY_ENGINE`.
+
+### Fixed — owner live-QA round (Claude Desktop)
+
+- **`geometry_op` cold start.** The shapely/pyproj import is now **preloaded in the server lifespan**,
+  so the first call no longer pays it (the reported first-call timeout).
+- **`project` accepts `output_wkid` as the target alias.** `output_wkid` used to be ignored unless
+  `wkid` was also given; now either names the target CRS.
+- **`distance`/`nearest` echo the requested `units`.** They returned metres regardless of `units`;
+  now `units` (`m|km|ft|mi`, default `m`) is validated and the result is converted + labelled.
+- **`show_map` opens no browser.** `open_browser=true` used to open the raw JSON manifest in a
+  browser (reported as a "map opened" false positive). It now returns `browserOpened:false` with a
+  note, because there is no viewer page until Lane B.
+- **Stable port option.** `GEOPACK_MCP_MAP_PORT` pins the loopback port; a random port changed on
+  every idle-restart, breaking client URLs. `allow_reuse_address` is on so a pinned port rebinds.
+
+### Notes
+
+- Lane B (the built-in Leaflet viewer / user-editable map templates) is **deferred** by the owner's
+  lane choice (A + C); `show_map` returns data URLs and states honestly that no viewer page is served.
+
 ## 0.10.0 — 2026-11-21
 
 Sort parity across the MCP list lanes, plus a thumbnail-save hardening from the owner's live re-check.

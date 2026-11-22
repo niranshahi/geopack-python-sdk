@@ -20,12 +20,31 @@ async def _app_lifespan(_server: FastMCP) -> AsyncIterator[AppContext]:
     """Login once at process start; reuse session for all tool calls."""
     client = bootstrap_geopack_client()
     set_lifespan_client(client)
+
+    # Preload the local geometry engine (slice 033, Lane C) so the FIRST
+    # geometry_op call does not pay the shapely/pyproj import cost (cold-start
+    # timeouts). Optional lane: any failure must not block startup.
+    try:
+        from .geometry import resolve_engine
+
+        resolve_engine()
+    except Exception:  # noqa: BLE001 - the lane degrades to a coded tool error
+        logger.debug("Geometry engine preload failed", exc_info=True)
+
     try:
         yield AppContext(client=client)
     finally:
         set_lifespan_client(None)
         logger.debug("Geopack SDK MCP: shutting down")
-        
+
+        # Stop the opt-in localhost map data service (slice 033).
+        try:
+            from .maps import stop_service
+
+            stop_service()
+        except Exception:  # noqa: BLE001 - shutdown must never raise
+            logger.debug("Map service shutdown failed", exc_info=True)
+
         # Temporary asset Garbage Collection
         from .context import get_registered_temp_files
         import os

@@ -68,6 +68,11 @@ _LOCAL_WRITE_TOOLS = (
     "geopack_sdk_download_workflow_artifact",
 )
 
+#: Tools that start a LOCALHOST-ONLY host service (slice 033). Not a portal
+#: mutation and no local file write, but the host should still know a socket is
+#: opened. ``readOnlyHint`` is false for these (see annotations).
+_HOST_SERVICE_TOOLS = ("geopack_sdk_show_map",)
+
 #: Everything else is a pure read: no portal change, no local file.
 _READ_TOOLS = (
     "geopack_sdk_list_datasets",
@@ -91,6 +96,7 @@ _READ_TOOLS = (
     "geopack_sdk_get_quota_summary",
     "geopack_sdk_geocode_place",
     "geopack_sdk_get_mcp_safety_policy",
+    "geopack_sdk_geometry_op",
 )
 
 #: Operations that are NOT exposed as tools — the stated exclusion list that
@@ -108,6 +114,7 @@ UNAVAILABLE_OPERATIONS = (
 TOOL_POLICY: Dict[str, Dict[str, Any]] = {
     **{name: {"mutating": True, **spec} for name, spec in _MUTATING_TOOLS.items()},
     **{name: {"mutating": False, "localWrites": True} for name in _LOCAL_WRITE_TOOLS},
+    **{name: {"mutating": False, "hostServices": True} for name in _HOST_SERVICE_TOOLS},
     **{name: {"mutating": False} for name in _READ_TOOLS},
 }
 
@@ -118,7 +125,10 @@ _POLICY_NOTE = (
     "Tools listed in localWrites write to the MCP host filesystem only on a best-effort "
     "basis: a sandboxed host that forbids writes answers saved=false instead of failing, "
     "and geopack_sdk_get_dataset_thumbnail delivers the image inline regardless (inline is "
-    "the official delivery mode for a thumbnail)."
+    "the official delivery mode for a thumbnail). Tools listed in hostServices may open a "
+    "LOCALHOST-ONLY browser/data service (127.0.0.1, ephemeral port, opt-in via "
+    "GEOPACK_MCP_MAP_SERVICE): it holds the portal credential and exposes only a "
+    "low-sensitivity local session token; it produces no map image."
 )
 
 
@@ -150,9 +160,12 @@ def build_policy_payload(client: Optional[GeopackClient] = None) -> Dict[str, An
             name: entry for name, entry in TOOL_POLICY.items() if entry["mutating"]
         },
         "readOnlyTools": [
-            name for name, entry in TOOL_POLICY.items() if not entry["mutating"]
+            name
+            for name, entry in TOOL_POLICY.items()
+            if not entry["mutating"] and not entry.get("hostServices")
         ],
         "localWrites": list(_LOCAL_WRITE_TOOLS),
+        "hostServices": list(_HOST_SERVICE_TOOLS),
         "unavailable": list(UNAVAILABLE_OPERATIONS),
         "uploadLimits": _upload_limits(client),
         "note": _POLICY_NOTE,

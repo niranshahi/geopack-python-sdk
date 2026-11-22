@@ -456,6 +456,173 @@ GeocodeLimit = Annotated[
     Field(description="Max number of place candidates to return (default 1).", ge=1, le=10),
 ]
 
+# --- Local geometry ops (slice 033, Lane C) ---
+
+GeometryOpName = Annotated[
+    str,
+    Field(
+        description=(
+            "The local op: buffer | overlay | convex_hull | envelope | dissolve | simplify | "
+            "validate | fix | convert | project | measure | distance | nearest | line_between | "
+            "point_on_surface | smooth | create | describe. Runs locally — no portal call."
+        )
+    ),
+]
+GeometryGeoJson = Annotated[
+    Optional[Dict[str, Any]],
+    Field(
+        description=(
+            "Input GeoJSON (geometry, Feature or FeatureCollection) for the first side. "
+            "Coordinates are WGS84 unless 'wkid' names the projected CRS for metric math."
+        ),
+        default=None,
+    ),
+]
+GeometryText = Annotated[
+    Optional[str],
+    Field(description="Input as WKT text (alternative to 'geojson'; used by convert).", default=None),
+]
+GeometryBSide = Annotated[
+    Optional[Dict[str, Any]],
+    Field(description="Second-side GeoJSON for overlay/distance/nearest/line_between.", default=None),
+]
+GeometryBText = Annotated[
+    Optional[str],
+    Field(description="Second side as WKT text.", default=None),
+]
+GeometryOverlayOp = Annotated[
+    Optional[str],
+    Field(
+        description=(
+            "Overlay sub-op when op='overlay': union | intersection | difference | xor | clip. "
+            "Omit 'b' for union to merge every part of the first input into one geometry."
+        ),
+        default=None,
+    ),
+]
+GeometryUnits = Annotated[
+    Optional[str],
+    Field(
+        description=(
+            "Distance unit: m | km | ft | mi. Unknown units are refused (never defaulted). "
+            "buffer input and measure output use it; distance/nearest echo it in the result."
+        ),
+        default=None,
+    ),
+]
+GeometryDistance = Annotated[
+    Optional[float],
+    Field(
+        description="buffer: distance in the chosen units (must be a positive finite number).",
+        default=None,
+    ),
+]
+GeometryMethod = Annotated[
+    Optional[str],
+    Field(
+        description=(
+            "Buffer method: planar (default; auto local UTM) or geodesic (not available in v1 — "
+            "refused with a code)."
+        ),
+        default=None,
+    ),
+]
+GeometryWkid = Annotated[
+    Optional[int],
+    Field(
+        description=(
+            "Projected EPSG code for metric math (e.g. a UTM zone). Omitted/4326 = derive a local "
+            "UTM from the input; a projected code is honoured for buffer/simplify/measure/distance. "
+            "For project, wkid is the target CRS (output_wkid is accepted as an alias)."
+        ),
+        default=None,
+    ),
+]
+GeometrySegments = Annotated[
+    Optional[int],
+    Field(description="Buffer circle segments (8–256, default 64).", default=None),
+]
+GeometryDissolve = Annotated[
+    Optional[bool],
+    Field(description="Buffer: merge all buffered parts into one geometry (default true).", default=None),
+]
+GeometryGroupBy = Annotated[
+    Optional[List[str]],
+    Field(description="dissolve: feature property keys to group by (required).", default=None),
+]
+GeometryTolerance = Annotated[
+    Optional[float],
+    Field(description="simplify: Douglas–Peucker tolerance in metres (default 1).", default=None),
+]
+GeometryIterations = Annotated[
+    Optional[int],
+    Field(description="smooth: Chaikin passes (1–10, default 1).", default=None),
+]
+GeometryFormat = Annotated[
+    Optional[str],
+    Field(description="convert target: geojson | wkt (inferred from the input when omitted).", default=None),
+]
+GeometryOutputWkid = Annotated[
+    Optional[int],
+    Field(description="project: optional second transform for the output CRS.", default=None),
+]
+GeometryTypeName = Annotated[
+    Optional[str],
+    Field(
+        description="create: Point | LineString | Polygon | MultiPoint | MultiLineString | MultiPolygon.",
+        default=None,
+    ),
+]
+GeometryCoordinates = Annotated[
+    Optional[Any],
+    Field(description="create: GeoJSON coordinate array for the chosen geometry type.", default=None),
+]
+GeometryMaxVertices = Annotated[
+    Optional[int],
+    Field(description="describe: vertex-count cap (1–200000, default 10000).", default=None),
+]
+GeometryMerge = Annotated[
+    Optional[bool],
+    Field(description="convex_hull: merge the whole collection into one hull (default true).", default=None),
+]
+
+# --- Local map data service (slice 033, Lane A) ---
+
+MapTitle = Annotated[
+    Optional[str],
+    Field(description="Map title shown in the manifest (default 'Geopack map').", default=None),
+]
+MapLayers = Annotated[
+    Optional[List[Dict[str, Any]]],
+    Field(
+        description=(
+            "Layers to declare, each an object with a 'kind' (or an inferred one): "
+            "portal-dataset {datasetId, query?}, portal-publication {publicationId}, "
+            "local-file {path under GEOPACK_MCP_MAP_ROOT}, or inline-geometry {geojson}. "
+            "Optional id/title/style/bbox. Every layer gets a stable dataUrl; portal layers "
+            "also get a tileUrl."
+        ),
+        default=None,
+    ),
+]
+MapIdArg = Annotated[
+    Optional[str],
+    Field(description="Existing map id to update instead of creating a new map.", default=None),
+]
+OpenBrowser = Annotated[
+    bool,
+    Field(
+        description=(
+            "Currently a no-op: the built-in viewer (Lane B) is not shipped, so `show_map` returns "
+            "browserOpened:false and a note. The URLs are always returned for your own page."
+        ),
+    ),
+]
+BasemapName = Annotated[
+    Optional[str],
+    Field(description="Recorded basemap preference (e.g. 'osm' or 'blank') for a future viewer.", default=None),
+]
+
 # --- Return types (geocode only) ---
 
 GeocodeResult = Union[Dict[str, Any], List[Dict[str, Any]]]

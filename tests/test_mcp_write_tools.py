@@ -258,9 +258,19 @@ class PolicyRegistryTest(unittest.TestCase):
         overlap = set(payload["readOnlyTools"]) & set(payload["mutatingTools"])
         self.assertEqual(overlap, set())
         self.assertEqual(
-            len(payload["readOnlyTools"]) + len(payload["mutatingTools"]),
+            len(payload["readOnlyTools"])
+            + len(payload["mutatingTools"])
+            + len(payload["hostServices"]),
             len(self.tools),
         )
+
+    def test_show_map_is_a_host_service_not_a_read(self):
+        payload = build_policy_payload(None)
+
+        self.assertEqual(payload["hostServices"], ["geopack_sdk_show_map"])
+        self.assertNotIn("geopack_sdk_show_map", payload["readOnlyTools"])
+        self.assertFalse(TOOL_POLICY["geopack_sdk_show_map"]["mutating"])
+        self.assertNotIn("geopack_sdk_show_map", payload["localWrites"])
 
     def test_upload_limits_come_from_the_server(self):
         client = MagicMock()

@@ -62,7 +62,11 @@ class AnnotationSurfaceTest(unittest.TestCase):
     def test_the_hints_agree_with_the_policy_registry(self):
         for name, tool in self.tools.items():
             entry = TOOL_POLICY[name]
-            read_only = not entry["mutating"] and not entry.get("localWrites")
+            read_only = (
+                not entry["mutating"]
+                and not entry.get("localWrites")
+                and not entry.get("hostServices")
+            )
             annotations = tool.annotations
             self.assertEqual(annotations.readOnlyHint, read_only, name)
             # A read that mints a new artifact (export) is not idempotent.

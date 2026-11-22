@@ -360,17 +360,39 @@ def tool_error_payload(exc: BaseException) -> Dict[str, Any]:
             "message": exc.message,
         }
     else:
-        # Never echo an absolute host path (an OSError message embeds one).
-        if isinstance(exc, OSError):
-            message = f"{type(exc).__name__}: {exc.strerror or 'local file operation failed'}"
+        # Local coded refusals (slice 033: geometry/map service) carry their own
+        # ``code``/``message``/``hint``/``invalid_args``/extra fields. They are not
+        # SDK API errors and never touched the portal.
+        local_code = getattr(exc, "code", None)
+        if (
+            isinstance(local_code, str)
+            and local_code
+            and isinstance(getattr(exc, "message", None), str)
+        ):
+            payload = {
+                "error": True,
+                "type": type(exc).__name__,
+                "code": local_code,
+                "message": exc.message,
+            }
+            invalid = getattr(exc, "invalid_args", None)
+            if invalid:
+                payload["invalidArgs"] = [str(name) for name in invalid]
+            extra = getattr(exc, "extra", None)
+            if isinstance(extra, dict):
+                payload.update(extra)
         else:
-            message = str(exc)
-        payload = {
-            "error": True,
-            "type": type(exc).__name__,
-            "code": "UNKNOWN_ERROR",
-            "message": message,
-        }
+            # Never echo an absolute host path (an OSError message embeds one).
+            if isinstance(exc, OSError):
+                message = f"{type(exc).__name__}: {exc.strerror or 'local file operation failed'}"
+            else:
+                message = str(exc)
+            payload = {
+                "error": True,
+                "type": type(exc).__name__,
+                "code": "UNKNOWN_ERROR",
+                "message": message,
+            }
 
     hint = _hint_for(exc)
     if hint:

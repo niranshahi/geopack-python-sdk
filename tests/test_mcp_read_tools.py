@@ -82,6 +82,8 @@ EXPECTED_TOOL_NAMES = {
     "geopack_sdk_get_analysis_result",
     "geopack_sdk_submit_edit_document",
     "geopack_sdk_cancel_task",
+    "geopack_sdk_show_map",
+    "geopack_sdk_geometry_op",
 }
 
 #: The seven tools slice 020 added (021 added two more, 031 one).
@@ -780,8 +782,8 @@ class ToolSurfaceTest(unittest.TestCase):
 
         cls.tools = {tool.name: tool for tool in mcp._tool_manager.list_tools()}  # noqa: SLF001
 
-    def test_surface_is_twenty_nine_tools(self):
-        self.assertEqual(len(self.tools), 29)
+    def test_surface_is_thirty_one_tools(self):
+        self.assertEqual(len(self.tools), 31)
         self.assertEqual(set(self.tools), EXPECTED_TOOL_NAMES)
 
     def test_no_tool_name_collides(self):

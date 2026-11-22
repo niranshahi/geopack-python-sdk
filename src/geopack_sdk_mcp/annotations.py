@@ -60,6 +60,8 @@ TITLES: Dict[str, str] = {
     "geopack_sdk_run_analysis": "Run an analysis tool",
     "geopack_sdk_get_analysis_result": "Get an analysis result",
     "geopack_sdk_submit_edit_document": "Submit an edit document",
+    "geopack_sdk_show_map": "Show a local map data service",
+    "geopack_sdk_geometry_op": "Run a local geometry op",
 }
 
 OPEN_WORLD_TOOLS = frozenset(
@@ -109,4 +111,15 @@ def mutating_tool(name: str) -> ToolAnnotations:
         destructiveHint=name in DESTRUCTIVE_TOOLS,
         idempotentHint=False,
         openWorldHint=name in OPEN_WORLD_TOOLS,
+    )
+
+
+def host_service_tool(name: str) -> ToolAnnotations:
+    """Starts a localhost-only host service; writes no portal data and no file."""
+    return ToolAnnotations(
+        title=_title(name),
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=False,
     )

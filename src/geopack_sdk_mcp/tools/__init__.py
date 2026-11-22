@@ -12,6 +12,8 @@ def register_all_tools(mcp: Any) -> None:
         edits,
         generated_files,
         geocoding,
+        geometry,
+        maps,
         policy,
         quotas,
         tasks,
@@ -29,3 +31,5 @@ def register_all_tools(mcp: Any) -> None:
     generated_files.register(mcp)
     quotas.register(mcp)
     edits.register(mcp)
+    maps.register(mcp)
+    geometry.register(mcp)
