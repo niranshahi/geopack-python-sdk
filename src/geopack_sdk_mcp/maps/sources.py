@@ -11,12 +11,18 @@ Two families:
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse, urlsplit, urlunsplit
 
 from .errors import SERVICE_ERROR, MapServiceError
+from ..crs_utils import (
+    WGS84 as _WGS84,
+    coerce_mapping,
+    honor_output_srid,
+    looks_wgs84,
+    srid_from_dataset,
+)
 from ..serialize import to_jsonable
 
 #: Local file extensions the service may serve.
@@ -107,8 +113,10 @@ def query_dataset_geojson(
     ``out_srid`` defaults to **4326** so the browser gets WGS84 geometry. The
     portal stores many datasets in a projected/native CRS (e.g. Iran Lambert,
     metres); without this the viewer would plot projection-metre numbers as
-    lon/lat and show nothing.
+    lon/lat and show nothing. If the portal ignores the request, the answer is
+    repaired locally (:func:`_repair_to_wgs84`).
     """
+    effective_out = out_srid
     try:
         if query:
             dsl = dict(query)
@@ -116,6 +124,10 @@ def query_dataset_geojson(
             if out_srid is not None:
                 projection.setdefault("outSRID", int(out_srid))
             dsl["projection"] = projection
+            # An explicit ``projection.outSRID`` wins (both here and at the portal),
+            # so repair against what was really asked for, not the outer default.
+            if projection.get("outSRID") is not None:
+                effective_out = projection.get("outSRID")
             result = client.datasets.query(dataset_id, dsl)
         else:
             result = client.datasets.query(dataset_id, limit=limit, out_srid=out_srid)
@@ -125,7 +137,41 @@ def query_dataset_geojson(
         raise MapServiceError(
             SERVICE_ERROR, _safe_message(exc), key="dataset_id"
         ) from exc
-    return _as_geojson(result)
+    return _repair_to_wgs84(client, dataset_id, _as_geojson(result), effective_out)
+
+
+def _repair_to_wgs84(
+    client: Any, dataset_id: int, geojson: Dict[str, Any], out_srid: Optional[int]
+) -> Dict[str, Any]:
+    """Repair a portal answer that ignored ``outSRID=4326`` (viewer needs lon/lat).
+
+    The viewer plots coordinates directly, so a projected answer renders nowhere.
+    When the first position is decisively non-lon/lat and the dataset's own SRID is
+    known, the FeatureCollection is reprojected locally; otherwise it is returned
+    unchanged (the same behaviour as before this safety net).
+    """
+    if out_srid is None:
+        return geojson
+    try:
+        if int(out_srid) != _WGS84:
+            return geojson
+    except (TypeError, ValueError):
+        return geojson
+    if looks_wgs84(geojson) is not False:
+        return geojson
+    outcome = honor_output_srid(
+        geojson,
+        target_srid=_WGS84,
+        source_srid=srid_from_dataset(_safe_dataset_raw(client, dataset_id)),
+    )
+    return outcome.feature_collection
+
+
+def _safe_dataset_raw(client: Any, dataset_id: int) -> Any:
+    try:
+        return to_jsonable(client.datasets.get(dataset_id))
+    except Exception:  # noqa: BLE001 - the layer still renders without the SRID
+        return None
 
 
 def valid_wgs84_bbox(value: Any) -> Optional[List[float]]:
@@ -148,21 +194,13 @@ def valid_wgs84_bbox(value: Any) -> Optional[List[float]]:
 
 
 def _as_details(value: Any) -> Dict[str, Any]:
-    """Coerce ``details`` to a dict.
+    """Coerce ``details`` to a dict (see :func:`crs_utils.coerce_mapping`).
 
     The portal answers ``details`` as a JSON **string** for most datasets (only
     some come back as an object), so a dict-only read silently found no extent —
     the reason a projected dataset produced no ``bbox`` (live-QA 2026-11-22).
     """
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = json.loads(value)
-        except ValueError:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
+    return coerce_mapping(value)
 
 
 def dataset_info(client: Any, dataset_id: int) -> Dict[str, Any]:
@@ -199,15 +237,9 @@ def dataset_info(client: Any, dataset_id: int) -> Dict[str, Any]:
     if extent is not None:
         info["extent"] = extent
 
-    spatial = details.get("spatialReference")
-    if isinstance(spatial, dict):
-        sr_id = spatial.get("srid") or spatial.get("wkid") or spatial.get("latestWkid")
-        if sr_id is not None:
-            info["srid"] = sr_id
-    elif details.get("srid") is not None:
-        info["srid"] = details.get("srid")
-    if "srid" not in info and raw.get("srid") is not None:
-        info["srid"] = raw.get("srid")
+    srid = srid_from_dataset(raw)
+    if srid is not None:
+        info["srid"] = srid
     return info
 
 

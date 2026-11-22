@@ -3,6 +3,30 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.4 — 2026-11-22
+
+Client-side CRS verification (slice 033 robustness). A fifth live-QA report showed
+the portal can silently ignore `out_srid`/`outSRID=4326` and return native
+projected coordinates while the payload still claims the requested CRS. The
+dataset and map lanes now **verify** the answer and **repair** it locally. No new
+tool (31); `pyproj` is an optional, lazily-imported extra.
+
+### Fixed
+
+- **The output CRS is now verified, not assumed.** `query_dataset` reads
+  `outSridApplied` from the CRS **actually in the payload**: if the first position
+  is decisively non-lon/lat (projected metres) and the dataset's own SRID is known,
+  the geometry is reprojected to EPSG:4326 locally with `pyproj` and the repair is
+  reported in `crsNote`; if it cannot be repaired (unknown source CRS, or `pyproj`
+  absent), `crsNote` says so and `outSridApplied` is omitted — metre coordinates
+  are never echoed as WGS84. The map lane (`show_map`'s `portal-dataset` layers)
+  performs the same repair so a projected dataset still renders in the viewer.
+- **New module `geopack_sdk_mcp/crs_utils.py`** — `parse_epsg`, `srid_from_dataset`,
+  `looks_wgs84`, `reproject_feature_collection`, `honor_output_srid`. It sits
+  outside `geometry/` and imports `pyproj` lazily, so the map/dataset lanes keep
+  working where the optional geometry extras are absent (degrade to the `crsNote`
+  warning, never a crash). `dataset_info` now shares `srid_from_dataset`.
+
 ## 0.12.3 — 2026-11-22
 
 Fourth live-QA round (slice 033). `query_dataset` now answers in WGS84 by

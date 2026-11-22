@@ -2,7 +2,7 @@
 
 A standalone Python library to interact with the Geopack Geoportal API.
 
-Current release: **0.12.3** — see [CHANGELOG.md](CHANGELOG.md).
+Current release: **0.12.4** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Naming
 

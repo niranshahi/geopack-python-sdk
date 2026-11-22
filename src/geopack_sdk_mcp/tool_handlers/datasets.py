@@ -19,6 +19,7 @@ from geopack_sdk.exceptions import (
 )
 
 from ..bbox import normalize_bbox
+from ..crs_utils import dataset_srid, honor_output_srid, looks_wgs84
 from ..errors import ToolArgumentError
 from ..resource_handlers.datasets import fetch_dataset_thumbnail
 from ..sanitize.dataset_details import (
@@ -165,36 +166,6 @@ def get_dataset(
     )
 
 
-def _first_position(geometry: Any) -> Optional[tuple]:
-    """The first ``(x, y)`` of a GeoJSON geometry (nested coordinates unwrapped)."""
-    if not isinstance(geometry, dict):
-        return None
-    coords = geometry.get("coordinates")
-    while isinstance(coords, list) and coords and isinstance(coords[0], list):
-        coords = coords[0]
-    if (
-        isinstance(coords, list)
-        and len(coords) >= 2
-        and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in coords[:2])
-    ):
-        return coords[0], coords[1]
-    return None
-
-
-def _geometry_looks_wgs84(payload: Dict[str, Any]) -> Optional[bool]:
-    """``True``/``False`` for the first feature's position, or ``None`` if unknown."""
-    features = payload.get("features")
-    if not isinstance(features, list):
-        return None
-    for feature in features:
-        if isinstance(feature, dict):
-            position = _first_position(feature.get("geometry"))
-            if position is not None:
-                x, y = position
-                return abs(x) <= 180 and abs(y) <= 90
-    return None
-
-
 def query_dataset(
     client: GeopackClient,
     dataset_id: int,
@@ -210,6 +181,12 @@ def query_dataset(
     Output geometry defaults to **EPSG:4326** (map-friendly lon/lat): a dataset
     stored in a projected/native CRS otherwise returns metre coordinates that a
     WGS84 client plots nowhere. ``out_srid`` overrides the target.
+
+    The answer is **verified**: if the portal silently ignores ``out_srid=4326``
+    and returns projected metres, the geometry is reprojected locally (when the
+    dataset's own SRID is known) and ``outSridApplied`` reports the CRS actually
+    in the payload; when it cannot be repaired, a ``crsNote`` says so — the output
+    is never passed off as WGS84 when it is not.
     """
     effective_srid = 4326 if out_srid is None else out_srid
     if query is None:
@@ -243,15 +220,24 @@ def query_dataset(
     payload = trim_feature_collection_for_mcp(to_jsonable(result))
     payload["queryLimitApplied"] = effective_limit
     if return_geometry:
-        payload["outSridApplied"] = int(effective_srid)
-        # Belt-and-suspenders: if the portal could not reproject, say so loudly
-        # instead of letting metre coordinates masquerade as lon/lat.
-        if int(effective_srid) == 4326 and _geometry_looks_wgs84(payload) is False:
-            payload["crsNote"] = (
-                "Geometry coordinates still look projected (not EPSG:4326 lon/lat) after "
-                "requesting out_srid=4326 — the portal could not reproject this dataset. "
-                "Use a portal-publication (WMS) layer, or query the source in its own CRS."
-            )
+        target = int(effective_srid)
+        # Only spend an extra metadata round trip when the answer actually looks
+        # wrong: `looks_wgs84` is False only when a position is decisive non-lon/lat.
+        source_srid = (
+            dataset_srid(client, dataset_id)
+            if target == 4326 and looks_wgs84(payload) is False
+            else None
+        )
+        outcome = honor_output_srid(
+            payload, target_srid=target, source_srid=source_srid
+        )
+        payload = outcome.feature_collection
+        # `outSridApplied` must name the CRS ACTUALLY in the payload, not the one we
+        # asked for: a portal that ignored out_srid must not be echoed as honoured.
+        if outcome.applied_srid is not None:
+            payload["outSridApplied"] = outcome.applied_srid
+        if outcome.note:
+            payload["crsNote"] = outcome.note
     return payload
 
 

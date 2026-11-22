@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from geopack_sdk_mcp.maps import reset_for_tests
 from geopack_sdk_mcp.maps.errors import MapServiceError
+from geopack_sdk_mcp.maps.sources import query_dataset_geojson
 from geopack_sdk_mcp.tool_handlers.geometry import geometry_op
 from geopack_sdk_mcp.tool_handlers.maps import show_map
 
@@ -39,15 +40,19 @@ class _Session:
 
 
 class _Datasets:
-    def __init__(self, details=None, data_type="vector", extra=None):
+    def __init__(self, details=None, data_type="vector", extra=None, feature_collection=None):
         self.calls = []
         self._details = details if details is not None else {}
         self._data_type = data_type
         self._extra = extra or {}
+        self._feature_collection = feature_collection or {
+            "type": "FeatureCollection",
+            "features": [],
+        }
 
     def query(self, dataset_id, *args, **kwargs):
         self.calls.append({"dataset_id": dataset_id, "args": args, "kwargs": kwargs})
-        return {"type": "FeatureCollection", "features": []}
+        return self._feature_collection
 
     def get(self, dataset_id):
         record = {"id": dataset_id, "dataType": self._data_type, "details": self._details}
@@ -75,10 +80,15 @@ class _WrappedPublications:
 class _Client:
     base_url = PORTAL
 
-    def __init__(self, publication_ids=(60,), details=None, data_type="vector", extra=None):
+    def __init__(self, publication_ids=(60,), details=None, data_type="vector", extra=None, feature_collection=None):
         self.auth = _Auth()
         self.session = _Session()
-        self.datasets = _Datasets(details=details, data_type=data_type, extra=extra)
+        self.datasets = _Datasets(
+            details=details,
+            data_type=data_type,
+            extra=extra,
+            feature_collection=feature_collection,
+        )
         self.publications = _Publications(publication_ids)
 
 
@@ -279,6 +289,29 @@ class ShowMapTest(unittest.TestCase):
 
         self.assertTrue(client.datasets.calls)
         self.assertEqual(client.datasets.calls[-1]["kwargs"].get("out_srid"), 4326)
+
+    def test_a_projected_portal_answer_is_repaired_for_the_viewer(self):
+        # The portal ignored outSRID and returned native metres; the viewer plots
+        # coordinates directly, so the map lane must repair to lon/lat.
+        client = _Client(
+            details={"spatialReference": {"srid": 32640}},
+            feature_collection={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {},
+                        "geometry": {"type": "Point", "coordinates": [500000.0, 4000000.0]},
+                    }
+                ],
+            },
+        )
+
+        fc = query_dataset_geojson(client, 2436)
+
+        x, y = fc["features"][0]["geometry"]["coordinates"]
+        self.assertLessEqual(abs(x), 180)
+        self.assertLessEqual(abs(y), 90)
 
     def test_string_details_extent_is_read_for_a_projected_dataset(self):
         # The portal answers `details` as a JSON string for most datasets; a

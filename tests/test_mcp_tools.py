@@ -251,6 +251,29 @@ class TestMcpToolHandlers(unittest.TestCase):
         dsl = self.client.datasets.query.call_args.args[1]
         self.assertEqual(dsl["projection"]["outSRID"], 4326)
 
+    def test_query_dataset_repairs_a_ignored_out_srid_locally(self):
+        # The portal ignored out_srid=4326 and returned native metres; the dataset
+        # declares a UTM SRID, so the handler reprojects and reports the real CRS.
+        self.client.datasets.query.return_value = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {},
+                    "geometry": {"type": "Point", "coordinates": [500000.0, 4000000.0]},
+                }
+            ],
+        }
+        self.client.datasets.get.return_value = {"id": 2436, "details": {"spatialReference": {"srid": 32640}}}
+
+        result = query_dataset(self.client, 2436, limit=1)
+
+        self.assertEqual(result["outSridApplied"], 4326)
+        self.assertIn("reprojected", result.get("crsNote", ""))
+        x, y = result["features"][0]["geometry"]["coordinates"]
+        self.assertLessEqual(abs(x), 180)
+        self.assertLessEqual(abs(y), 90)
+
 
 if __name__ == "__main__":
     unittest.main()
