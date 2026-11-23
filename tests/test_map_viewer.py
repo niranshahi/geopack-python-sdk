@@ -188,6 +188,16 @@ class RenderHtmlTest(unittest.TestCase):
         self.assertIsInstance(palette, list)
         self.assertGreaterEqual(len(palette), 2)
 
+    def test_large_geojson_layers_show_download_progress_in_the_legend(self):
+        # A whole-dataset (limit:0) GeoJSON can be tens of MB; the viewer streams
+        # it and shows a byte/percentage bar in the legend so it never looks frozen.
+        html = viewer.default_viewer_html()
+        self.assertIn("gpLoadUrl", html)
+        self.assertIn("loadPendingVectors", html)
+        self.assertIn("streamGeojson", html)
+        self.assertIn("gp-prog-", html)
+        self.assertIn("Content-Length", html)
+
 
 class ViewerHtmlTest(unittest.TestCase):
     def test_default_source_when_no_user_page(self):

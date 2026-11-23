@@ -3,6 +3,21 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.6 — 2026-11-23
+
+Viewer download progress (slice 033, Lane B follow-up). A whole-dataset GeoJSON
+(`limit:0`) can be tens of MB and, with the default OpenLayers url loader, the
+viewer looked frozen until it finished (owner report on dataset 1577). No new
+tool (31), no new dependency.
+
+### Added
+
+- **Per-layer download progress in the viewer legend** — a `geojson` layer is now
+  streamed by the page (`fetch` + `ReadableStream`), so its legend row shows a
+  spinner, then a byte/percentage bar from `Content-Length`, until the feature
+  collection is on the map. The layer list/legend behaviour is unchanged
+  otherwise; MVT/WMS/WMTS/XYZ layers keep their built-in loaders.
+
 ## 0.12.5 — 2026-11-23
 
 Dataset saved-symbology disclosure (slice 033 Phase 1). An agent could not tell

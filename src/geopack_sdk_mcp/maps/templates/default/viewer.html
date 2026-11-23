@@ -34,6 +34,13 @@ __CSS_VARS__
   #legend .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.3); }
   #legend .swatch.raster { background: repeating-linear-gradient(45deg, #8a9a93, #8a9a93 3px, #cfd8d4 3px, #cfd8d4 6px); }
   #panel .gp-empty { opacity: .6; font-style: italic; }
+  #legend .item .progress { margin-left: auto; font-size: 10px; opacity: .8; white-space: nowrap; }
+  #legend .item .progress .bar { display: inline-block; width: 46px; height: 6px; border-radius: 3px;
+    background: rgba(0,0,0,.12); overflow: hidden; vertical-align: middle; margin-right: 4px; }
+  #legend .item .progress .bar i { display: block; height: 100%; width: 0; background: var(--gp-accent); transition: width .15s linear; }
+  #legend .item .progress .spin { display: inline-block; width: 10px; height: 10px; border: 2px solid rgba(0,0,0,.15);
+    border-top-color: var(--gp-accent); border-radius: 50%; animation: gp-spin .8s linear infinite; vertical-align: middle; }
+  @keyframes gp-spin { to { transform: rotate(360deg); } }
   footer { background: #f4f6f5; color: #4b5b54; padding: 5px 14px; font-size: 11px; }
   #banner { position: absolute; left: 10px; top: 10px; z-index: 5; max-width: 60%;
     background: #b3261e; color: #fff; padding: 6px 10px; border-radius: 6px; display: none; }
@@ -142,8 +149,11 @@ function buildLayer(spec, index) {
   const resolved = resolveStyle(spec, index);
   let source, layer;
   if (render === 'geojson') {
-    source = new ol.source.Vector({ url: withToken(spec.dataUrl), format: new ol.format.GeoJSON() });
+    // The source is left empty here; the GeoJSON is streamed by loadGeojsonLayer
+    // so the legend can show real download progress for large datasets.
+    source = new ol.source.Vector();
     layer = new ol.layer.Vector({ source: source, style: vectorStyle(resolved) });
+    layer.set('gpLoadUrl', spec.dataUrl);
   } else if (render === 'mvt') {
     source = new ol.source.VectorTile({ format: new ol.format.MVT(), url: withToken(spec.tileUrl) });
     layer = new ol.layer.VectorTile({ source: source, style: vectorStyle(resolved) });
@@ -157,8 +167,9 @@ function buildLayer(spec, index) {
     source = new ol.source.XYZ({ url: spec.xyzUrl, tileLoadFunction: xyzTileLoad });
     layer = new ol.layer.Tile({ source: source });
   } else {
-    source = new ol.source.Vector({ url: withToken(spec.dataUrl), format: new ol.format.GeoJSON() });
+    source = new ol.source.Vector();
     layer = new ol.layer.Vector({ source: source, style: vectorStyle(resolved) });
+    layer.set('gpLoadUrl', spec.dataUrl);
   }
   layer.set('title', spec.title || spec.id);
   layer.set('gpId', spec.id);
@@ -182,6 +193,77 @@ async function wfsLayer(spec, index) {
   layer.set('gpStyle', resolveStyle(spec, index));
   layer.set('gpRaster', false);
   return layer;
+}
+
+// A large GeoJSON layer (a "whole dataset" `limit:0` can be tens of MB) otherwise
+// looks frozen while it downloads. These helpers stream the body so the legend
+// shows a byte/percentage progress bar until the layer is on the map.
+function progressEl(id) { return document.getElementById('gp-prog-' + id); }
+
+function setProgress(id, received, total) {
+  const el = progressEl(id);
+  if (!el) return;
+  const mb = function (n) { return (n / 1048576).toFixed(1); };
+  if (total > 0) {
+    const pct = Math.min(100, Math.round((received / total) * 100));
+    el.innerHTML = '<span class="bar"><i style="width:' + pct + '%"></i></span>' +
+      mb(received) + '/' + mb(total) + ' MB (' + pct + '%)';
+  } else {
+    el.innerHTML = '<span class="spin"></span>' + mb(received) + ' MB';
+  }
+}
+
+function clearProgress(id) {
+  const el = progressEl(id);
+  if (el) el.remove();
+}
+
+async function streamGeojson(url, onProgress) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('data HTTP ' + response.status);
+  const total = Number(response.headers.get('Content-Length') || 0);
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const geo = await response.json();
+    if (onProgress) onProgress(total, total);
+    return geo;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  for (;;) {
+    const step = await reader.read();
+    if (step.done) break;
+    chunks.push(step.value);
+    received += step.value.length;
+    if (onProgress) onProgress(received, total);
+  }
+  return JSON.parse(await new Blob(chunks).text());
+}
+
+async function loadGeojsonLayer(layer, map) {
+  const id = layer.get('gpId');
+  const url = layer.get('gpLoadUrl');
+  if (!url) return;
+  try {
+    const geo = await streamGeojson(withToken(url), function (received, total) {
+      setProgress(id, received, total);
+    });
+    const features = new ol.format.GeoJSON().readFeatures(geo, { featureProjection: 'EPSG:3857' });
+    layer.getSource().addFeatures(features);
+    clearProgress(id);
+    if (TEMPLATE.view && TEMPLATE.view.mode === 'fit' && features.length) {
+      try { map.getView().fit(layer.getSource().getExtent(), { padding: [40, 40, 40, 40], maxZoom: 17 }); } catch (e) {}
+    }
+  } catch (err) {
+    clearProgress(id);
+    banner('Layer "' + (layer.get('title') || id) + '" failed: ' + err.message);
+  }
+}
+
+function loadPendingVectors(map, dataLayers) {
+  dataLayers.forEach(function (layer) {
+    if (layer.get('gpLoadUrl')) { loadGeojsonLayer(layer, map); }
+  });
 }
 
 function renderPanel(map, baseLayers, dataLayers) {
@@ -257,6 +339,7 @@ function renderPanel(map, baseLayers, dataLayers) {
       const swatch = document.createElement('span');
       swatch.className = 'swatch';
       const label = document.createElement('span');
+      label.style.flex = '1';
       if (isRasterRender(render) || layer.get('gpRaster')) {
         // An image layer (or a raster dataset) has no meaningful client colour;
         // show a raster swatch, not a fake vector fill.
@@ -268,6 +351,13 @@ function renderPanel(map, baseLayers, dataLayers) {
         label.textContent = layer.get('title');
       }
       item.appendChild(swatch); item.appendChild(label);
+      if (layer.get('gpLoadUrl')) {
+        const prog = document.createElement('span');
+        prog.className = 'progress';
+        prog.id = 'gp-prog-' + layer.get('gpId');
+        prog.innerHTML = '<span class="spin"></span>';
+        item.appendChild(prog);
+      }
       legendEl.appendChild(item);
     });
   }
@@ -340,18 +430,14 @@ async function main() {
     if (box) {
       ol.extent.extend(extent, ol.proj.transformExtent(box, 'EPSG:4326', 'EPSG:3857'));
     }
-    const source = layer.getSource && layer.getSource();
-    if (source && source.on) {
-      source.on('featuresloadend', function () {
-        if (TEMPLATE.view && TEMPLATE.view.mode === 'fit') { try { map.getView().fit(source.getExtent(), { padding: [40, 40, 40, 40], maxZoom: 17 }); } catch (e) {} }
-      });
-    }
   }
 
   if (TEMPLATE.view && TEMPLATE.view.mode === 'fit' && !ol.extent.isEmpty(extent)) {
     map.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 17 });
   }
   renderPanel(map, baseLayers, dataLayers);
+  // GeoJSON layers stream AFTER the panel exists so their legend shows progress.
+  loadPendingVectors(map, dataLayers);
 }
 
 main();
