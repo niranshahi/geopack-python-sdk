@@ -637,7 +637,12 @@ MapLayers = Annotated[
             "be recoloured (use render 'wfs' for a client-styled vector layer). Layers without an "
             "explicit fill rotate through the template `layerPalette`, so several layers stay "
             "distinguishable. The manifest additionally marks a raster source with `raster: true` "
-            "(the legend then shows a raster swatch)."
+            "(the legend then shows a raster swatch). An `inline-geometry` layer accepts a bare "
+            "geometry, a Feature, or a FeatureCollection. Use the reserved `properties.__style__` key "
+            "(NOT `style`) to style one feature on top of the layer style: "
+            "`__style__` = {fill,stroke,weight,radius,opacity}. It is never mistaken for a normal "
+            "attribute and is hidden from the identify popup, so the agent can draw any geometry "
+            "with embedded styling."
         ),
         default=None,
     ),
@@ -686,6 +691,28 @@ MapStyle = Annotated[
             "Per-call default layer style shorthand: {fill, stroke, weight, opacity, radius}. "
             "Merged into the template's layerStyle and applies to VECTOR layers only (a WMS/WMTS "
             "image is server-rendered and ignores it)."
+        ),
+        default=None,
+    ),
+]
+
+MapCenter = Annotated[
+    Optional[List[float]],
+    Field(
+        description=(
+            "Point the map at a location: [lon, lat] in EPSG:4326. Sugar for "
+            "`template.view.center`; also sets `view.mode='center'` (unless a mode was given) so "
+            "the view stays on the point instead of auto-fitting the layer extents."
+        ),
+        default=None,
+    ),
+]
+MapZoom = Annotated[
+    Optional[int],
+    Field(
+        description=(
+            "Initial zoom level (0-24). Sugar for `template.view.zoom`; also sets "
+            "`view.mode='center'` (unless a mode was given)."
         ),
         default=None,
     ),

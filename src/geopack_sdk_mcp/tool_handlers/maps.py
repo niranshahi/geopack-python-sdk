@@ -112,6 +112,20 @@ def _bboxes_overlap(a: Any, b: Any) -> bool:
     return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
 
 
+def _valid_lonlat(value: Any) -> Optional[List[float]]:
+    """``[lon, lat]`` in EPSG:4326, or ``None`` when implausible."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    try:
+        lon = float(value[0])
+        lat = float(value[1])
+    except (TypeError, ValueError):
+        return None
+    if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+        return None
+    return [lon, lat]
+
+
 def _resolve_caller_symbology(
     client: Any, layer: Any, warnings: List[str], field_meta: Optional[Dict[str, Any]] = None
 ) -> None:
@@ -393,6 +407,8 @@ def show_map(
     basemap: Optional[str] = None,
     template: Optional[Dict[str, Any]] = None,
     style: Optional[Dict[str, Any]] = None,
+    center: Optional[List[float]] = None,
+    zoom: Optional[int] = None,
 ) -> Dict[str, Any]:
     service = get_or_start_service(client)
 
@@ -405,11 +421,38 @@ def show_map(
         manifest.title = title
 
     per_call: Dict[str, Any] = dict(template) if isinstance(template, dict) else {}
+
+    # `center`/`zoom` are sugar for `template.view.*`: pointing the map at a place
+    # also switches the mode to 'center' so auto-fit does not move it away.
+    view_warnings: List[str] = []
+    view = dict(per_call["view"]) if isinstance(per_call.get("view"), dict) else {}
+    if center is not None:
+        point = _valid_lonlat(center)
+        if point is None:
+            view_warnings.append("center must be [lon, lat] in EPSG:4326; ignored.")
+        else:
+            view["center"] = point
+            view.setdefault("mode", "center")
+    if zoom is not None:
+        level: Optional[int] = None
+        if isinstance(zoom, int) and not isinstance(zoom, bool):
+            level = zoom
+        elif isinstance(zoom, str) and zoom.strip().isdigit():
+            level = int(zoom.strip())
+        if level is None or level < 0 or level > 24:
+            view_warnings.append("zoom must be an integer 0-24; ignored.")
+        else:
+            view["zoom"] = level
+            view.setdefault("mode", "center")
+    if view:
+        per_call["view"] = view
+
     if style and isinstance(style, dict):
         per_call["layerStyle"] = {**(per_call.get("layerStyle") or {}), **style}
     if basemap is not None:
         per_call["basemap"] = basemap
     template_obj, warnings, source = viewer.load_template(service.templates_dir, per_call)
+    warnings = view_warnings + warnings
     manifest.options = template_obj
     _, viewer_source, viewer_warnings = viewer.load_viewer_html(service.templates_dir)
 

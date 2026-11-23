@@ -592,6 +592,20 @@ class ShowMapTest(unittest.TestCase):
         payload = show_map(_Client(), layers=[{"kind": "portal-publication", "publicationId": 60}])
         self.assertNotIn("identifyWmsLayers", payload["layers"][0])
 
+    def test_center_and_zoom_point_the_view_and_skip_autofit(self):
+        # `center`/`zoom` are sugar for template.view and switch the mode to
+        # 'center' so the viewer does not auto-fit away from the requested point.
+        payload = show_map(_Client(), center=[59.26, 36.48], zoom=14)
+        view = payload["options"]["view"]
+        self.assertEqual(view["center"], [59.26, 36.48])
+        self.assertEqual(view["zoom"], 14)
+        self.assertEqual(view["mode"], "center")
+
+    def test_an_invalid_center_is_warned_and_ignored(self):
+        payload = show_map(_Client(), center=[999, 999])
+        self.assertTrue(any("center" in w for w in payload["templateWarnings"]))
+        self.assertNotEqual(payload["options"]["view"]["center"], [999, 999])
+
     def test_a_caller_symbology_shorthand_derives_class_breaks(self):
         payload = show_map(
             _Client(feature_collection=_sample_features()),

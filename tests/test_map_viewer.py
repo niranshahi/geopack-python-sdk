@@ -260,6 +260,7 @@ class RenderHtmlTest(unittest.TestCase):
         self.assertIn("<summary>", js)
         self.assertIn("row-top", js)
         self.assertIn("gp-name", js)
+        self.assertIn("dataLayers.slice().reverse()", js)
         self.assertIn("statusbar", js)
         self.assertIn("pointermove", js)
         self.assertIn('id="statusbar"', html)
@@ -274,6 +275,18 @@ class RenderHtmlTest(unittest.TestCase):
         self.assertIn("gpRasterBands", js)
         self.assertIn("getData", js)
         self.assertIn("no data", js)
+
+    def test_the_view_can_be_pointed_by_url_and_features_can_carry_style(self):
+        # A URL override (?center=lon,lat&zoom=N) points an existing map at a place
+        # and suppresses auto-fit; a GeoJSON feature's `properties.style` styles that
+        # feature; and a bare geometry is wrapped so OL can read it.
+        js = viewer.default_viewer_js()
+        self.assertIn("VIEW_OVERRIDE", js)
+        self.assertIn("URLSearchParams", js)
+        self.assertIn("makeVectorStyle", js)
+        self.assertIn("feature.get('__style__')", js)
+        self.assertIn("name === '__style__'", js)
+        self.assertIn("asFeatureCollection", js)
 
     def test_the_geotiff_bundle_is_loaded_for_cog_layers(self):
         # The legacy OpenLayers build does NOT embed geotiff.js; its GeoTIFF source

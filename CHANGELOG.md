@@ -3,6 +3,47 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.10 — 2026-11-23
+
+View-at-location and geometry-with-embedded-style (slice 033). Viewer lane +
+`show_map` sugar; no new tool (31), no new Python dependency.
+
+### Added
+
+- **`show_map(center=[lon, lat], zoom=N)`** — sugar for `template.view.*`; also sets
+  `view.mode='center'` (unless a mode was given) so the map stays on the point instead
+  of auto-fitting the layer extents. An implausible center or an out-of-range zoom
+  (0–24) is warned and ignored.
+- **Viewer URL view override** — an existing map can be pointed at a place without
+  recreating it: `?center=lon,lat&zoom=N` (or `?lon=&lat=&z=`); when present the
+  auto-fit is suppressed so the view stays put.
+- **Per-feature styling** via the reserved `properties.__style__` key
+  (`{fill,stroke,weight,radius,opacity}`) — styles one feature on top of the layer
+  style (per-value `Style` cache). `__style__` is never mistaken for a normal
+  attribute and is hidden from the identify popup.
+- **Bare geometries** — an `inline-geometry` layer may now carry a bare geometry
+  (Point/LineString/Polygon), a Feature, or a FeatureCollection; a bare geometry is
+  wrapped so OpenLayers can read it.
+
+### Changed
+
+- **Layer list and legend are reversed** so the top of the panel matches the map
+  stacking (the newest layer is drawn on top).
+
+### Verification
+
+- Full suite **784 tests** OK (was 781; +3 for center/zoom, invalid-center and
+  URL-override/per-feature-style).
+
+Touched files:
+- `src/geopack_sdk_mcp/maps/templates/default/viewer.js`
+- `src/geopack_sdk_mcp/tool_handlers/maps.py`
+- `src/geopack_sdk_mcp/tool_schema.py`
+- `src/geopack_sdk_mcp/tools/maps.py`
+- `tests/test_map_tools.py`
+- `tests/test_map_viewer.py`
+- `pyproject.toml`, `src/geopack_sdk/__init__.py`, `CHANGELOG.md`
+
 ## 0.12.9 — 2026-11-23
 
 Responsive viewer layout (slice 033). Viewer-only; no new tool (31), no new

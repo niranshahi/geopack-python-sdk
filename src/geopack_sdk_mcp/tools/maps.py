@@ -21,11 +21,13 @@ from ..errors import tool_error_result, tool_result
 from ..tool_handlers.maps import show_map
 from ..tool_schema import (
     BasemapName,
+    MapCenter,
     MapIdArg,
     MapLayers,
     MapStyle,
     MapTemplate,
     MapTitle,
+    MapZoom,
     OpenBrowser,
 )
 
@@ -62,6 +64,8 @@ def register(mcp: Any) -> None:
         basemap: BasemapName = None,
         template: MapTemplate = None,
         style: MapStyle = None,
+        center: MapCenter = None,
+        zoom: MapZoom = None,
     ) -> CallToolResult:
         try:
             client = get_client(ctx)
@@ -75,6 +79,8 @@ def register(mcp: Any) -> None:
                     basemap=basemap,
                     template=template,
                     style=style,
+                    center=center,
+                    zoom=zoom,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - the error contract renders it

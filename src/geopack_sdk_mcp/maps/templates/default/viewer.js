@@ -16,6 +16,32 @@ function hashToken() {
 }
 // The server embeds a VALID token into the shell; otherwise read ?t= then #t=.
 const TOKEN = TOKEN_EMBEDDED || queryToken() || hashToken();
+
+// Optional view override from the URL, so an agent (or a user) can point an
+// existing map at a place without recreating it: ?center=lon,lat&zoom=N (or
+// ?lon=&lat=&z=). When present the auto-fit is suppressed so the view stays put.
+const VIEW_OVERRIDE = (function () {
+  try {
+    const q = new URLSearchParams(location.search);
+    const out = {};
+    const center = q.get('center');
+    if (center) {
+      const parts = center.split(',').map(Number);
+      if (parts.length === 2 && isFinite(parts[0]) && isFinite(parts[1])) {
+        out.center = [parts[0], parts[1]];
+      }
+    }
+    const lat = q.get('lat');
+    const lon = q.get('lon') || q.get('lng');
+    if (lat !== null && lon !== null && isFinite(Number(lat)) && isFinite(Number(lon))) {
+      out.center = [Number(lon), Number(lat)];
+    }
+    const zoom = q.get('zoom') || q.get('z');
+    if (zoom !== null && isFinite(Number(zoom))) out.zoom = Number(zoom);
+    return out;
+  } catch (e) { return {}; }
+})();
+const VIEW_OVERRIDE_ACTIVE = !!VIEW_OVERRIDE.center || VIEW_OVERRIDE.zoom != null;
 function withToken(url) {
   if (!url) return url;
   if (/[?&]t=/.test(url)) return url;
@@ -93,6 +119,33 @@ function symbologyStyleFn(sym) {
   };
 }
 
+// A GeoJSON feature may carry its own `properties.style` ({fill,stroke,weight,
+// radius,opacity}); that styles it on top of the layer style. Styles are cached by
+// value so a FeatureCollection only builds one Style per distinct style object.
+function makeVectorStyle(baseStyle, sym) {
+  const staticStyle = vectorStyle(baseStyle);
+  const symFn = sym ? symbologyStyleFn(sym) : null;
+  const cache = {};
+  function perFeature(fs) {
+    const key = JSON.stringify(fs);
+    if (!cache[key]) {
+      cache[key] = vectorStyle(Object.assign({}, baseStyle, {
+        fill: fs.fill || baseStyle.fill,
+        stroke: fs.stroke || baseStyle.stroke,
+        weight: fs.weight != null ? fs.weight : baseStyle.weight,
+        radius: fs.radius != null ? fs.radius : baseStyle.radius,
+        opacity: fs.opacity != null ? fs.opacity : baseStyle.opacity
+      }));
+    }
+    return cache[key];
+  }
+  return function (feature, resolution) {
+    const fs = feature && feature.get ? feature.get('__style__') : null;
+    if (fs && typeof fs === 'object' && !Array.isArray(fs)) return perFeature(fs);
+    return symFn ? symFn(feature, resolution) : staticStyle;
+  };
+}
+
 // WMS/WMTS/XYZ are images rendered elsewhere: a per-layer `style` cannot recolour
 // them, and the legend must show a raster swatch rather than a vector colour.
 function isRasterRender(render) {
@@ -120,7 +173,7 @@ function buildLayer(spec, index) {
   // what the layer ACTUALLY draws with, and is the ONLY thing the legend reads —
   // so map and legend cannot disagree when a caller overrides the spec.
   const appliedSym = spec.symbology && !spec.style ? spec.symbology : null;
-  const styleArg = appliedSym ? symbologyStyleFn(appliedSym) : vectorStyle(resolved);
+  const styleArg = makeVectorStyle(resolved, appliedSym);
   let source, layer;
   if (render === 'geojson') {
     // The source is left empty here; the GeoJSON is streamed by loadGeojsonLayer
@@ -176,7 +229,7 @@ async function wfsLayer(spec, index) {
   });
   const resolved = resolveStyle(spec, index);
   const appliedSym = spec.symbology && !spec.style ? spec.symbology : null;
-  const styleArg = appliedSym ? symbologyStyleFn(appliedSym) : vectorStyle(resolved);
+  const styleArg = makeVectorStyle(resolved, appliedSym);
   const layer = new ol.layer.Vector({ source: source, style: styleArg });
   layer.set('gpRender', 'wfs');
   layer.set('gpStyle', resolved);
@@ -234,6 +287,18 @@ async function streamGeojson(url, onProgress) {
   return JSON.parse(await new Blob(chunks).text());
 }
 
+// A bare GeoJSON geometry (an inline-geometry layer may carry one) must be wrapped
+// into a Feature so OL can read it; its `properties.style` (if present) is kept.
+function asFeatureCollection(geo) {
+  if (!geo || typeof geo !== 'object') return geo;
+  if (geo.type === 'FeatureCollection' || geo.type === 'Feature') return geo;
+  return {
+    type: 'Feature',
+    geometry: geo,
+    properties: (geo.properties && typeof geo.properties === 'object') ? geo.properties : {}
+  };
+}
+
 async function loadGeojsonLayer(layer, map) {
   const id = layer.get('gpId');
   const url = layer.get('gpLoadUrl');
@@ -242,10 +307,12 @@ async function loadGeojsonLayer(layer, map) {
     const geo = await streamGeojson(withToken(url), function (received, total) {
       setProgress(id, received, total);
     });
-    const features = new ol.format.GeoJSON().readFeatures(geo, { featureProjection: 'EPSG:3857' });
+    const features = new ol.format.GeoJSON().readFeatures(asFeatureCollection(geo), {
+      featureProjection: 'EPSG:3857'
+    });
     layer.getSource().addFeatures(features);
     clearProgress(id);
-    if (TEMPLATE.view && TEMPLATE.view.mode === 'fit' && features.length) {
+    if (TEMPLATE.view && TEMPLATE.view.mode === 'fit' && !VIEW_OVERRIDE_ACTIVE && features.length) {
       try { map.getView().fit(layer.getSource().getExtent(), { padding: [40, 40, 40, 40], maxZoom: 17 }); } catch (e) {}
     }
   } catch (err) {
@@ -317,7 +384,9 @@ function renderPanel(map, baseLayers, dataLayers) {
       empty.textContent = 'No layers';
       listEl.appendChild(empty);
     }
-    dataLayers.forEach(function (layer) {
+    // Newest layer = drawn on top; list it at the TOP so the panel mirrors the map
+    // stacking (reverse of dataLayers, which is bottom→top).
+    dataLayers.slice().reverse().forEach(function (layer) {
       const row = document.createElement('div');
       row.className = 'row';
       const top = document.createElement('div');
@@ -363,7 +432,8 @@ function renderPanel(map, baseLayers, dataLayers) {
       empty.textContent = 'No layers';
       legendEl.appendChild(empty);
     }
-    dataLayers.forEach(function (layer) {
+    // Legend mirrors the same top-to-bottom stacking order as the layer list.
+    dataLayers.slice().reverse().forEach(function (layer) {
       const render = layer.get('gpRender');
       const s = layer.get('gpStyle') || BASE_STYLE;
       const sym = layer.get('gpSymbology');
@@ -460,7 +530,7 @@ function rowsFromProps(props, layer) {
     }
   });
   Object.keys(source).forEach(function (name) {
-    if (name === 'geometry' || name.charAt(0) === '@' || seen[name]) return;
+    if (name === 'geometry' || name.charAt(0) === '@' || name === '__style__' || seen[name]) return;
     seen[name] = true; names.push(name);
   });
   return names.map(function (name) {
@@ -653,12 +723,17 @@ async function main() {
     if (layer) { layer.setVisible(entry.id === (TEMPLATE.basemap || '')); baseLayers.push(layer); }
   });
 
+  const startCenter = VIEW_OVERRIDE.center ||
+    (TEMPLATE.view && TEMPLATE.view.center) || [0, 0];
+  const startZoom = (VIEW_OVERRIDE.zoom != null)
+    ? VIEW_OVERRIDE.zoom
+    : ((TEMPLATE.view && TEMPLATE.view.zoom) || 2);
   const map = new ol.Map({
     target: 'map',
     layers: baseLayers,
     view: new ol.View({
-      center: ol.proj.fromLonLat((TEMPLATE.view && TEMPLATE.view.center) || [0, 0]),
-      zoom: (TEMPLATE.view && TEMPLATE.view.zoom) || 2
+      center: ol.proj.fromLonLat(startCenter),
+      zoom: startZoom
     })
   });
   if (TEMPLATE.scale !== false) { map.addControl(new ol.control.ScaleLine()); }
@@ -705,7 +780,8 @@ async function main() {
     }
   }
 
-  if (TEMPLATE.view && TEMPLATE.view.mode === 'fit' && !ol.extent.isEmpty(extent)) {
+  if (TEMPLATE.view && TEMPLATE.view.mode === 'fit' && !VIEW_OVERRIDE_ACTIVE &&
+      !ol.extent.isEmpty(extent)) {
     map.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 17 });
   }
   renderPanel(map, baseLayers, dataLayers);
