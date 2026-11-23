@@ -3,6 +3,59 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.8 — 2026-11-23
+
+Shared viewer runtime, COG raster layers, click identify and zoom-to-layer
+(slice 033 §13/§14). No new tool (31), no new Python dependency; the viewer now
+also loads the pinned geotiff.js bundle in the browser (for COG).
+
+### Added
+
+- **Shared viewer runtime** — the page's drawing logic moved out of
+  `viewer.html` into `templates/default/viewer.js` (served at
+  `/viewer/asset/viewer.js`; a Tier-2 `viewer.js` overrides it), so several page
+  shells share one runtime. `viewer.html` is now markup + a `window.GP_VIEWER`
+  bootstrap. The COG lane works because the page loads the geotiff UMD bundle
+  (global `GeoTIFF`) **before** OpenLayers — the legacy `ol.js` does not embed it
+  (fixes `GeoTIFF is not defined`).
+- **COG raster lane** — a raster dataset with `details.hasCOG` gets
+  `render: 'cog'`; the manifest exposes a Range-capable `cogUrl`
+  (`/cog/{datasetId}` proxies `GET /datasets/{id}/cog`, forwarding `Range` /
+  `Content-Range`); the viewer draws it with `ol/source.GeoTIFF` +
+  `ol/layer.WebGLTile`.
+- **Click identify** (client-side, mirroring the frontend) — (I1) vector features
+  (`geojson`/`mvt`/`wfs`) with field **aliases + coded-value domains**
+  (`layer.fields` from `details.fields`); (I2) WMS/WMTS publications via **OGC
+  GetFeatureInfo** through the proxy (`QUERY_LAYERS` from `identifyWmsLayers`,
+  WMS 1.1.1 `SRS=EPSG:4326`, `INFO_FORMAT=application/json`); (I3) COG **pixel
+  value** at the click via `WebGLTile.getData(pixel)` with band metadata
+  (`rasterBands`; no-data sentinel masked).
+- **Zoom to layer** — a per-row button in the layer list fits the view to the
+  layer's manifest `bbox` (fallback: the vector source extent).
+
+### Fixed
+
+- **WMS GetFeatureInfo 401** — the request appended a second `?` after the
+  `?t=` token (`...?t=TOKEN?SERVICE=...`), truncating the token; it now extends
+  the query with `&`.
+
+### Verification
+
+- Full suite **780 tests** OK (was 762). Live-verified on dataset 1577 (WMS
+  GetFeatureInfo returns parcels; COG 1949 renders and reports pixel values).
+
+Touched files:
+- `src/geopack_sdk_mcp/maps/templates/default/viewer.js` (new)
+- `src/geopack_sdk_mcp/maps/templates/default/viewer.html`
+- `src/geopack_sdk_mcp/maps/viewer.py`
+- `src/geopack_sdk_mcp/maps/service.py`
+- `src/geopack_sdk_mcp/maps/sources.py`
+- `src/geopack_sdk_mcp/maps/manifest.py`
+- `src/geopack_sdk_mcp/tool_handlers/maps.py`
+- `src/geopack_sdk_mcp/tool_schema.py`
+- `tests/test_map_service.py`, `tests/test_map_tools.py`, `tests/test_map_viewer.py`
+- `pyproject.toml`, `src/geopack_sdk/__init__.py`, `CHANGELOG.md`
+
 ## 0.12.7 — 2026-11-23
 
 Portable layer-style model, Phase 2 (slice 033 §12.2/§12.3 F2+F4). A dataset's

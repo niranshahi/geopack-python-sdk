@@ -36,10 +36,12 @@ from .manifest import MapLayer, MapManifest, new_id
 from . import viewer
 from .sources import (
     allowed_upstream,
+    dataset_cog_url,
     dataset_tile_url,
     merge_query,
     mint_publication_url,
     portal_get_bytes,
+    portal_range_get,
     query_dataset_geojson,
     read_local_file,
 )
@@ -83,7 +85,11 @@ def resolve_assets(
     configured = (os.getenv("GEOPACK_MCP_MAP_ASSETS") or "").strip()
     if configured and os.path.isdir(configured):
         return (
-            {"ol_js": "/viewer/asset/ol.js", "ol_css": "/viewer/asset/ol.css"},
+            {
+                "ol_js": "/viewer/asset/ol.js",
+                "ol_css": "/viewer/asset/ol.css",
+                "gt_js": "/viewer/asset/geotiff.js",
+            },
             os.path.realpath(configured),
         )
     return dict(viewer.CDN_ASSETS), None
@@ -268,6 +274,26 @@ class LocalService:
             SERVICE_ERROR, "this layer kind has no tile endpoint.", key="layer"
         )
 
+    def cog_resource(
+        self, ref: str, range_header: Optional[str]
+    ) -> Tuple[int, Dict[str, str], bytes]:
+        """Byte-serve a dataset's COG through the portal, forwarding a ``Range``."""
+        try:
+            dataset_id = int(str(ref).split("/", 1)[0])
+        except (TypeError, ValueError) as exc:
+            raise MapServiceError(
+                SERVICE_ERROR, "the COG path must be /cog/{datasetId}.", key="cog"
+            ) from exc
+        url = dataset_cog_url(self.client, dataset_id)
+        if not allowed_upstream(
+            url, str(getattr(self.client, "base_url", "")), self.proxy_hosts
+        ):
+            raise MapServiceError(
+                SERVICE_ERROR,
+                "the upstream host is not allow-listed (set GEOPACK_MCP_PROXY_HOSTS).",
+            )
+        return portal_range_get(self.client, url, range_header=range_header)
+
     # --- viewer assets & templates (Lane B) -------------------------------
 
     def user_css_url(self) -> Optional[str]:
@@ -278,19 +304,33 @@ class LocalService:
         return None
 
     def viewer_asset(self, name: str) -> Tuple[bytes, str]:
-        """An allow-listed viewer asset: ``ol.js``/``ol.css`` (vendored) or ``viewer.css``."""
-        if name not in {"ol.js", "ol.css", "viewer.css"}:
+        """An allow-listed viewer asset.
+
+        ``ol.js``/``ol.css`` come from the vendored asset dir. ``viewer.css`` and the
+        shared ``viewer.js`` runtime prefer a Tier-2 user file and fall back to the
+        shipped default (the runtime ships with the package, so it is always served).
+        """
+        if name not in {"ol.js", "ol.css", "geotiff.js", "viewer.css", "viewer.js"}:
             raise MapServiceError(SERVICE_ERROR, "unknown viewer asset.", key="asset")
-        base = self.templates_dir if name == "viewer.css" else self.assets_dir
-        if not base:
+        content_type = "text/css" if name.endswith(".css") else "text/javascript"
+        if name in {"viewer.css", "viewer.js"}:
+            for base in (self.templates_dir, viewer.DEFAULT_TEMPLATES_DIR):
+                if not base:
+                    continue
+                base_real = os.path.realpath(base)
+                path = os.path.realpath(os.path.join(base_real, name))
+                if os.path.commonpath([base_real, path]) == base_real and os.path.isfile(path):
+                    with open(path, "rb") as handle:
+                        return handle.read(), content_type
+            raise MapServiceError(SERVICE_ERROR, "viewer asset not found.", key="asset")
+        if not self.assets_dir:
             raise MapServiceError(
                 SERVICE_ERROR, "viewer assets are not vendored locally.", key="asset"
             )
-        base_real = os.path.realpath(base)
+        base_real = os.path.realpath(self.assets_dir)
         path = os.path.realpath(os.path.join(base_real, name))
         if os.path.commonpath([base_real, path]) != base_real or not os.path.isfile(path):
             raise MapServiceError(SERVICE_ERROR, "viewer asset not found.", key="asset")
-        content_type = "text/css" if name.endswith(".css") else "text/javascript"
         with open(path, "rb") as handle:
             return handle.read(), content_type
 
@@ -310,7 +350,11 @@ class _Handler(BaseHTTPRequestHandler):
     # --- plumbing ----------------------------------------------------------
 
     def _is_cors_path(self, path: str) -> bool:
-        return path.startswith("/data/") or path.startswith("/tiles/")
+        return (
+            path.startswith("/data/")
+            or path.startswith("/tiles/")
+            or path.startswith("/cog/")
+        )
 
     def _is_public_path(self, path: str) -> bool:
         """The viewer shell and its assets carry no secret; the token travels in
@@ -466,6 +510,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._route_tiles(path[len("/tiles/"):], cors)
             return
 
+        if path.startswith("/cog/"):
+            self._route_cog(path[len("/cog/"):], cors)
+            return
+
         if path.startswith("/proxy/publication/"):
             self._route_publication(path[len("/proxy/publication/"):], cors, query)
             return
@@ -522,6 +570,14 @@ class _Handler(BaseHTTPRequestHandler):
             name = name[len("asset/"):]
         body, content_type = self.service.viewer_asset(name)
         self._send(200, body, content_type)
+
+    def _route_cog(self, rest: str, cors: bool) -> None:
+        """Proxy a COG byte range. The browser (ol/source/GeoTIFF) sends Range. """
+        range_header = self.headers.get("Range")
+        status, headers, body = self.service.cog_resource(rest, range_header)
+        content_type = headers.get("Content-Type", "image/tiff")
+        extra = {key: value for key, value in headers.items() if key != "Content-Type"}
+        self._send(status, body, content_type, cors=cors, extra=extra)
 
     def _route_tiles(self, rest: str, cors: bool) -> None:
         pieces = rest.split("/")

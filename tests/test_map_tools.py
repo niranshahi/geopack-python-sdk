@@ -549,6 +549,49 @@ class ShowMapTest(unittest.TestCase):
         self.assertEqual([e["label"] for e in sym["unique"]], ["اوقاف", "مستثنیات"])
         self.assertEqual(sym["legend"]["title"], "مالکیت")
 
+    def test_a_dataset_layer_exposes_field_labels_and_domains_for_identify(self):
+        # The manifest carries the dataset's field aliases + coded-value domains so
+        # the viewer's identify popup can label a code with its human value.
+        details = {
+            "fields": [
+                {"name": "Ownership", "alias": "مالکیت",
+                 "domain": {"type": "codedValues",
+                            "items": [{"code": 1, "value": "اوقاف"}]}},
+                {"name": "Parcel_Number", "alias": "شماره قطعه"},
+            ]
+        }
+        payload = show_map(
+            _Client(details=details),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577}],
+        )
+        fields = {f["name"]: f for f in payload["layers"][0]["fields"]}
+        self.assertEqual(fields["Ownership"]["alias"], "مالکیت")
+        self.assertEqual(fields["Ownership"]["domain"]["1"], "اوقاف")
+        self.assertEqual(fields["Parcel_Number"]["domain"], {})
+
+    def test_a_dataset_without_field_metadata_carries_no_fields(self):
+        payload = show_map(_Client(), layers=[{"kind": "portal-dataset", "datasetId": 7}])
+        self.assertNotIn("fields", payload["layers"][0])
+
+    def test_a_publication_layer_carries_its_queryable_wms_layer_name(self):
+        # A WMS/WMTS image layer is identified with GetFeatureInfo, which must send
+        # the publication's queryable GeoServer layer name as QUERY_LAYERS.
+        class _NamedPublications(_Publications):
+            def get(self, publication_id):
+                return {"id": publication_id, "datasetId": 7, "protocol": "wms",
+                        "canonicalName": "pub_1577_wms_direct_source"}
+
+        client = _Client()
+        client.publications = _NamedPublications()
+        payload = show_map(client, layers=[{"kind": "portal-publication", "publicationId": 60}])
+        self.assertEqual(
+            payload["layers"][0]["identifyWmsLayers"], "pub_1577_wms_direct_source"
+        )
+
+    def test_a_publication_without_a_layer_name_has_no_identify_layers(self):
+        payload = show_map(_Client(), layers=[{"kind": "portal-publication", "publicationId": 60}])
+        self.assertNotIn("identifyWmsLayers", payload["layers"][0])
+
     def test_a_caller_symbology_shorthand_derives_class_breaks(self):
         payload = show_map(
             _Client(feature_collection=_sample_features()),
@@ -612,6 +655,52 @@ class ShowMapTest(unittest.TestCase):
             ],
         )
         self.assertTrue(any("does not affect" in w for w in payload["templateWarnings"]))
+
+    def test_a_cog_dataset_layer_gets_a_cog_renderer_and_url(self):
+        # A raster dataset with a Cloud-Optimized GeoTIFF is drawn directly (the
+        # viewer streams bytes via /cog), not vectorised and not warned about.
+        payload = show_map(
+            _Client(details={"hasCOG": True}, data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 1949}],
+        )
+        layer = payload["layers"][0]
+        self.assertEqual(layer["render"], "cog")
+        self.assertTrue(layer["raster"])
+        self.assertTrue(layer["cogUrl"].endswith("/cog/1949"))
+        self.assertFalse(any("is raster" in w for w in payload["templateWarnings"]))
+
+    def test_a_cog_layer_carries_band_metadata_for_value_lookup(self):
+        # Band metadata (type, no-data) lets the viewer label the value read at a
+        # click and mask the no-data sentinel.
+        details = {
+            "hasCOG": True,
+            "bands": [
+                {"band": 1, "type": "Int32", "colorInterpretation": "Gray",
+                 "minimum": 1123, "maximum": 1404, "noDataValue": -2147483647},
+            ],
+        }
+        payload = show_map(
+            _Client(details=details, data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 1949}],
+        )
+        bands = payload["layers"][0]["rasterBands"]
+        self.assertEqual(bands[0]["band"], 1)
+        self.assertEqual(bands[0]["noDataValue"], -2147483647)
+        self.assertEqual(bands[0]["minimum"], 1123)
+
+    def test_a_layer_without_bands_carries_no_raster_bands(self):
+        payload = show_map(_Client(), layers=[{"kind": "portal-dataset", "datasetId": 7}])
+        self.assertNotIn("rasterBands", payload["layers"][0])
+
+    def test_render_cog_on_a_non_cog_dataset_warns_and_falls_back(self):
+        payload = show_map(
+            _Client(),
+            layers=[{"kind": "portal-dataset", "datasetId": 7, "render": "cog"}],
+        )
+        self.assertNotEqual(payload["layers"][0]["render"], "cog")
+        self.assertTrue(
+            any("Cloud-Optimized GeoTIFF" in w for w in payload["templateWarnings"])
+        )
 
     def test_a_large_dataset_layer_warns_about_the_geojson_cap(self):
         payload = show_map(

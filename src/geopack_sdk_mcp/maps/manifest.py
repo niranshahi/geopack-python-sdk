@@ -12,7 +12,7 @@ LAYER_KINDS = frozenset(
 )
 
 #: Viewer renderers a layer spec may request explicitly.
-RENDER_KINDS = frozenset({"geojson", "mvt", "wms", "wmts", "wfs", "xyz"})
+RENDER_KINDS = frozenset({"geojson", "mvt", "wms", "wmts", "wfs", "xyz", "cog"})
 
 
 def _render_or_none(spec: Dict[str, Any]) -> Optional[str]:
@@ -60,6 +60,17 @@ class MapLayer:
     query: Optional[Dict[str, Any]] = None
     render: Optional[str] = None
     xyz_url: Optional[str] = None
+    #: Field labels + coded-value domains (``name``/``alias``/``domain``) for the
+    #: viewer's identify popup, from the source dataset's ``details.fields``. Small;
+    #: omitted when the layer declares none.
+    fields: Optional[List[Dict[str, Any]]] = None
+    #: The queryable WMS layer name a publication renders as, so the viewer's
+    #: identify can send a ``GetFeatureInfo`` (``QUERY_LAYERS``) for an image
+    #: layer. ``None`` for non-publication layers.
+    identify_layers: Optional[str] = None
+    #: Band descriptors for a raster/COG layer (from the dataset's ``details.bands``)
+    #: so the viewer can label the value read at a click (band name, type, no-data).
+    raster_bands: Optional[List[Dict[str, Any]]] = None
     #: GeoJSON page cap for a portal-dataset layer (``None`` = the 1,000 default;
     #: ``<= 0`` = unbounded — the server returns the whole dataset). The caller
     #: decides; the MCP never silently switches or truncates.
@@ -69,11 +80,17 @@ class MapLayer:
     #: vector colour, even when ``render`` is vector (a raster dataset is served
     #: as vector but shows nothing — the caller is warned).
     raster: bool = False
+    #: True when a ``portal-dataset`` carries a Cloud-Optimized GeoTIFF the viewer
+    #: can byte-serve directly (``details.hasCOG``). It then defaults to the ``cog``
+    #: renderer and the manifest exposes a Range-capable ``cogUrl``.
+    has_cog: bool = False
 
     def resolved_render(self) -> str:
         """The viewer renderer for this layer (explicit override or inferred)."""
         if self.render:
             return self.render
+        if self.has_cog:
+            return "cog"
         if self.xyz_url:
             return "xyz"
         if self.kind == "portal-publication":
@@ -97,6 +114,14 @@ class MapLayer:
                 payload[key] = f"{base_url}/proxy/publication/{self.publication_id}/{protocol}"
         if self.xyz_url:
             payload["xyzUrl"] = self.xyz_url
+        if self.fields:
+            payload["fields"] = self.fields
+        if self.identify_layers:
+            payload["identifyWmsLayers"] = self.identify_layers
+        if self.raster_bands:
+            payload["rasterBands"] = self.raster_bands
+        if self.has_cog and self.dataset_id is not None:
+            payload["cogUrl"] = f"{base_url}/cog/{self.dataset_id}"
         if self.raster:
             payload["raster"] = True
         if self.style:

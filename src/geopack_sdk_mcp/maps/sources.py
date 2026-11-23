@@ -291,6 +291,11 @@ def dataset_info(client: Any, dataset_id: int) -> Dict[str, Any]:
     if srid is not None:
         info["srid"] = srid
 
+    if details.get("hasCOG"):
+        info["has_cog"] = True
+    bands = details.get("bands")
+    if isinstance(bands, list) and bands:
+        info["bands"] = [band for band in bands if isinstance(band, dict)]
     info["symbology"] = summarise_symbology(raw)
     field_meta = field_meta_from_details(details)
     if field_meta:
@@ -299,6 +304,28 @@ def dataset_info(client: Any, dataset_id: int) -> Dict[str, Any]:
     if spec is not None:
         info["style_spec"] = spec
     return info
+
+
+def publication_layer_name(publication: Any) -> Optional[str]:
+    """The WMS/WMTS layer name a publication renders as (for ``GetFeatureInfo``).
+
+    The portal record carries ``canonicalName`` (and the mint descriptor may carry
+    ``layerName``); either names the queryable GeoServer layer, which a WMS
+    ``GetFeatureInfo`` request must send as ``QUERY_LAYERS``.
+    """
+    raw = to_jsonable(publication)
+    if not isinstance(raw, dict):
+        return None
+    records: List[Dict[str, Any]] = [raw]
+    inner = raw.get("raw")
+    if isinstance(inner, dict):
+        records.insert(0, inner)
+    for record in records:
+        for key in ("layerName", "canonicalName", "wmsLayer"):
+            value = record.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
 
 
 def publication_dataset_id(publication: Any) -> Optional[int]:
@@ -351,6 +378,44 @@ def portal_get_bytes(
 
 def dataset_tile_url(client: Any, dataset_id: int, z: int, x: int, y: int) -> str:
     return portal_url(client, f"/datasets/{dataset_id}/mvt/{z}/{x}/{y}.pbf")
+
+
+def dataset_cog_url(client: Any, dataset_id: int) -> str:
+    """The portal's COG byte-serving endpoint (``GET /datasets/{id}/cog``)."""
+    return portal_url(client, f"/datasets/{int(dataset_id)}/cog")
+
+
+def portal_range_get(
+    client: Any, url: str, *, range_header: Optional[str] = None
+) -> Tuple[int, Dict[str, str], bytes]:
+    """A raw portal GET that forwards a ``Range`` header (COG byte serving).
+
+    Returns ``(status, headers, body)`` where ``headers`` carries the HTTP metadata
+    a COG reader needs (``Content-Type``, ``Content-Range``, ``Accept-Ranges``). A
+    ``206`` is a valid partial answer, not an error. The portal credential stays
+    server-side.
+    """
+    headers = auth_headers(client)
+    if range_header:
+        headers = {**headers, "Range": range_header}
+    try:
+        response = client.session.get(url, headers=headers, timeout=60)
+    except Exception as exc:  # noqa: BLE001
+        raise MapServiceError(SERVICE_ERROR, _safe_message(exc)) from exc
+    if not response.ok and response.status_code != 206:
+        raise MapServiceError(
+            SERVICE_ERROR,
+            f"upstream answered HTTP {response.status_code}.",
+            status=response.status_code,
+        )
+    content_type = (response.headers.get("Content-Type") or "image/tiff").split(";")[0]
+    passthrough = {"Content-Type": content_type}
+    for name in ("Content-Range", "Accept-Ranges"):
+        value = response.headers.get(name)
+        if value:
+            passthrough[name] = value
+    passthrough.setdefault("Accept-Ranges", "bytes")
+    return response.status_code, passthrough, response.content
 
 
 def mint_publication_url(client: Any, publication_id: int, protocol: str) -> str:

@@ -38,6 +38,14 @@ class _Session:
 
     def get(self, url, headers=None, params=None, timeout=None):
         self.calls.append({"url": url, "headers": headers or {}})
+        if (headers or {}).get("Range"):
+            response = _FakeResponse(body=b"II*\x00", content_type="image/tiff", status=206)
+            response.headers = {
+                "Content-Type": "image/tiff",
+                "Content-Range": "bytes 0-4/1000",
+                "Accept-Ranges": "bytes",
+            }
+            return response
         return _FakeResponse()
 
 
@@ -73,13 +81,15 @@ class _FakeClient:
         self.publications = _Publications(mint_template)
 
 
-def _request(port, path, *, token=None, host=None, method="GET"):
+def _request(port, path, *, token=None, host=None, method="GET", range_header=None):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     headers = {}
     if token:
         headers["X-Geopack-Map-Token"] = token
     if host:
         headers["Host"] = host
+    if range_header:
+        headers["Range"] = range_header
     conn.request(method, path, headers=headers)
     response = conn.getresponse()
     body = response.read()
@@ -232,6 +242,22 @@ class EndpointTest(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertIn("{z}", str(self.service.client.publications.template))
+
+    def test_a_cog_byte_range_is_proxied_with_the_range_forwarded(self):
+        status, headers, _ = _request(
+            self.service.port, "/cog/1949", token=self.service.token, range_header="bytes=0-4"
+        )
+        self.assertEqual(status, 206)
+        self.assertEqual(headers.get("Content-Range"), "bytes 0-4/1000")
+        self.assertEqual(headers.get("Accept-Ranges"), "bytes")
+        self.assertEqual(headers.get("Content-Type"), "image/tiff")
+        sent = self.service.client.session.calls[-1]
+        self.assertEqual(sent["headers"].get("Range"), "bytes=0-4")
+        self.assertIn("/datasets/1949/cog", sent["url"])
+
+    def test_a_cog_path_needs_a_numeric_dataset_id(self):
+        status, _, _ = _request(self.service.port, "/cog/abc", token=self.service.token)
+        self.assertNotEqual(status, 200)
 
     def test_a_minted_foreign_host_is_refused(self):
         service = _service(mint_template="http://evil.example/{z}/{x}/{y}.pbf")

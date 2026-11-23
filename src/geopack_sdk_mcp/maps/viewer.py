@@ -47,16 +47,32 @@ DEFAULT_TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates", "de
 
 #: OpenLayers build served to the browser. Pinned; a vendored copy overrides it.
 DEFAULT_OL_VERSION = "10.6.1"
+#: The legacy OpenLayers build does NOT embed geotiff.js; its GeoTIFF source reads
+#: the global ``GeoTIFF`` (from the geotiff UMD bundle), so the page must load it
+#: first or the COG layer fails with "GeoTIFF is not defined".
+DEFAULT_GEOTIFF_VERSION = "2.1.3"
 CDN_ASSETS = {
     "ol_js": f"https://cdn.jsdelivr.net/npm/ol@{DEFAULT_OL_VERSION}/dist/ol.js",
     "ol_css": f"https://cdn.jsdelivr.net/npm/ol@{DEFAULT_OL_VERSION}/ol.css",
+    "gt_js": (
+        f"https://cdn.jsdelivr.net/npm/geotiff@{DEFAULT_GEOTIFF_VERSION}"
+        "/dist-browser/geotiff.js"
+    ),
 }
 
 _TEMPLATE_FILE = "template.json"
 _VIEWER_FILE = "viewer.html"
+_VIEWER_JS_FILE = "viewer.js"
 _USER_CSS_FILE = "viewer.css"
 
-#: Every ``__…__`` placeholder the shipped page substitutes. ``__TITLE__`` etc.
+#: The shipped, **shared** viewer runtime. The page shell (``viewer.html``) carries
+#: only the markup + a tiny bootstrap that injects the per-map values into
+#: ``window.GP_VIEWER``; all drawing logic lives here so several page shells share
+#: one runtime. Served at ``/viewer/asset/viewer.js``; overridable by a Tier-2
+#: ``viewer.js`` in the user templates dir.
+_VIEWER_JS_ASSET = "/viewer/asset/viewer.js"
+
+#: Every ``__...__`` placeholder the shipped page substitutes. ``__TITLE__`` etc.
 #: are cosmetic; the required subset below is what the inline script needs to run.
 VIEWER_PLACEHOLDERS = (
     "__TITLE__",
@@ -64,6 +80,8 @@ VIEWER_PLACEHOLDERS = (
     "__FOOTER__",
     "__OL_JS__",
     "__OL_CSS__",
+    "__GT_JS__",
+    "__VIEWER_JS__",
     "__USER_CSS_LINK__",
     "__CSS_VARS__",
     "__TEMPLATE_JSON__",
@@ -129,6 +147,19 @@ def viewer_html_path(templates_dir: Optional[str]) -> Optional[str]:
     if not templates_dir:
         return None
     return os.path.join(templates_dir, _VIEWER_FILE)
+
+
+def default_viewer_js() -> str:
+    """The shipped shared viewer runtime (a resource file, read from disk)."""
+    with open(os.path.join(DEFAULT_TEMPLATES_DIR, _VIEWER_JS_FILE), encoding="utf-8") as handle:
+        return handle.read()
+
+
+def viewer_js_path(templates_dir: Optional[str]) -> Optional[str]:
+    """Where a user may override the shared runtime (returned by ``show_map``)."""
+    if not templates_dir:
+        return None
+    return os.path.join(templates_dir, _VIEWER_JS_FILE)
 
 
 def load_viewer_html(templates_dir: Optional[str] = None) -> Tuple[str, str, List[str]]:
@@ -284,6 +315,8 @@ def render_viewer_html(*, title: str, manifest_url: str, template: Dict[str, Any
         ("__FOOTER__", html.escape(str(footer))),
         ("__OL_JS__", html.escape(assets.get("ol_js", CDN_ASSETS["ol_js"]))),
         ("__OL_CSS__", html.escape(assets.get("ol_css", CDN_ASSETS["ol_css"]))),
+        ("__GT_JS__", html.escape(assets.get("gt_js", CDN_ASSETS["gt_js"]))),
+        ("__VIEWER_JS__", html.escape(assets.get("viewer_js", _VIEWER_JS_ASSET))),
         ("__MANIFEST_URL__", script_json(manifest_url)),
         ("__TOKEN_EMBEDDED__", script_json(embedded_token or "")),
         ("__TEMPLATE_JSON__", script_json(template)),

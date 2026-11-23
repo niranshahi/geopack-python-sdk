@@ -22,6 +22,7 @@ from ..maps.sources import (
     dataset_field_values,
     dataset_info,
     publication_dataset_id,
+    publication_layer_name,
     valid_wgs84_bbox,
 )
 from ..sanitize.dataset_symbology import styled_publications
@@ -38,9 +39,10 @@ _AXIS_ORDER = "west,south,east,north"
 #: Fallback when a template declares no ``layerPalette``.
 _DEFAULT_LAYER_PALETTE = ("#3ba776", "#3b7fa7", "#c2703b", "#8b5cf6", "#d1477a", "#2f9e8f")
 
-#: Renderers whose image is produced server-side (a per-layer ``style`` cannot
-#: recolour them; only vector renderers honour it).
-_RASTER_RENDERS = frozenset({"wms", "wmts", "xyz"})
+#: Raster renderers: the image is produced by the server or byte-served as a COG,
+#: so a per-layer vector ``style`` cannot recolour them and the legend shows a
+#: raster swatch (only vector renderers honour ``style``).
+_RASTER_RENDERS = frozenset({"wms", "wmts", "xyz", "cog"})
 
 #: Features a portal-dataset GeoJSON layer loads when no ``limit`` is set.
 _GEOJSON_DEFAULT_LIMIT = 1000
@@ -212,6 +214,7 @@ def _apply_extent(
         dataset_id = publication_dataset_id(publication)
         if dataset_id is not None:
             info = dataset_info(client, dataset_id)
+        layer.identify_layers = publication_layer_name(publication)
     dataset_extent = info.get("extent")
 
     if layer.bbox is not None:
@@ -237,9 +240,51 @@ def _apply_extent(
         layer.bbox_crs = _WGS84_CRS
         layer.bbox_axis_order = _AXIS_ORDER
 
+    field_meta = info.get("field_meta")
+    if isinstance(field_meta, dict) and field_meta:
+        # Field aliases + coded-value domains for the viewer's identify popup, so a
+        # coded field shows its human value (e.g. 1 -> "اوقاف"), not the raw code.
+        layer.fields = [
+            {
+                "name": name,
+                "alias": meta.get("alias") if isinstance(meta, dict) else None,
+                "domain": (meta.get("domain") if isinstance(meta, dict) else None) or {},
+            }
+            for name, meta in field_meta.items()
+            if isinstance(name, str) and name
+        ]
+
+    if layer.kind == "portal-dataset":
+        if info.get("has_cog"):
+            # The dataset ships a Cloud-Optimized GeoTIFF: byte-serve it directly
+            # (the viewer draws it with ol/source/GeoTIFF) rather than vectorising.
+            layer.has_cog = True
+        elif layer.render == "cog":
+            warnings.append(
+                f"layer '{label}': render 'cog' needs a Cloud-Optimized GeoTIFF; dataset "
+                f"{layer.dataset_id} has none — using the default renderer."
+            )
+            layer.render = None
+
+    if layer.has_cog and info.get("bands"):
+        # Band metadata lets the viewer label the value read at a click and skip
+        # the no-data sentinel (e.g. -2147483647).
+        layer.raster_bands = [
+            {
+                "band": band.get("band") or (index + 1),
+                "label": band.get("name") or band.get("description"),
+                "type": band.get("type") or band.get("dataType"),
+                "colorInterpretation": band.get("colorInterpretation"),
+                "noDataValue": band.get("noDataValue"),
+                "minimum": band.get("minimum"),
+                "maximum": band.get("maximum"),
+            }
+            for index, band in enumerate(info["bands"])
+        ]
+
     if info.get("data_type") == "raster":
         layer.raster = True
-        if layer.kind == "portal-dataset":
+        if layer.kind == "portal-dataset" and not layer.has_cog:
             warnings.append(
                 f"layer '{label}': dataset {layer.dataset_id} is raster; a portal-dataset layer is "
                 "served as vector GeoJSON/MVT and will not show an image — use a portal-publication "

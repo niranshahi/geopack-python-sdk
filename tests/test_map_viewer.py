@@ -141,7 +141,9 @@ class RenderHtmlTest(unittest.TestCase):
         self.assertIn("/v/ol.css", html)
         self.assertIn("/map/m1/manifest.json", html)
         self.assertIn("Demo &lt;x&gt;", html)
-        self.assertIn("new ol.Map", html)
+        # The page carries the manifest URL + loads the shared runtime asset.
+        self.assertIn("/viewer/asset/viewer.js", html)
+        self.assertIn("new ol.Map", viewer.default_viewer_js())
 
     def test_the_page_is_a_resource_file_not_an_embedded_string(self):
         # The shipped page lives on disk so it is editable without touching code.
@@ -150,22 +152,25 @@ class RenderHtmlTest(unittest.TestCase):
         self.assertIn("__TEMPLATE_JSON__", viewer.default_viewer_html())
 
     def test_osm_tiles_override_the_document_referrer_policy(self):
-        # OSM answers "access blocked" when a tile has no Referer; the page sets a
-        # per-element referrerPolicy on every XYZ tile <img>.
+        # OSM answers "access blocked" when a tile has no Referer; the shared
+        # runtime sets a per-element referrerPolicy on every XYZ tile <img>.
+        js = viewer.default_viewer_js()
+        self.assertIn("strict-origin-when-cross-origin", js)
+        self.assertIn("referrerPolicy", js)
+        self.assertIn("tileLoadFunction", js)
+        # The shell loads that runtime from the shared asset.
         html = viewer.render_viewer_html(
             title="t",
             manifest_url="http://127.0.0.1:9/map/m1/manifest.json",
             template=viewer.default_template(),
             assets={"ol_js": "/v/ol.js", "ol_css": "/v/ol.css"},
         )
-        self.assertIn("strict-origin-when-cross-origin", html)
-        self.assertIn("referrerPolicy", html)
-        self.assertIn("tileLoadFunction", html)
+        self.assertIn("/viewer/asset/viewer.js", html)
 
     def test_layer_list_and_legend_render_data_layers(self):
         # Regression: the list iterated basemaps only (empty) and the legend was
         # drawn before the panel reset — data layers now drive both.
-        html = viewer.default_viewer_html()
+        html = viewer.default_viewer_js()
         self.assertIn("dataLayers", html)
         self.assertIn("renderPanel(map, baseLayers, dataLayers)", html)
         self.assertNotIn("baseLayers.filter(", html)
@@ -175,12 +180,12 @@ class RenderHtmlTest(unittest.TestCase):
         # A layer `style` used to be echoed but never applied; the viewer now
         # resolves a per-layer style and the legend shows a raster swatch for
         # image layers instead of a fake vector fill.
-        html = viewer.default_viewer_html()
+        html = viewer.default_viewer_js()
         self.assertIn("resolveStyle", html)
         self.assertIn("layerPalette", html)
         self.assertIn("isRasterRender", html)
         self.assertIn("gpRaster", html)
-        self.assertIn("swatch.raster", html)
+        self.assertIn("swatch.classList.add('raster')", html)
         self.assertIn("(raster)", html)
 
     def test_the_default_template_declares_a_layer_palette(self):
@@ -191,7 +196,7 @@ class RenderHtmlTest(unittest.TestCase):
     def test_large_geojson_layers_show_download_progress_in_the_legend(self):
         # A whole-dataset (limit:0) GeoJSON can be tens of MB; the viewer streams
         # it and shows a byte/percentage bar in the legend so it never looks frozen.
-        html = viewer.default_viewer_html()
+        html = viewer.default_viewer_js()
         self.assertIn("gpLoadUrl", html)
         self.assertIn("loadPendingVectors", html)
         self.assertIn("streamGeojson", html)
@@ -201,7 +206,7 @@ class RenderHtmlTest(unittest.TestCase):
     def test_a_dataset_symbology_spec_drives_a_style_function_and_legend(self):
         # The portable spec (§12) is applied via a style FUNCTION and the legend
         # is built from the SAME spec, so map and legend cannot disagree.
-        html = viewer.default_viewer_html()
+        html = viewer.default_viewer_js()
         self.assertIn("symbologyStyleFn", html)
         self.assertIn("gpSymbology", html)
         self.assertIn("legend-block", html)
@@ -210,6 +215,64 @@ class RenderHtmlTest(unittest.TestCase):
         # of class colours over a flat palette map).
         self.assertIn("appliedSym", html)
         self.assertNotIn("layer.set('gpSymbology', spec.symbology", html)
+
+    def test_clicking_a_vector_feature_identifies_its_attributes(self):
+        # A vector feature click shows its attributes; a coded-value field is shown
+        # with its human label (from the manifest `fields` domain) and the popup
+        # closes on a miss. Raster layers (wms/wmts/xyz/cog) are not identifiable.
+        js = viewer.default_viewer_js()
+        self.assertIn("setupIdentify", js)
+        self.assertIn("forEachFeatureAtPixel", js)
+        self.assertIn("gpFields", js)
+        self.assertIn("escapeHtml", js)
+        self.assertIn("gp-id-close", js)
+        self.assertIn("setupIdentify(map, dataLayers)", js)
+        # The page shell carries the popup container.
+        self.assertIn('id="identify"', viewer.default_viewer_html())
+
+    def test_a_wms_publication_is_identified_with_get_feature_info(self):
+        # A WMS/WMTS image layer draws server-side features the browser never sees,
+        # so identify fires a GetFeatureInfo request carrying the publication's
+        # queryable layer name (QUERY_LAYERS) from the manifest.
+        js = viewer.default_viewer_js()
+        self.assertIn("wmsFeatureInfoUrl", js)
+        self.assertIn("GetFeatureInfo", js)
+        self.assertIn("QUERY_LAYERS", js)
+        self.assertIn("identifyWmsLayers", js)
+        self.assertIn("gpWmsUrl", js)
+
+    def test_each_layer_can_zoom_to_its_extent(self):
+        # The layer list carries a "zoom to layer" control that fits the view to the
+        # manifest bbox (or the vector source extent as a fallback).
+        js = viewer.default_viewer_js()
+        self.assertIn("zoomToLayer", js)
+        self.assertIn("gp-zoom", js)
+        self.assertIn("gpBbox", js)
+        self.assertIn("getView().fit", js)
+
+    def test_a_cog_layer_reads_its_pixel_value_on_click(self):
+        # A COG layer is a WebGLTile; `getData(pixel)` reads the band value the
+        # renderer already decoded (client-side, no server round-trip).
+        js = viewer.default_viewer_js()
+        self.assertIn("identifyRasterBlock", js)
+        self.assertIn("gpRasterBands", js)
+        self.assertIn("getData", js)
+        self.assertIn("no data", js)
+
+    def test_the_geotiff_bundle_is_loaded_for_cog_layers(self):
+        # The legacy OpenLayers build does NOT embed geotiff.js; its GeoTIFF source
+        # reads the global `GeoTIFF`, so the page must load that bundle or a COG
+        # layer fails with "GeoTIFF is not defined".
+        self.assertIn("geotiff", viewer.CDN_ASSETS["gt_js"])
+        html = viewer.render_viewer_html(
+            title="t",
+            manifest_url="http://127.0.0.1:9/map/m1/manifest.json",
+            template=viewer.default_template(),
+            assets={"ol_js": "/v/ol.js", "ol_css": "/v/ol.css"},
+        )
+        self.assertIn(viewer.CDN_ASSETS["gt_js"], html)
+        # Loaded before OpenLayers so the global exists when a COG source is built.
+        self.assertLess(html.index("geotiff@"), html.index("/v/ol.js"))
 
 
 class ViewerHtmlTest(unittest.TestCase):
@@ -293,7 +356,14 @@ class AssetsTest(unittest.TestCase):
     def test_default_is_the_cdn(self):
         urls, directory = resolve_assets()
         self.assertIn("cdn.jsdelivr.net", urls["ol_js"])
+        self.assertIn("geotiff", urls["gt_js"])
         self.assertIsNone(directory)
+
+    def test_vendored_dir_serves_the_geotiff_bundle_locally(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"GEOPACK_MCP_MAP_ASSETS": tmp}):
+                urls, _ = resolve_assets()
+        self.assertEqual(urls["gt_js"], "/viewer/asset/geotiff.js")
 
 
 class ViewerRoutesTest(unittest.TestCase):
@@ -335,14 +405,14 @@ class ViewerRoutesTest(unittest.TestCase):
     def test_a_valid_query_token_is_embedded_in_the_shell(self):
         status, body, _ = _http(self.port, f"/map/{self.manifest.map_id}", token="localtoken")
         self.assertEqual(status, 200)
-        self.assertIn('TOKEN_EMBEDDED = "localtoken"', body.decode("utf-8"))
+        self.assertIn('token: "localtoken"', body.decode("utf-8"))
 
     def test_an_invalid_query_token_is_not_embedded(self):
         status, body, _ = _http(self.port, f"/map/{self.manifest.map_id}", token="wrong")
         self.assertEqual(status, 200)
         text = body.decode("utf-8")
-        self.assertIn('TOKEN_EMBEDDED = ""', text)
-        self.assertNotIn('TOKEN_EMBEDDED = "wrong"', text)
+        self.assertIn('token: ""', text)
+        self.assertNotIn('token: "wrong"', text)
 
     def test_the_manifest_route_requires_the_token(self):
         status, _, _ = _http(self.port, f"/map/{self.manifest.map_id}/manifest.json")
@@ -363,6 +433,25 @@ class ViewerRoutesTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/css", headers.get("Content-Type", ""))
         self.assertIn(b".gp", body)
+
+    def test_the_shared_viewer_runtime_is_served(self):
+        # The runtime is a shared asset (not inline), so several page shells reuse it.
+        status, body, headers = _http(self.port, "/viewer/asset/viewer.js")
+        self.assertEqual(status, 200)
+        self.assertIn("javascript", headers.get("Content-Type", ""))
+        self.assertIn(b"function buildLayer", body)
+
+        _, shell, _ = _http(self.port, f"/map/{self.manifest.map_id}")
+        text = shell.decode("utf-8")
+        self.assertIn("/viewer/asset/viewer.js", text)
+        self.assertIn("window.GP_VIEWER", text)
+
+    def test_a_user_viewer_js_overrides_the_shipped_runtime(self):
+        with open(os.path.join(self._tmp.name, "viewer.js"), "w", encoding="utf-8") as handle:
+            handle.write("// house runtime")
+        status, body, _ = _http(self.port, "/viewer/asset/viewer.js")
+        self.assertEqual(status, 200)
+        self.assertIn(b"house runtime", body)
 
     def test_unknown_viewer_asset_is_refused(self):
         status, _, _ = _http(self.port, "/viewer/asset/secret.txt")
