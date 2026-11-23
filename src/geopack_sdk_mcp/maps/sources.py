@@ -23,6 +23,7 @@ from ..crs_utils import (
     looks_wgs84,
     srid_from_dataset,
 )
+from ..sanitize.dataset_symbology import styled_publications, summarise_symbology
 from ..serialize import to_jsonable
 
 #: Local file extensions the service may serve.
@@ -105,7 +106,7 @@ def query_dataset_geojson(
     dataset_id: int,
     *,
     query: Optional[Dict[str, Any]] = None,
-    limit: int = 1000,
+    limit: Optional[int] = 1000,
     out_srid: Optional[int] = 4326,
 ) -> Dict[str, Any]:
     """Fetch a dataset's records as a GeoJSON FeatureCollection (portal auth).
@@ -115,6 +116,11 @@ def query_dataset_geojson(
     metres); without this the viewer would plot projection-metre numbers as
     lon/lat and show nothing. If the portal ignores the request, the answer is
     repaired locally (:func:`_repair_to_wgs84`).
+
+    ``limit`` caps the GeoJSON page (**1000** by default). ``limit <= 0`` means
+    **unbounded**: the request carries no pagination limit, so the server returns
+    the WHOLE dataset — the caller has decided to accept the payload cost. The
+    server itself imposes no cap on this lane.
     """
     effective_out = out_srid
     try:
@@ -129,8 +135,17 @@ def query_dataset_geojson(
             if projection.get("outSRID") is not None:
                 effective_out = projection.get("outSRID")
             result = client.datasets.query(dataset_id, dsl)
+        elif limit is None or int(limit) > 0:
+            result = client.datasets.query(
+                dataset_id, limit=int(limit or 1000), out_srid=out_srid
+            )
         else:
-            result = client.datasets.query(dataset_id, limit=limit, out_srid=out_srid)
+            # Unbounded: send a projection with NO pagination limit so the server
+            # returns every row (verified: no default LIMIT on POST /query).
+            projection = {"returnGeometry": True}
+            if out_srid is not None:
+                projection["outSRID"] = int(out_srid)
+            result = client.datasets.query(dataset_id, {"projection": projection})
     except MapServiceError:
         raise
     except Exception as exc:  # noqa: BLE001 - sanitize upstream errors
@@ -138,6 +153,23 @@ def query_dataset_geojson(
             SERVICE_ERROR, _safe_message(exc), key="dataset_id"
         ) from exc
     return _repair_to_wgs84(client, dataset_id, _as_geojson(result), effective_out)
+
+
+def dataset_feature_count(client: Any, dataset_id: int) -> Optional[int]:
+    """Best-effort total feature count via the server COUNT (``None`` if unknown).
+
+    Used only to TELL the caller how much is being truncated by a GeoJSON cap —
+    the MCP never changes the layer's renderer or limit on its own.
+    """
+    try:
+        page = client.datasets.query_paged(
+            dataset_id, page=1, page_size=1, include_total_count=True
+        )
+    except Exception:  # noqa: BLE001 - discovery is best-effort
+        return None
+    pagination = getattr(page, "pagination", None)
+    total = getattr(pagination, "total_count", None) if pagination is not None else None
+    return int(total) if isinstance(total, int) else None
 
 
 def _repair_to_wgs84(
@@ -240,6 +272,8 @@ def dataset_info(client: Any, dataset_id: int) -> Dict[str, Any]:
     srid = srid_from_dataset(raw)
     if srid is not None:
         info["srid"] = srid
+
+    info["symbology"] = summarise_symbology(raw)
     return info
 
 

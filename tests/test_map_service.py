@@ -42,7 +42,11 @@ class _Session:
 
 
 class _Datasets:
+    def __init__(self):
+        self.queries = []
+
     def query(self, dataset_id, *args, **kwargs):
+        self.queries.append({"dataset_id": dataset_id, "args": args, "kwargs": kwargs})
         return {
             "type": "FeatureCollection",
             "features": [
@@ -183,6 +187,40 @@ class EndpointTest(unittest.TestCase):
         sent = self.service.client.session.calls[-1]
         self.assertEqual(sent["headers"]["Authorization"], f"Bearer {PORTAL_TOKEN}")
         self.assertNotIn(PORTAL_TOKEN.encode(), tile)
+
+    def test_dataset_geojson_defaults_to_a_1000_feature_cap(self):
+        layer = self.manifest.add_layer(layer_from_spec({"kind": "portal-dataset", "datasetId": 7}))
+        self.assertIsNone(layer.limit)
+
+        _request(self.service.port, f"/data/{layer.id}", token=self.service.token)
+
+        sent = self.service.client.datasets.queries[-1]
+        self.assertEqual(sent["kwargs"].get("limit"), 1000)
+
+    def test_a_layer_limit_of_zero_requests_the_whole_dataset(self):
+        layer = self.manifest.add_layer(
+            layer_from_spec({"kind": "portal-dataset", "datasetId": 7, "limit": 0})
+        )
+        self.assertEqual(layer.limit, 0)
+
+        _request(self.service.port, f"/data/{layer.id}", token=self.service.token)
+
+        sent = self.service.client.datasets.queries[-1]
+        # Unbounded: a projection is sent with NO pagination limit.
+        self.assertNotIn("limit", sent["kwargs"])
+        projection = sent["args"][0]["projection"]
+        self.assertNotIn("limit", projection)
+        self.assertEqual(projection["outSRID"], 4326)
+
+    def test_an_explicit_layer_limit_is_passed_through(self):
+        layer = self.manifest.add_layer(
+            layer_from_spec({"kind": "portal-dataset", "datasetId": 7, "limit": 5000})
+        )
+
+        _request(self.service.port, f"/data/{layer.id}", token=self.service.token)
+
+        sent = self.service.client.datasets.queries[-1]
+        self.assertEqual(sent["kwargs"].get("limit"), 5000)
 
     def test_a_minted_publication_tile_is_proxied(self):
         layer = self.manifest.add_layer(

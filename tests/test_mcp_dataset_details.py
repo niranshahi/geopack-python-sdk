@@ -90,10 +90,37 @@ class TestMcpDatasetDetails(unittest.TestCase):
         self.assertNotIn("details", row)
         self.assertTrue(row["detailsOmitted"])
 
+    def test_symbology_is_attached_at_lite(self):
+        details = {"display": {"esri": {"renderer": {"type": "uniqueValue", "field1": "LANDUSE"}}}}
+        row = trim_dataset_for_mcp({"id": 5, "dataType": "vector", "details": details}, "lite")
+        self.assertTrue(row["symbology"]["hasSavedStyle"])
+        self.assertEqual(row["symbology"]["rendererType"], "uniqueValue")
+        self.assertEqual(row["symbology"]["fields"], ["LANDUSE"])
+
+    def test_list_lite_rows_still_carry_the_symbology_flag(self):
+        # Discovery must survive the lite details drop: the summary is tiny.
+        payload = {
+            "datasets": [
+                {
+                    "id": 7,
+                    "dataType": "vector",
+                    "details": {
+                        "display": {"esri": {"renderer": {"type": "classBreaks", "classBreakInfos": [1]}}}
+                    },
+                }
+            ]
+        }
+        row = trim_datasets_list_payload(payload)["datasets"][0]
+        self.assertNotIn("details", row)
+        self.assertEqual(row["symbology"]["rendererType"], "classBreaks")
+
+    def test_a_plain_row_reports_no_saved_style(self):
+        row = trim_dataset_for_mcp({"id": 7, "dataType": "vector", "details": {}}, "lite")
+        self.assertEqual(row["symbology"], {"hasSavedStyle": False, "kind": "none"})
+
     def test_list_payload_standard_keeps_trimmed_details(self):
         huge = json.dumps(self._sample_vector_details())
         payload = {"datasets": [{"id": 1, "name": "x", "details": huge}]}
-
         out = trim_datasets_list_payload(payload, details_level="standard")
 
         details = out["datasets"][0]["details"]

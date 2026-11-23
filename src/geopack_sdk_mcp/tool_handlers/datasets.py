@@ -32,6 +32,7 @@ from ..sanitize.dataset_details import (
     validate_projection_fields,
 )
 from ..sanitize.dataset_schema import build_dataset_schema, build_relationship_rows
+from ..sanitize.dataset_symbology import styled_publications
 from ..sanitize.query_results import clamp_query_limit, trim_feature_collection_for_mcp
 from ..sanitize.task_results import sanitize_async_task_start, sanitize_task_payload
 from ..serialize import to_jsonable
@@ -159,11 +160,16 @@ def get_dataset(
     result = client.datasets.get(dataset_id)
     projected_fields = normalize_fields(fields)
     validate_projection_fields(projected_fields)
-    return trim_dataset_for_mcp(
+    payload = trim_dataset_for_mcp(
         to_jsonable(result),
         level,
         fields=projected_fields,
     )
+    # `styledPublications` is opt-in: it costs a publications call, so it is only
+    # computed when the caller asks for it (or names it in `fields`).
+    if projected_fields and "styledPublications" in projected_fields:
+        payload["styledPublications"] = styled_publications(client, dataset_id)
+    return payload
 
 
 def query_dataset(

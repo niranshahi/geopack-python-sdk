@@ -3,6 +3,47 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.5 — 2026-11-23
+
+Dataset saved-symbology disclosure (slice 033 Phase 1). An agent could not tell
+that a dataset carries its own rendering, so `show_map`/`portal-dataset` silently
+used the generic viewer palette and the official symbology was never discovered
+(owner report about dataset 1577). The MCP now **detects and discloses** it. No
+new tool (31), no new dependency.
+
+### Added
+
+- **A `symbology` summary on every dataset record** (`get_dataset` and
+  `list_datasets`, all detail levels incl. `lite`), resolved with the SAME
+  precedence as the frontend (`displayMigration.getDisplaySettings` +
+  `getDatasetEsriDisplay`): vector/table `details.display.esri` (legacy
+  `details.esri.display`/`details.esri`, generic `display.default`) and raster
+  flat `details.display` (`displayType` RGB/colorMap). It reports
+  `hasSavedStyle`, `kind` (`vector|raster|none`), `rendererFamily`, `rendererType`
+  (+friendly `rendererLabel`), `fields`, `classCount`, `labelingCount`, and for
+  rasters `rasterDisplayType`/`bands`/`band`/`colorMap`.
+- **`styledPublications` (opt-in `fields`)** — the dataset's publications, each
+  flagged `hasStyle` (a set `canonicalStyleRevision` or a `configuration.styleOverride`),
+  naming the publication that renders the official symbology. Computed on demand
+  (it costs one publications call).
+- **`show_map` disclosure** — a `portal-dataset` layer whose dataset has a saved
+  symbology (or, failing that, a styled publication) now adds a
+  `templateWarnings` entry telling the agent to use `kind:'portal-publication'`
+  (or an explicit style) instead of the generic palette. An explicitly styled
+  layer is not warned.
+- New `sanitize/dataset_symbology.py` (`summarise_symbology`,
+  `styled_publications`, resolvers). Live-verified on dataset 1577
+  (`uniqueValue` on `Landuse_Group`, 24 classes; publications 204/202 styled).
+- **Per-layer `limit` on a `portal-dataset` layer** — caps the features a GeoJSON
+  layer loads (`default 1000`; `0` = the **whole** dataset, sent with no pagination
+  limit). Fixes reports that a large dataset (1577: 18,648 features) appeared
+  sparse at 1,000. The MCP does **not** switch renderer or truncate silently: when a
+  dataset exceeds the cap it adds a `templateWarnings` entry naming the totals and
+  the levers (`limit:0` for the full GeoJSON, keeping the saved symbology; or
+  `render:'mvt'` for tiled full coverage) so the **agent** chooses (and can ask the
+  user). `query_dataset_geojson` gained `limit<=0` unbounded semantics;
+  `dataset_feature_count` reads the server COUNT via `query_paged`.
+
 ## 0.12.4 — 2026-11-22
 
 Client-side CRS verification (slice 033 robustness). A fifth live-QA report showed

@@ -232,7 +232,15 @@ class LocalService:
 
     def layer_data(self, layer: MapLayer) -> Any:
         if layer.kind == "portal-dataset":
-            return ("json", query_dataset_geojson(self.client, int(layer.dataset_id), query=layer.query))
+            return (
+                "json",
+                query_dataset_geojson(
+                    self.client,
+                    int(layer.dataset_id),
+                    query=layer.query,
+                    limit=layer.limit,
+                ),
+            )
         if layer.kind == "inline-geometry":
             return ("json", layer.geojson or {})
         if layer.kind == "local-file":

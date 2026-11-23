@@ -170,6 +170,37 @@ class TestMcpToolHandlers(unittest.TestCase):
         self.assertEqual(result["thumbnailApiPath"], "/datasets/2/thumbnail")
         self.assertNotIn("thumbnail", result)
 
+    def test_get_dataset_discloses_a_saved_renderer(self):
+        self.client.datasets.get.return_value = {
+            "id": 1577,
+            "dataType": "vector",
+            "details": {"display": {"esri": {"renderer": {"type": "uniqueValue", "field1": "LANDUSE"}}}},
+        }
+
+        result = get_dataset(self.client, 1577)
+
+        self.assertTrue(result["symbology"]["hasSavedStyle"])
+        self.assertEqual(result["symbology"]["rendererType"], "uniqueValue")
+
+    def test_get_dataset_styled_publications_field_is_opt_in(self):
+        self.client.datasets.get.return_value = {"id": 1577, "dataType": "vector", "details": {}}
+        self.client.publications.list_for_dataset.return_value = [
+            {"raw": {"id": 204, "protocol": "wms", "canonicalStyleRevision": "rev"}}
+        ]
+
+        result = get_dataset(self.client, 1577, fields=["symbology", "styledPublications"])
+
+        self.assertEqual(result["styledPublications"][0]["publicationId"], 204)
+        self.assertTrue(result["styledPublications"][0]["hasStyle"])
+
+    def test_get_dataset_skips_the_publication_probe_by_default(self):
+        self.client.datasets.get.return_value = {"id": 1577, "dataType": "vector", "details": {}}
+
+        result = get_dataset(self.client, 1577)
+
+        self.assertNotIn("styledPublications", result)
+        self.client.publications.list_for_dataset.assert_not_called()
+
     def test_query_dataset_applies_limit(self):
         self.client.datasets.query.return_value = FeatureCollection(
             type="FeatureCollection",

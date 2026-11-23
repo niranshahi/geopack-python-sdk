@@ -7,6 +7,7 @@ import json
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from ..errors import ToolArgumentError
+from .dataset_symbology import summarise_symbology
 
 DetailsLevel = Literal["lite", "standard", "full"]
 # Legacy aliases used internally before v0.5
@@ -61,6 +62,12 @@ DATASET_TOP_LEVEL_KEYS = frozenset(
         # box without pulling the whole (large) `details` blob
         "geo_extent",
         "details.geo_extent",
+        # synthetic, derived from details.display — always attached (tiny) so an
+        # agent can SEE that the dataset carries its own rendering; `styledPublications`
+        # is derived on demand (it costs a publications call) and names the styled
+        # publication that renders the official symbology.
+        "symbology",
+        "styledPublications",
         # present only on a degraded (unparseable) row — kept projectable
         "validationDegraded",
         "validationErrors",
@@ -431,6 +438,10 @@ def trim_dataset_for_mcp(
     trimmed = dict(dataset)
     if "details" in trimmed:
         trimmed["details"] = trim_details(trimmed["details"], level)
+    # Derived, tiny, always present: an agent must be able to SEE that the dataset
+    # carries its own rendering (computed from the UNtrimmed details).
+    if "symbology" not in trimmed:
+        trimmed["symbology"] = summarise_symbology(dataset)
     return project_dataset_keys(trimmed, fields)
 
 

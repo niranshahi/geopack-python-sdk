@@ -40,11 +40,12 @@ class _Session:
 
 
 class _Datasets:
-    def __init__(self, details=None, data_type="vector", extra=None, feature_collection=None):
+    def __init__(self, details=None, data_type="vector", extra=None, feature_collection=None, feature_total=None):
         self.calls = []
         self._details = details if details is not None else {}
         self._data_type = data_type
         self._extra = extra or {}
+        self._feature_total = feature_total
         self._feature_collection = feature_collection or {
             "type": "FeatureCollection",
             "features": [],
@@ -54,6 +55,15 @@ class _Datasets:
         self.calls.append({"dataset_id": dataset_id, "args": args, "kwargs": kwargs})
         return self._feature_collection
 
+    def query_paged(self, dataset_id, page=1, page_size=1, include_total_count=False):
+        class _Pagination:
+            total_count = self._feature_total
+
+        class _Page:
+            pagination = _Pagination()
+
+        return _Page()
+
     def get(self, dataset_id):
         record = {"id": dataset_id, "dataType": self._data_type, "details": self._details}
         record.update(self._extra)
@@ -61,13 +71,17 @@ class _Datasets:
 
 
 class _Publications:
-    def __init__(self, ids=(60,)):
+    def __init__(self, ids=(60,), dataset_publications=None):
         self._ids = set(ids)
+        self._dataset_publications = dataset_publications or []
 
     def get(self, publication_id):
         if publication_id not in self._ids:
             raise RuntimeError("Publication not found. (HTTP 404)")
         return {"id": publication_id, "datasetId": 7, "protocol": "wms"}
+
+    def list_for_dataset(self, dataset_id):
+        return self._dataset_publications
 
 
 class _WrappedPublications:
@@ -80,7 +94,7 @@ class _WrappedPublications:
 class _Client:
     base_url = PORTAL
 
-    def __init__(self, publication_ids=(60,), details=None, data_type="vector", extra=None, feature_collection=None):
+    def __init__(self, publication_ids=(60,), details=None, data_type="vector", extra=None, feature_collection=None, publication_list=None, feature_total=None):
         self.auth = _Auth()
         self.session = _Session()
         self.datasets = _Datasets(
@@ -88,8 +102,9 @@ class _Client:
             data_type=data_type,
             extra=extra,
             feature_collection=feature_collection,
+            feature_total=feature_total,
         )
-        self.publications = _Publications(publication_ids)
+        self.publications = _Publications(publication_ids, publication_list)
 
 
 def _free_port():
@@ -372,6 +387,67 @@ class ShowMapTest(unittest.TestCase):
             ],
         )
         self.assertTrue(any("style does not affect" in w for w in payload["templateWarnings"]))
+
+    def test_a_dataset_layer_with_a_saved_renderer_warns(self):
+        payload = show_map(
+            _Client(details={"display": {"esri": {"renderer": {"type": "uniqueValue"}}}}),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577}],
+        )
+        self.assertTrue(any("saved symbology" in w for w in payload["templateWarnings"]))
+
+    def test_a_dataset_layer_with_a_styled_publication_names_it(self):
+        client = _Client(
+            publication_list=[
+                {"raw": {"id": 204, "protocol": "wms", "canonicalStyleRevision": "rev"}}
+            ]
+        )
+        payload = show_map(client, layers=[{"kind": "portal-dataset", "datasetId": 1577}])
+        self.assertTrue(any("204" in w for w in payload["templateWarnings"]))
+
+    def test_an_explicitly_styled_dataset_layer_is_not_warned(self):
+        payload = show_map(
+            _Client(details={"display": {"esri": {"renderer": {"type": "uniqueValue"}}}}),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577, "style": {"fill": "#ff0000"}}],
+        )
+        self.assertFalse(any("saved symbology" in w for w in payload["templateWarnings"]))
+
+    def test_a_large_dataset_layer_warns_about_the_geojson_cap(self):
+        payload = show_map(
+            _Client(feature_total=18648),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577}],
+        )
+        warning = next(w for w in payload["templateWarnings"] if "18648" in w)
+        self.assertIn("1000", warning)
+        self.assertIn("limit", warning)
+        self.assertIn("mvt", warning)
+
+    def test_a_layer_limit_of_zero_is_not_warned_about_truncation(self):
+        payload = show_map(
+            _Client(feature_total=18648),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577, "limit": 0}],
+        )
+        self.assertFalse(any("18648" in w for w in payload["templateWarnings"]))
+
+    def test_mvt_render_is_not_warned_about_the_geojson_cap(self):
+        payload = show_map(
+            _Client(feature_total=18648),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577, "render": "mvt"}],
+        )
+        self.assertFalse(any("18648" in w for w in payload["templateWarnings"]))
+
+    def test_a_dataset_within_the_cap_is_not_warned(self):
+        payload = show_map(
+            _Client(feature_total=500),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577}],
+        )
+        self.assertFalse(any("500 features" in w for w in payload["templateWarnings"]))
+
+    def test_an_explicit_limit_above_the_total_is_not_warned(self):
+        payload = show_map(
+            _Client(feature_total=18648),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577, "limit": 30000}],
+        )
+        self.assertFalse(any("18648" in w for w in payload["templateWarnings"]))
 
 
 class SurfacePinTest(unittest.TestCase):

@@ -56,6 +56,10 @@ class MapLayer:
     query: Optional[Dict[str, Any]] = None
     render: Optional[str] = None
     xyz_url: Optional[str] = None
+    #: GeoJSON page cap for a portal-dataset layer (``None`` = the 1,000 default;
+    #: ``<= 0`` = unbounded — the server returns the whole dataset). The caller
+    #: decides; the MCP never silently switches or truncates.
+    limit: Optional[int] = None
     #: True when the layer's source is a raster (a raster dataset or a WMS/WMTS
     #: publication). The viewer shows a raster swatch for these, never a made-up
     #: vector colour, even when ``render`` is vector (a raster dataset is served
@@ -80,6 +84,8 @@ class MapLayer:
             "dataUrl": f"{base_url}/data/{self.id}",
             "render": self.resolved_render(),
         }
+        if self.limit is not None:
+            payload["limit"] = self.limit
         if self.kind in ("portal-dataset", "portal-publication"):
             payload["tileUrl"] = f"{base_url}/tiles/{self.id}/{{z}}/{{x}}/{{y}}.pbf"
         if self.kind == "portal-publication" and self.publication_id is not None:
@@ -148,6 +154,7 @@ def layer_from_spec(spec: Dict[str, Any]) -> MapLayer:
         query=spec.get("query"),
         render=_render_or_none(spec),
         xyz_url=spec.get("xyzUrl") or spec.get("xyz_url"),
+        limit=_int_or_none(spec.get("limit")),
     )
     if kind == "portal-dataset":
         layer.dataset_id = _int_or_none(spec.get("datasetId") or spec.get("dataset_id"))

@@ -17,7 +17,13 @@ from typing import Any, Dict, List, Optional
 from ..maps import get_or_start_service, layer_from_spec
 from ..maps import viewer
 from ..maps.errors import SERVICE_ERROR, MapServiceError
-from ..maps.sources import dataset_info, publication_dataset_id, valid_wgs84_bbox
+from ..maps.sources import (
+    dataset_feature_count,
+    dataset_info,
+    publication_dataset_id,
+    valid_wgs84_bbox,
+)
+from ..sanitize.dataset_symbology import styled_publications
 
 _WGS84_CRS = "EPSG:4326"
 _AXIS_ORDER = "west,south,east,north"
@@ -28,6 +34,9 @@ _DEFAULT_LAYER_PALETTE = ("#3ba776", "#3b7fa7", "#c2703b", "#8b5cf6", "#d1477a",
 #: Renderers whose image is produced server-side (a per-layer ``style`` cannot
 #: recolour them; only vector renderers honour it).
 _RASTER_RENDERS = frozenset({"wms", "wmts", "xyz"})
+
+#: Features a portal-dataset GeoJSON layer loads when no ``limit`` is set.
+_GEOJSON_DEFAULT_LIMIT = 1000
 
 
 def _assign_layer_palette(manifest: Any, template_obj: Dict[str, Any]) -> None:
@@ -135,6 +144,73 @@ def _apply_extent(
                 "served as vector GeoJSON/MVT and will not show an image — use a portal-publication "
                 "layer (a raster WMS/WMTS publication) instead."
             )
+
+    _warn_about_saved_symbology(client, layer, info, warnings)
+    _warn_about_geojson_cap(client, layer, warnings)
+
+
+def _warn_about_geojson_cap(client: Any, layer: Any, warnings: List[str]) -> None:
+    """Say how many features a GeoJSON cap hides — never decide for the caller.
+
+    A portal-dataset GeoJSON layer loads the first 1,000 features by default. The
+    MCP does NOT silently switch to tiles or raise the limit; it names the numbers
+    and the levers (`limit`, `render:'mvt'`) so the AGENT (with the user) chooses.
+    """
+    if layer.kind != "portal-dataset" or layer.resolved_render() != "geojson":
+        return
+    cap = layer.limit if layer.limit is not None else _GEOJSON_DEFAULT_LIMIT
+    if cap is not None and cap <= 0:
+        return  # the caller already asked for the whole dataset
+    total = dataset_feature_count(client, int(layer.dataset_id))
+    if total is None or total <= cap:
+        return
+    label = layer.title or layer.id
+    warnings.append(
+        f"layer '{label}': dataset {layer.dataset_id} has {total} features but a GeoJSON layer "
+        f"loads the first {cap}. To show all, set the layer `limit` to 0 (whole dataset) or use "
+        "render:'mvt' (tiled, full coverage) — choose the appropriate one (ask the user if unsure)."
+    )
+
+
+def _warn_about_saved_symbology(
+    client: Any, layer: Any, info: Dict[str, Any], warnings: List[str]
+) -> None:
+    """Disclose a dataset's saved rendering so an agent never misses it.
+
+    A `portal-dataset` layer is drawn with the generic viewer style; the dataset's
+    own symbology (a saved ESRI renderer, or a raster display block) is NOT applied.
+    When the dataset stores none, its *publication* may still carry the style (the
+    path that renders dataset 1577's official look) — probe once and name it.
+    """
+    if layer.kind != "portal-dataset":
+        return
+    if isinstance(layer.style, dict) and layer.style:
+        return  # a caller style is deliberate; the disclosure is noise here
+    label = layer.title or layer.id
+    symbology = info.get("symbology") or {}
+    if symbology.get("hasSavedStyle"):
+        kind = symbology.get("kind")
+        flavour = symbology.get("rendererType") or symbology.get("rasterDisplayType")
+        detail = f"{kind}" + (f" ({flavour})" if flavour else "")
+        warnings.append(
+            f"layer '{label}': dataset {layer.dataset_id} has its own saved symbology {detail}; a "
+            "portal-dataset layer does not apply it and shows the generic viewer style. Use a "
+            "portal-publication layer to render the official symbology, or pass an explicit style."
+        )
+        return
+
+    styled = [
+        pub
+        for pub in styled_publications(client, int(layer.dataset_id))
+        if pub.get("hasStyle")
+    ]
+    if styled:
+        ids = ", ".join(str(pub.get("publicationId")) for pub in styled)
+        warnings.append(
+            f"layer '{label}': dataset {layer.dataset_id} stores no symbology, but publication(s) "
+            f"{ids} carry a saved style — use kind:'portal-publication' with that publicationId to "
+            "render the official symbology instead of the generic viewer style."
+        )
 
 
 def show_map(
