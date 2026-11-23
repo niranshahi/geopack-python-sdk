@@ -23,7 +23,12 @@ from ..crs_utils import (
     looks_wgs84,
     srid_from_dataset,
 )
-from ..sanitize.dataset_symbology import styled_publications, summarise_symbology
+from ..sanitize.dataset_symbology import (
+    field_meta_from_details,
+    styled_publications,
+    summarise_symbology,
+)
+from ..sanitize.style_spec import dataset_style_spec, field_values_from_geojson
 from ..serialize import to_jsonable
 
 #: Local file extensions the service may serve.
@@ -172,6 +177,19 @@ def dataset_feature_count(client: Any, dataset_id: int) -> Optional[int]:
     return int(total) if isinstance(total, int) else None
 
 
+def dataset_field_values(
+    client: Any, dataset_id: int, field: str, *, limit: int = 1000
+) -> List[Any]:
+    """A sample of one ``field``'s values, to derive a caller-requested symbology.
+
+    Reads the same GeoJSON lane the viewer uses and keeps only the requested
+    attribute, so a ``uniqueValue``/``classBreaks`` spec can be computed from the
+    real distribution rather than a caller-guessed set of classes.
+    """
+    geojson = query_dataset_geojson(client, int(dataset_id), limit=int(limit))
+    return field_values_from_geojson(geojson, field)
+
+
 def _repair_to_wgs84(
     client: Any, dataset_id: int, geojson: Dict[str, Any], out_srid: Optional[int]
 ) -> Dict[str, Any]:
@@ -274,6 +292,12 @@ def dataset_info(client: Any, dataset_id: int) -> Dict[str, Any]:
         info["srid"] = srid
 
     info["symbology"] = summarise_symbology(raw)
+    field_meta = field_meta_from_details(details)
+    if field_meta:
+        info["field_meta"] = field_meta
+    spec = dataset_style_spec(raw)
+    if spec is not None:
+        info["style_spec"] = spec
     return info
 
 

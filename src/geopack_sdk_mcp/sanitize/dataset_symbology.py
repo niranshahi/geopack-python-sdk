@@ -97,6 +97,39 @@ def resolve_esri_display(details: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
+def field_meta_from_details(details: Any) -> Dict[str, Dict[str, Any]]:
+    """Per-field metadata from a dataset's ``details``: alias + coded-value domain.
+
+    A coded-value field carries ``details.fields[].domain`` as
+    ``{"type": "codedValues", "items": [{"code": 1, "value": "مسکونی"}, ...]}``.
+    Returns ``{fieldName: {"alias": str|None, "domain": {str(code): label}}}`` for
+    every field that has an alias or a domain, so a data-derived symbology can put
+    the human value (not the raw code) in its legend.
+    """
+    block = _as_dict(details)
+    fields = block.get("fields")
+    if not isinstance(fields, list):
+        return {}
+    meta: Dict[str, Dict[str, Any]] = {}
+    for field in fields:
+        field = _as_dict(field)
+        name = field.get("name") or field.get("fieldName")
+        if not isinstance(name, str) or not name:
+            continue
+        domain: Dict[str, str] = {}
+        for item in _as_dict(field.get("domain")).get("items") or []:
+            item = _as_dict(item)
+            code = item.get("code")
+            label = item.get("value", item.get("label"))
+            if code is None or label is None:
+                continue
+            domain[str(code)] = str(label)
+        alias = field.get("alias") if isinstance(field.get("alias"), str) else None
+        if domain or alias:
+            meta[name] = {"alias": alias, "domain": domain}
+    return meta
+
+
 def resolve_raster_display(details: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """The raster display block (``displayType``), frontend precedence; else ``None``."""
     display = details.get("display")

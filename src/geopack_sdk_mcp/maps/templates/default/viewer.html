@@ -40,6 +40,9 @@ __CSS_VARS__
   #legend .item .progress .bar i { display: block; height: 100%; width: 0; background: var(--gp-accent); transition: width .15s linear; }
   #legend .item .progress .spin { display: inline-block; width: 10px; height: 10px; border: 2px solid rgba(0,0,0,.15);
     border-top-color: var(--gp-accent); border-radius: 50%; animation: gp-spin .8s linear infinite; vertical-align: middle; }
+  #legend .legend-block { margin: 6px 0; }
+  #legend .legend-block .item > .head { font-weight: 600; }
+  #legend .legend-sub { padding-left: 20px; font-size: 12px; opacity: .95; }
   @keyframes gp-spin { to { transform: rotate(360deg); } }
   footer { background: #f4f6f5; color: #4b5b54; padding: 5px 14px; font-size: 11px; }
   #banner { position: absolute; left: 10px; top: 10px; z-index: 5; max-width: 60%;
@@ -125,6 +128,33 @@ function vectorStyle(layerStyle) {
   });
 }
 
+// The portable style spec (slice 033 §12) drives a style FUNCTION: uniqueValue
+// matches a feature property, classBreaks buckets a numeric value, simple is
+// constant. The legend is built from the SAME spec, so map and legend agree.
+function symbologyStyleFn(sym) {
+  const fallback = sym.simple || sym.default || BASE_STYLE;
+  return function (feature) {
+    let s = fallback;
+    if (sym.type === 'uniqueValue' && sym.field) {
+      const raw = feature.get(sym.field);
+      const key = raw === null || raw === undefined ? '' : String(raw);
+      const hit = (sym.unique || []).find(function (e) { return String(e.value) === key; });
+      if (hit && hit.style) s = hit.style;
+    } else if (sym.type === 'classBreaks' && sym.field) {
+      const n = Number(feature.get(sym.field));
+      if (isFinite(n)) {
+        const hit = (sym.breaks || []).find(function (b) {
+          const min = b.min === null || b.min === undefined ? -Infinity : b.min;
+          const max = b.max === null || b.max === undefined ? Infinity : b.max;
+          return n >= min && n <= max;
+        });
+        if (hit && hit.style) s = hit.style;
+      }
+    }
+    return vectorStyle(s);
+  };
+}
+
 // WMS/WMTS/XYZ are images rendered elsewhere: a per-layer `style` cannot recolour
 // them, and the legend must show a raster swatch rather than a vector colour.
 function isRasterRender(render) {
@@ -147,16 +177,22 @@ function basemapLayer(entry) {
 function buildLayer(spec, index) {
   const render = spec.render || (spec.kind === 'portal-publication' ? 'wms' : 'geojson');
   const resolved = resolveStyle(spec, index);
+  // A dataset's saved symbology (if the MCP derived one) wins over the palette;
+  // an explicit simple `style` still wins over the derived spec. `appliedSym` is
+  // what the layer ACTUALLY draws with, and is the ONLY thing the legend reads —
+  // so map and legend cannot disagree when a caller overrides the spec.
+  const appliedSym = spec.symbology && !spec.style ? spec.symbology : null;
+  const styleArg = appliedSym ? symbologyStyleFn(appliedSym) : vectorStyle(resolved);
   let source, layer;
   if (render === 'geojson') {
     // The source is left empty here; the GeoJSON is streamed by loadGeojsonLayer
     // so the legend can show real download progress for large datasets.
     source = new ol.source.Vector();
-    layer = new ol.layer.Vector({ source: source, style: vectorStyle(resolved) });
+    layer = new ol.layer.Vector({ source: source, style: styleArg });
     layer.set('gpLoadUrl', spec.dataUrl);
   } else if (render === 'mvt') {
     source = new ol.source.VectorTile({ format: new ol.format.MVT(), url: withToken(spec.tileUrl) });
-    layer = new ol.layer.VectorTile({ source: source, style: vectorStyle(resolved) });
+    layer = new ol.layer.VectorTile({ source: source, style: styleArg });
   } else if (render === 'wms') {
     source = new ol.source.TileWMS({ url: spec.wmsUrl, params: { t: TOKEN } });
     layer = new ol.layer.Tile({ source: source });
@@ -168,13 +204,14 @@ function buildLayer(spec, index) {
     layer = new ol.layer.Tile({ source: source });
   } else {
     source = new ol.source.Vector();
-    layer = new ol.layer.Vector({ source: source, style: vectorStyle(resolved) });
+    layer = new ol.layer.Vector({ source: source, style: styleArg });
     layer.set('gpLoadUrl', spec.dataUrl);
   }
   layer.set('title', spec.title || spec.id);
   layer.set('gpId', spec.id);
   layer.set('gpRender', render);
   layer.set('gpStyle', resolved);
+  layer.set('gpSymbology', appliedSym);
   layer.set('gpRaster', !!spec.raster);
   return layer;
 }
@@ -188,10 +225,16 @@ async function wfsLayer(spec, index) {
   const source = new ol.source.Vector({
     features: new ol.format.GeoJSON().readFeatures(geo, { featureProjection: 'EPSG:3857' })
   });
-  const layer = new ol.layer.Vector({ source: source, style: vectorStyle(resolveStyle(spec, index)) });
+  const resolved = resolveStyle(spec, index);
+  const appliedSym = spec.symbology && !spec.style ? spec.symbology : null;
+  const styleArg = appliedSym ? symbologyStyleFn(appliedSym) : vectorStyle(resolved);
+  const layer = new ol.layer.Vector({ source: source, style: styleArg });
   layer.set('gpRender', 'wfs');
-  layer.set('gpStyle', resolveStyle(spec, index));
+  layer.set('gpStyle', resolved);
+  layer.set('gpSymbology', appliedSym);
   layer.set('gpRaster', false);
+  layer.set('title', spec.title || spec.id);
+  layer.set('gpId', spec.id);
   return layer;
 }
 
@@ -334,6 +377,11 @@ function renderPanel(map, baseLayers, dataLayers) {
     dataLayers.forEach(function (layer) {
       const render = layer.get('gpRender');
       const s = layer.get('gpStyle') || BASE_STYLE;
+      const sym = layer.get('gpSymbology');
+      const base = (sym && (sym.simple || sym.default)) || s;
+      const legendEntries = sym && sym.legend && Array.isArray(sym.legend.entries)
+        ? sym.legend.entries.filter(function (e) { return e && e.style; })
+        : null;
       const item = document.createElement('div');
       item.className = 'item';
       const swatch = document.createElement('span');
@@ -346,8 +394,8 @@ function renderPanel(map, baseLayers, dataLayers) {
         swatch.classList.add('raster');
         label.textContent = (layer.get('title') || '') + ' (raster)';
       } else {
-        swatch.style.background = s.fill || '#3ba776';
-        swatch.style.borderColor = s.stroke || 'rgba(0,0,0,.3)';
+        swatch.style.background = base.fill || '#3ba776';
+        swatch.style.borderColor = base.stroke || 'rgba(0,0,0,.3)';
         label.textContent = layer.get('title');
       }
       item.appendChild(swatch); item.appendChild(label);
@@ -357,6 +405,33 @@ function renderPanel(map, baseLayers, dataLayers) {
         prog.id = 'gp-prog-' + layer.get('gpId');
         prog.innerHTML = '<span class="spin"></span>';
         item.appendChild(prog);
+      }
+      if (legendEntries && legendEntries.length) {
+        // A derived symbology legend (unique value / class breaks) is a block:
+        // the layer title, then one swatch row per class — from the SAME spec the
+        // style function draws with.
+        const block = document.createElement('div');
+        block.className = 'legend-block';
+        block.appendChild(item);
+        legendEntries.forEach(function (entry) {
+          const es = entry.style || {};
+          const row = document.createElement('div');
+          row.className = 'item legend-sub';
+          const sw = document.createElement('span');
+          sw.className = 'swatch';
+          sw.style.background = es.fill || es.stroke || '#3ba776';
+          sw.style.borderColor = es.stroke || 'rgba(0,0,0,.3)';
+          if (es.opacity !== undefined && es.opacity !== null) sw.style.opacity = String(es.opacity);
+          const lb = document.createElement('span');
+          lb.style.flex = '1';
+          lb.textContent = (entry.label === null || entry.label === undefined || entry.label === '')
+            ? '(no value)'
+            : entry.label;
+          row.appendChild(sw); row.appendChild(lb);
+          block.appendChild(row);
+        });
+        legendEl.appendChild(block);
+        return;
       }
       legendEl.appendChild(item);
     });

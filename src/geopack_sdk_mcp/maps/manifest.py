@@ -50,6 +50,10 @@ class MapLayer:
     path: Optional[str] = None
     geojson: Optional[Dict[str, Any]] = None
     style: Optional[Dict[str, Any]] = None
+    #: The portable style spec (slice 033 §12) derived from the dataset's saved
+    #: ESRI renderer. A vector layer applies it via a style FUNCTION and the
+    #: legend is built from it; an explicit ``style`` overrides it.
+    symbology: Optional[Dict[str, Any]] = None
     bbox: Optional[List[float]] = None
     bbox_crs: Optional[str] = None
     bbox_axis_order: Optional[str] = None
@@ -97,6 +101,8 @@ class MapLayer:
             payload["raster"] = True
         if self.style:
             payload["style"] = self.style
+        if self.symbology:
+            payload["symbology"] = self.symbology
         if self.bbox:
             payload["bbox"] = self.bbox
             payload["bboxCrs"] = self.bbox_crs or "EPSG:4326"
@@ -150,6 +156,7 @@ def layer_from_spec(spec: Dict[str, Any]) -> MapLayer:
         kind=kind,
         title=spec.get("title"),
         style=spec.get("style"),
+        symbology=spec.get("symbology") if isinstance(spec.get("symbology"), dict) else None,
         bbox=spec.get("bbox"),
         query=spec.get("query"),
         render=_render_or_none(spec),

@@ -23,6 +23,28 @@ SQUARE = {
 }
 
 
+def _feature(properties):
+    return {
+        "type": "Feature",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[0.0, 0.0], [0.1, 0.0], [0.1, 0.1], [0.0, 0.1], [0.0, 0.0]]],
+        },
+        "properties": properties,
+    }
+
+
+def _sample_features():
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            _feature({"Ownership": 1, "DB_SHAPE_Area": 100.0}),
+            _feature({"Ownership": 2, "DB_SHAPE_Area": 200.0}),
+            _feature({"Ownership": 1, "DB_SHAPE_Area": 300.0}),
+        ],
+    }
+
+
 class _Response:
     content = b"\x1a\x00tile"
     headers = {"Content-Type": "application/vnd.mapbox-vector-tile"}
@@ -388,11 +410,86 @@ class ShowMapTest(unittest.TestCase):
         )
         self.assertTrue(any("style does not affect" in w for w in payload["templateWarnings"]))
 
-    def test_a_dataset_layer_with_a_saved_renderer_warns(self):
+    def test_a_dataset_layer_with_a_saved_renderer_gets_the_portable_spec(self):
+        # A translatable saved renderer is APPLIED (not merely warned): the layer
+        # carries the portable symbology spec so the viewer draws the real colours.
+        details = {
+            "display": {
+                "esri": {
+                    "renderer": {
+                        "type": "uniqueValue",
+                        "field1": "Landuse_Group",
+                        "uniqueValueInfos": [
+                            {
+                                "value": "1",
+                                "label": "Residential",
+                                "symbol": {
+                                    "type": "esriSFS",
+                                    "color": [27, 158, 119, 196],
+                                    "outline": {"color": [131, 129, 126, 255], "width": 0.75},
+                                },
+                            }
+                        ],
+                        "defaultSymbol": {"type": "esriSFS", "color": [252, 0, 0, 196]},
+                    }
+                }
+            }
+        }
         payload = show_map(
-            _Client(details={"display": {"esri": {"renderer": {"type": "uniqueValue"}}}}),
+            _Client(details=details),
             layers=[{"kind": "portal-dataset", "datasetId": 1577}],
         )
+        layer = payload["layers"][0]
+        self.assertEqual(layer["symbology"]["type"], "uniqueValue")
+        self.assertEqual(layer["symbology"]["field"], "Landuse_Group")
+        self.assertEqual(layer["symbology"]["unique"][0]["style"]["fill"], "#1b9e77")
+        self.assertEqual(layer["symbology"]["legend"]["entries"][0]["label"], "Residential")
+        # Applied, so no "saved symbology" disclosure warning.
+        self.assertFalse(any("saved symbology" in w for w in payload["templateWarnings"]))
+
+    def test_a_derived_symbology_layer_is_not_given_a_palette_style(self):
+        # The palette fill must NOT be attached to a layer that carries a derived
+        # spec: in the viewer an explicit `style` wins over `symbology`, so a
+        # palette fill would silently override the dataset colours (the drawn map
+        # stayed one flat colour while the legend showed every class).
+        details = {
+            "display": {
+                "esri": {
+                    "renderer": {
+                        "type": "uniqueValue",
+                        "field1": "Landuse_Group",
+                        "uniqueValueInfos": [
+                            {"value": "1", "label": "Residential",
+                             "symbol": {"type": "esriSFS", "color": [27, 158, 119, 196]}}
+                        ],
+                    }
+                }
+            }
+        }
+        payload = show_map(
+            _Client(details=details),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577}],
+        )
+        layer = payload["layers"][0]
+        self.assertEqual(layer["symbology"]["type"], "uniqueValue")
+        self.assertNotIn("style", layer)
+
+    def test_an_explicit_style_disables_the_derived_symbology(self):
+        details = {"display": {"esri": {"renderer": {"type": "uniqueValue", "field1": "x"}}}}
+        payload = show_map(
+            _Client(details=details),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577, "style": {"fill": "#ff0000"}}],
+        )
+        self.assertNotIn("symbology", payload["layers"][0])
+
+    def test_an_untranslatable_renderer_still_warns(self):
+        # pieChart is not translated yet → fall back to the disclosure warning.
+        details = {"display": {"esri": {"renderer": {"type": "pieChart", "field1": "x"}}}}
+        payload = show_map(
+            _Client(details=details),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577}],
+        )
+        self.assertNotIn("symbology", payload["layers"][0])
         self.assertTrue(any("saved symbology" in w for w in payload["templateWarnings"]))
 
     def test_a_dataset_layer_with_a_styled_publication_names_it(self):
@@ -410,6 +507,111 @@ class ShowMapTest(unittest.TestCase):
             layers=[{"kind": "portal-dataset", "datasetId": 1577, "style": {"fill": "#ff0000"}}],
         )
         self.assertFalse(any("saved symbology" in w for w in payload["templateWarnings"]))
+
+    def test_a_caller_symbology_shorthand_derives_unique_value_classes(self):
+        # `symbology: {type, field}` is derived from the layer's own data: one
+        # colour per distinct value, and NO palette `style` is attached (which
+        # would override it in the viewer).
+        payload = show_map(
+            _Client(feature_collection=_sample_features()),
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 1577,
+                 "symbology": {"type": "uniqueValue", "field": "Ownership"}}
+            ],
+        )
+        layer = payload["layers"][0]
+        sym = layer["symbology"]
+        self.assertEqual(sym["type"], "uniqueValue")
+        self.assertEqual(sym["field"], "Ownership")
+        self.assertEqual({e["value"] for e in sym["unique"]}, {1, 2})
+        self.assertTrue(all(e["style"]["fill"] for e in sym["unique"]))
+        self.assertNotIn("style", layer)
+
+    def test_a_caller_symbology_labels_codes_with_the_field_domain(self):
+        # A coded-value field's legend entry must read the human value (the domain
+        # label), not the raw integer code, and the legend title is the field alias.
+        details = {
+            "fields": [
+                {"name": "Ownership", "alias": "مالکیت",
+                 "domain": {"type": "codedValues",
+                            "items": [{"code": 1, "value": "اوقاف"},
+                                      {"code": 2, "value": "مستثنیات"}]}}
+            ]
+        }
+        payload = show_map(
+            _Client(details=details, feature_collection=_sample_features()),
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 1577,
+                 "symbology": {"type": "uniqueValue", "field": "Ownership"}}
+            ],
+        )
+        sym = payload["layers"][0]["symbology"]
+        self.assertEqual([e["label"] for e in sym["unique"]], ["اوقاف", "مستثنیات"])
+        self.assertEqual(sym["legend"]["title"], "مالکیت")
+
+    def test_a_caller_symbology_shorthand_derives_class_breaks(self):
+        payload = show_map(
+            _Client(feature_collection=_sample_features()),
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 1577,
+                 "symbology": {"type": "classBreaks", "field": "DB_SHAPE_Area", "classes": 5}}
+            ],
+        )
+        sym = payload["layers"][0]["symbology"]
+        self.assertEqual(sym["type"], "classBreaks")
+        self.assertEqual(len(sym["breaks"]), 5)
+        self.assertEqual(sym["breaks"][0]["min"], 100.0)
+        self.assertEqual(sym["breaks"][-1]["max"], 300.0)
+        self.assertNotEqual(sym["breaks"][0]["style"]["fill"], sym["breaks"][-1]["style"]["fill"])
+
+    def test_a_caller_symbology_wins_over_the_dataset_renderer(self):
+        details = {
+            "display": {
+                "esri": {
+                    "renderer": {
+                        "type": "uniqueValue",
+                        "field1": "Landuse_Group",
+                        "uniqueValueInfos": [
+                            {"value": "9", "label": "X",
+                             "symbol": {"type": "esriSFS", "color": [1, 2, 3]}}
+                        ],
+                    }
+                }
+            }
+        }
+        payload = show_map(
+            _Client(details=details, feature_collection=_sample_features()),
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 1577,
+                 "symbology": {"type": "uniqueValue", "field": "Ownership"}}
+            ],
+        )
+        self.assertEqual(payload["layers"][0]["symbology"]["field"], "Ownership")
+
+    def test_a_high_cardinality_shorthand_warns_and_is_dropped(self):
+        features = {
+            "type": "FeatureCollection",
+            "features": [_feature({"Parcel_Number": str(i)}) for i in range(40)],
+        }
+        payload = show_map(
+            _Client(feature_collection=features),
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 1577,
+                 "symbology": {"type": "uniqueValue", "field": "Parcel_Number"}}
+            ],
+        )
+        self.assertNotIn("symbology", payload["layers"][0])
+        self.assertTrue(any("distinct values" in w for w in payload["templateWarnings"]))
+
+    def test_a_symbology_on_an_image_render_warns(self):
+        payload = show_map(
+            _Client(),
+            layers=[
+                {"kind": "portal-publication", "publicationId": 60, "render": "wms",
+                 "symbology": {"type": "uniqueValue", "field": "x"}}
+            ],
+        )
+        self.assertTrue(any("does not affect" in w for w in payload["templateWarnings"]))
 
     def test_a_large_dataset_layer_warns_about_the_geojson_cap(self):
         payload = show_map(

@@ -19,11 +19,18 @@ from ..maps import viewer
 from ..maps.errors import SERVICE_ERROR, MapServiceError
 from ..maps.sources import (
     dataset_feature_count,
+    dataset_field_values,
     dataset_info,
     publication_dataset_id,
     valid_wgs84_bbox,
 )
 from ..sanitize.dataset_symbology import styled_publications
+from ..sanitize.style_spec import (
+    breaks_spec,
+    categorical_spec,
+    field_values_from_geojson,
+    quantile_breaks,
+)
 
 _WGS84_CRS = "EPSG:4326"
 _AXIS_ORDER = "west,south,east,north"
@@ -38,13 +45,24 @@ _RASTER_RENDERS = frozenset({"wms", "wmts", "xyz"})
 #: Features a portal-dataset GeoJSON layer loads when no ``limit`` is set.
 _GEOJSON_DEFAULT_LIMIT = 1000
 
+#: Features sampled to derive a caller-requested symbology from the data.
+_SYMBOLOGY_SAMPLE_LIMIT = 1000
+#: Default class count for a caller-requested ``classBreaks`` symbology.
+_DEFAULT_BREAK_CLASSES = 5
+#: A data-derived categorical symbology above this many classes is refused (a
+#: high-cardinality field like an id would render an unreadable legend).
+_MAX_DERIVED_CLASSES = 30
+
 
 def _assign_layer_palette(manifest: Any, template_obj: Dict[str, Any]) -> None:
     """Give each vector layer a distinct fill from the template palette.
 
     Layers without an explicit ``style.fill`` rotate through ``layerPalette`` so
     multiple layers are visually separable (one shared default colour made them
-    indistinguishable). Server-rendered raster layers are skipped.
+    indistinguishable). Server-rendered raster layers are skipped, and so is any
+    layer that already carries a derived ``symbology`` spec — its colours come
+    from the dataset's own renderer, and adding a palette ``style`` would override
+    it in the viewer (an explicit ``style`` wins over the derived spec there).
     """
     palette = template_obj.get("layerPalette")
     if not isinstance(palette, list):
@@ -55,6 +73,8 @@ def _assign_layer_palette(manifest: Any, template_obj: Dict[str, Any]) -> None:
     for index, layer in enumerate(manifest.layers.values()):
         if layer.raster or layer.resolved_render() in _RASTER_RENDERS:
             continue
+        if layer.symbology:
+            continue  # the derived dataset spec already fixes the colours
         style = dict(layer.style) if isinstance(layer.style, dict) else {}
         if not style.get("fill"):
             style["fill"] = colors[index % len(colors)]
@@ -88,6 +108,87 @@ def _require_publication(client: Any, publication_id: int) -> Any:
 
 def _bboxes_overlap(a: Any, b: Any) -> bool:
     return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
+
+
+def _resolve_caller_symbology(
+    client: Any, layer: Any, warnings: List[str], field_meta: Optional[Dict[str, Any]] = None
+) -> None:
+    """Resolve a caller-supplied ``symbology`` into a complete portable spec.
+
+    A caller may pass either a COMPLETE spec (already carrying ``unique``/``breaks``)
+    or a SHORTHAND the handler derives from the layer's own data:
+
+    * ``{"type": "uniqueValue", "field": "Ownership"}`` — one colour per distinct value
+    * ``{"type": "classBreaks", "field": "DB_SHAPE_Area", "classes": 5}`` — quantile breaks
+
+    The resolved spec is left on ``layer.symbology`` (so the viewer draws it and the
+    dataset's own saved renderer is never consulted); ``None`` means "no usable
+    symbology" and the caller is told why in ``warnings``.
+    """
+    symbology = layer.symbology
+    if not isinstance(symbology, dict) or not symbology:
+        layer.symbology = None
+        return
+    stype = symbology.get("type")
+    label = layer.title or layer.id
+
+    # A complete caller-authored spec is used verbatim.
+    if symbology.get("unique") and stype in (None, "uniqueValue"):
+        return
+    if symbology.get("breaks") and stype in (None, "classBreaks"):
+        return
+
+    field = symbology.get("field")
+    if not isinstance(field, str) or not field:
+        warnings.append(
+            f"layer '{label}': symbology needs a 'field' (or explicit 'unique'/'breaks'); ignored."
+        )
+        layer.symbology = None
+        return
+
+    if layer.kind == "portal-dataset":
+        values = dataset_field_values(
+            client, int(layer.dataset_id), field, limit=_SYMBOLOGY_SAMPLE_LIMIT
+        )
+    else:
+        values = field_values_from_geojson(layer.geojson, field)
+
+    field_info = (field_meta or {}).get(field)
+    field_info = field_info if isinstance(field_info, dict) else {}
+    domain = field_info.get("domain") if isinstance(field_info.get("domain"), dict) else {}
+    alias = field_info.get("alias")
+    title = alias if isinstance(alias, str) and alias else field
+
+    if stype == "classBreaks":
+        classes = symbology.get("classes")
+        classes = (
+            int(classes)
+            if isinstance(classes, int) and not isinstance(classes, bool) and classes > 0
+            else _DEFAULT_BREAK_CLASSES
+        )
+        breaks = quantile_breaks(values, classes)
+        if not breaks:
+            warnings.append(
+                f"layer '{label}': symbology field '{field}' has no numeric values; ignored."
+            )
+            layer.symbology = None
+            return
+        layer.symbology = breaks_spec(field, breaks, title=title)
+        return
+
+    spec = categorical_spec(field, values, domain=domain, title=title)
+    if not spec["unique"]:
+        warnings.append(f"layer '{label}': symbology field '{field}' has no values; ignored.")
+        layer.symbology = None
+        return
+    if len(spec["unique"]) > _MAX_DERIVED_CLASSES:
+        warnings.append(
+            f"layer '{label}': symbology field '{field}' has {len(spec['unique'])} distinct values "
+            f"(limit {_MAX_DERIVED_CLASSES}); use a lower-cardinality field or an explicit 'breaks' spec."
+        )
+        layer.symbology = None
+        return
+    layer.symbology = spec
 
 
 def _apply_extent(
@@ -145,6 +246,26 @@ def _apply_extent(
                 "layer (a raster WMS/WMTS publication) instead."
             )
 
+    if layer.symbology:
+        # A caller asked for a specific symbology. Resolve it (a shorthand spec is
+        # derived from the layer's data) and never overwrite it with the dataset's
+        # own renderer.
+        if layer.resolved_render() in _RASTER_RENDERS:
+            warnings.append(
+                f"layer '{label}': symbology does not affect a "
+                f"{layer.resolved_render().upper()} image layer (the server renders it); ignored."
+            )
+            layer.symbology = None
+        else:
+            _resolve_caller_symbology(
+                client, layer, warnings, field_meta=info.get("field_meta")
+            )
+    elif info.get("style_spec") and layer.kind == "portal-dataset" and not layer.style:
+        # No caller symbology: apply the dataset's saved symbol as the layer's
+        # default style, so the map reproduces the portal colouring instead of a
+        # palette colour.
+        layer.symbology = info["style_spec"]
+
     _warn_about_saved_symbology(client, layer, info, warnings)
     _warn_about_geojson_cap(client, layer, warnings)
 
@@ -175,15 +296,19 @@ def _warn_about_geojson_cap(client: Any, layer: Any, warnings: List[str]) -> Non
 def _warn_about_saved_symbology(
     client: Any, layer: Any, info: Dict[str, Any], warnings: List[str]
 ) -> None:
-    """Disclose a dataset's saved rendering so an agent never misses it.
+    """Disclose a dataset's saved rendering when the MCP cannot render it.
 
-    A `portal-dataset` layer is drawn with the generic viewer style; the dataset's
-    own symbology (a saved ESRI renderer, or a raster display block) is NOT applied.
-    When the dataset stores none, its *publication* may still carry the style (the
-    path that renders dataset 1577's official look) — probe once and name it.
+    A `portal-dataset` layer whose dataset has a **translatable** vector renderer
+    is now drawn with the derived portable spec (``layer.symbology``), so no
+    warning is needed there. This still warns when the saved symbology is NOT
+    applied — a raster display block, or a renderer family we do not translate —
+    and, failing that, names the styled *publication* that carries the official
+    look (the path that renders dataset 1577).
     """
     if layer.kind != "portal-dataset":
         return
+    if layer.symbology:
+        return  # the dataset's saved vector symbology IS applied; nothing to warn
     if isinstance(layer.style, dict) and layer.style:
         return  # a caller style is deliberate; the disclosure is noise here
     label = layer.title or layer.id

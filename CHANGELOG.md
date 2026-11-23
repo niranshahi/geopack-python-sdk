@@ -3,6 +3,52 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.7 — 2026-11-23
+
+Portable layer-style model, Phase 2 (slice 033 §12.2/§12.3 F2+F4). A dataset's
+saved ESRI renderer is now **translated** into a renderer-agnostic spec and
+**applied** to the layer — the map shows the portal's intended colours instead of
+a palette colour, and the legend is built from the same spec (owner request). No
+new tool (31), no new dependency.
+
+### Added
+
+- **`sanitize/style_spec.py`** — `esri_renderer_to_spec` (uniqueValue →
+  `unique[]`, classBreaks → `breaks[]`, simple → `simple`; ESRI `[r,g,b,a]`
+  colours → `#rrggbb` + `opacity`; esriSFS/esriSLS/esriSMS → polygon/line/point)
+  and `dataset_style_spec` (reads `display.esri.renderer` with the frontend's
+  precedence; vector/table only).
+- **`show_map` applies the derived spec** — a `portal-dataset` layer with a
+  translatable saved renderer and no explicit `style` now carries `symbology`
+  (the portable spec) in its manifest; an explicit `style` still wins. The
+  disclosure warning from 0.12.5 is emitted only when the saved style is **not**
+  applied (a raster display block, an untranslated renderer family, or a styled
+  publication — the latter two still name the portal-publication route).
+- **Viewer style function + legend block** — the OpenLayers vector style is now a
+  **function** (uniqueValue matches a feature property, classBreaks buckets a
+  numeric value, simple is constant); the legend draws one swatch row per class
+  from the **same** spec, so the drawn map and the legend cannot disagree.
+- **Caller `symbology` on a layer** — a layer spec may carry a complete portable
+  spec (`unique`/`breaks`) or a shorthand the handler derives from the layer's own
+  data: `{type:'uniqueValue', field}` (one colour per distinct value) and
+  `{type:'classBreaks', field, classes}` (quantile breaks, default 5). Caller
+  symbology wins over the dataset's saved renderer, so one dataset can be shown
+  styled several ways.
+- **Coded-value domain labels** — a field's `details.fields[].domain`
+  (`{type:'codedValues', items:[{code, value}]}`) is read so the legend shows the
+  human value (e.g. «اوقاف») instead of the raw code, and the field `alias`
+  (e.g. «مالکیت») is the legend title. Applies to both derived and saved renderers
+  (a saved renderer label is used when present; the domain is the fallback).
+
+### Fixed
+
+- **Derived symbology was overridden by the palette** — `_assign_layer_palette`
+  ran after the symbology was attached and set a palette `style`, which the
+  viewer lets win over `symbology`, so the map stayed one flat colour while the
+  legend showed every class. A layer that carries `symbology` is now skipped by
+  the palette, and the viewer builds its legend from the same `appliedSym` the
+  style function uses.
+
 ## 0.12.6 — 2026-11-23
 
 Viewer download progress (slice 033, Lane B follow-up). A whole-dataset GeoJSON

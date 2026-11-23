@@ -198,6 +198,19 @@ class RenderHtmlTest(unittest.TestCase):
         self.assertIn("gp-prog-", html)
         self.assertIn("Content-Length", html)
 
+    def test_a_dataset_symbology_spec_drives_a_style_function_and_legend(self):
+        # The portable spec (§12) is applied via a style FUNCTION and the legend
+        # is built from the SAME spec, so map and legend cannot disagree.
+        html = viewer.default_viewer_html()
+        self.assertIn("symbologyStyleFn", html)
+        self.assertIn("gpSymbology", html)
+        self.assertIn("legend-block", html)
+        # The legend reads the SAME `appliedSym` the style function is built from,
+        # so an explicit `style` override downgrades both together (never a legend
+        # of class colours over a flat palette map).
+        self.assertIn("appliedSym", html)
+        self.assertNotIn("layer.set('gpSymbology', spec.symbology", html)
+
 
 class ViewerHtmlTest(unittest.TestCase):
     def test_default_source_when_no_user_page(self):
