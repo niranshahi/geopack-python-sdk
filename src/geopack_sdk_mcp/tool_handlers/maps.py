@@ -29,6 +29,7 @@ from ..sanitize.dataset_symbology import styled_publications
 from ..sanitize.style_spec import (
     breaks_spec,
     categorical_spec,
+    ensure_legend,
     field_values_from_geojson,
     quantile_breaks,
 )
@@ -140,6 +141,10 @@ def _resolve_caller_symbology(
     The resolved spec is left on ``layer.symbology`` (so the viewer draws it and the
     dataset's own saved renderer is never consulted); ``None`` means "no usable
     symbology" and the caller is told why in ``warnings``.
+
+    A COMPLETE spec is kept verbatim, except that a missing ``legend`` is derived
+    from its own ``unique``/``breaks`` (so the legend panel is never blank); an
+    explicit ``legend`` the caller sent is honoured as-is.
     """
     symbology = layer.symbology
     if not isinstance(symbology, dict) or not symbology:
@@ -148,13 +153,28 @@ def _resolve_caller_symbology(
     stype = symbology.get("type")
     label = layer.title or layer.id
 
-    # A complete caller-authored spec is used verbatim.
-    if symbology.get("unique") and stype in (None, "uniqueValue"):
-        return
-    if symbology.get("breaks") and stype in (None, "classBreaks"):
+    field = symbology.get("field")
+    field_info = (field_meta or {}).get(field) if isinstance(field, str) else None
+    field_info = field_info if isinstance(field_info, dict) else {}
+    domain = field_info.get("domain") if isinstance(field_info.get("domain"), dict) else {}
+    alias = field_info.get("alias")
+    if isinstance(alias, str) and alias:
+        title: Optional[str] = alias
+    elif isinstance(field, str) and field:
+        title = field
+    else:
+        title = None
+
+    # A complete caller-authored spec (already carrying `unique`/`breaks`) is used
+    # verbatim — but if it omits a `legend`, we derive one from its own classes so
+    # the panel is never blank (the SAME rule the dataset's saved-renderer path
+    # follows). An explicit caller `legend` is always honoured.
+    if (symbology.get("unique") and stype in (None, "uniqueValue")) or (
+        symbology.get("breaks") and stype in (None, "classBreaks")
+    ):
+        layer.symbology = ensure_legend(symbology, title=title)
         return
 
-    field = symbology.get("field")
     if not isinstance(field, str) or not field:
         warnings.append(
             f"layer '{label}': symbology needs a 'field' (or explicit 'unique'/'breaks'); ignored."
@@ -168,12 +188,6 @@ def _resolve_caller_symbology(
         )
     else:
         values = field_values_from_geojson(layer.geojson, field)
-
-    field_info = (field_meta or {}).get(field)
-    field_info = field_info if isinstance(field_info, dict) else {}
-    domain = field_info.get("domain") if isinstance(field_info.get("domain"), dict) else {}
-    alias = field_info.get("alias")
-    title = alias if isinstance(alias, str) and alias else field
 
     if stype == "classBreaks":
         classes = symbology.get("classes")

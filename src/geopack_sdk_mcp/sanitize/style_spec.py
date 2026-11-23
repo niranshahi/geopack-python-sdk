@@ -182,6 +182,26 @@ def _unique_entries(renderer: Dict[str, Any]) -> List[Dict[str, Any]]:
     return entries
 
 
+def _legend_from_classes(
+    classes: List[Dict[str, Any]], title: Optional[str]
+) -> Dict[str, Any]:
+    """The shared ``legend`` block for a set of ``unique``/``breaks`` classes.
+
+    One source of truth for every path that builds a legend, so the drawn classes
+    and the legend can never disagree. A class label falls back to its ``value``
+    when the renderer/caller omitted one.
+    """
+    entries: List[Dict[str, Any]] = []
+    for item in classes:
+        if not isinstance(item, dict):
+            continue
+        label = item.get("label")
+        if (label is None or label == "") and item.get("value") is not None:
+            label = item.get("value")
+        entries.append({"label": label, "style": item.get("style")})
+    return {"title": title, "entries": entries}
+
+
 def _simple_spec(style: Dict[str, Any], geometry: Optional[str]) -> Dict[str, Any]:
     # A single-class renderer needs no legend block; the layer's own legend swatch
     # (from `simple`) already shows the colour.
@@ -214,10 +234,7 @@ def _unique_spec(
     }
     if default:
         spec["default"] = default
-    spec["legend"] = {
-        "title": field,
-        "entries": [{"label": e.get("label"), "style": e["style"]} for e in entries],
-    }
+    spec["legend"] = _legend_from_classes(entries, field)
     return spec
 
 
@@ -243,10 +260,7 @@ def _breaks_spec(renderer: Dict[str, Any], geometry: Optional[str]) -> Dict[str,
     }
     if default:
         spec["default"] = default
-    spec["legend"] = {
-        "title": field,
-        "entries": [{"label": b.get("label"), "style": b["style"]} for b in breaks],
-    }
+    spec["legend"] = _legend_from_classes(breaks, field)
     return spec
 
 
@@ -366,10 +380,7 @@ def categorical_spec(
         "geometry": "polygon",
         "field": field,
         "unique": entries,
-        "legend": {
-            "title": title or field,
-            "entries": [{"label": e["label"], "style": e["style"]} for e in entries],
-        },
+        "legend": _legend_from_classes(entries, title or field),
     }
 
 
@@ -416,11 +427,41 @@ def breaks_spec(
         "geometry": "polygon",
         "field": field,
         "breaks": entries,
-        "legend": {
-            "title": title or field,
-            "entries": [{"label": e["label"], "style": e["style"]} for e in entries],
-        },
+        "legend": _legend_from_classes(entries, title or field),
     }
+
+
+def ensure_legend(spec: Any, *, title: Optional[str] = None) -> Any:
+    """Return ``spec`` with a derived ``legend`` when its classes carry none.
+
+    A caller-authored COMPLETE spec (already holding ``unique``/``breaks``) is used
+    verbatim, but if it omits a ``legend`` the viewer's panel would render blank.
+    We synthesise one from the spec's own classes — exactly the rule the dataset's
+    saved-renderer path follows — so every drawn class is explained. An explicit
+    caller ``legend`` (one carrying entries) is always honoured.
+
+    ``title`` overrides the heading (usually the field alias); otherwise the spec's
+    own ``field`` is used. A non-dict spec is returned unchanged.
+    """
+    if not isinstance(spec, dict):
+        return spec
+    existing = spec.get("legend")
+    if isinstance(existing, dict) and existing.get("entries"):
+        return spec
+    stype = spec.get("type")
+    if stype == "classBreaks" or (stype is None and spec.get("breaks")):
+        classes = spec.get("breaks") or []
+    elif stype in (None, "uniqueValue") or spec.get("unique"):
+        classes = spec.get("unique") or []
+    else:
+        return spec
+    entries = [item for item in classes if isinstance(item, dict)]
+    if not entries:
+        return spec
+    heading = title or (spec.get("field") if isinstance(spec.get("field"), str) else None)
+    out = dict(spec)
+    out["legend"] = _legend_from_classes(entries, heading)
+    return out
 
 
 def dataset_style_spec(record: Any) -> Optional[Dict[str, Any]]:

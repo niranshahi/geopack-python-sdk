@@ -10,6 +10,7 @@ from geopack_sdk_mcp.sanitize.style_spec import (
     breaks_spec,
     categorical_spec,
     dataset_style_spec,
+    ensure_legend,
     esri_renderer_to_spec,
     field_values_from_geojson,
     quantile_breaks,
@@ -226,6 +227,55 @@ class DerivedSymbologyTest(unittest.TestCase):
         fills = [b["style"]["fill"] for b in spec["breaks"]]
         self.assertEqual(len(set(fills)), 5)
         self.assertEqual(len(spec["legend"]["entries"]), 5)
+
+
+class EnsureLegendTest(unittest.TestCase):
+    def test_a_complete_unique_spec_gains_a_legend_from_its_classes(self):
+        # A caller-authored complete spec must not render a blank legend: the block
+        # is derived from its own classes (label falls back to the value).
+        spec = {
+            "type": "uniqueValue",
+            "field": "Landuse_Group",
+            "unique": [
+                {"value": "1", "label": "Residential", "style": {"fill": "#e6194b"}},
+                {"value": "2", "style": {"fill": "#0047ff"}},
+            ],
+            "default": {"fill": "#b0b0b0"},
+        }
+        out = ensure_legend(spec, title="گروه کاربری")
+        self.assertEqual(out["legend"]["title"], "گروه کاربری")
+        self.assertEqual([e["label"] for e in out["legend"]["entries"]], ["Residential", "2"])
+        self.assertEqual(out["legend"]["entries"][0]["style"]["fill"], "#e6194b")
+        # The caller's spec object is not mutated.
+        self.assertNotIn("legend", spec)
+
+    def test_the_field_names_the_legend_when_no_title_is_given(self):
+        spec = {"type": "uniqueValue", "field": "Ownership",
+                "unique": [{"value": 1, "style": {"fill": "#111"}}]}
+        self.assertEqual(ensure_legend(spec)["legend"]["title"], "Ownership")
+
+    def test_an_explicit_caller_legend_is_honoured(self):
+        spec = {
+            "type": "uniqueValue",
+            "field": "f",
+            "unique": [{"value": "1", "style": {"fill": "#111"}}],
+            "legend": {"title": "mine", "entries": [{"label": "x", "style": {"fill": "#222"}}]},
+        }
+        out = ensure_legend(spec, title="other")
+        self.assertEqual(out["legend"]["title"], "mine")
+        self.assertEqual(out["legend"]["entries"][0]["label"], "x")
+
+    def test_a_complete_class_breaks_spec_gains_a_legend(self):
+        spec = {"type": "classBreaks", "field": "pop",
+                "breaks": [{"min": 0, "max": 10, "label": "0 – 10", "style": {"fill": "#eee"}}]}
+        out = ensure_legend(spec)
+        self.assertEqual(out["legend"]["title"], "pop")
+        self.assertEqual(out["legend"]["entries"][0]["label"], "0 – 10")
+
+    def test_a_spec_without_classes_is_returned_unchanged(self):
+        spec = {"type": "uniqueValue", "field": "f"}
+        self.assertIs(ensure_legend(spec), spec)
+        self.assertIs(ensure_legend(None), None)
 
 
 if __name__ == "__main__":

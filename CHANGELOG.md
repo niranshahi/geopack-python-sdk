@@ -3,6 +3,35 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.11 — 2026-11-23
+
+Legend derivation for a caller-supplied complete style spec (slice 033; SDK-008).
+Viewer/handler fix; no new tool (31), no new Python dependency.
+
+### Fixed
+
+- **A caller-supplied COMPLETE `uniqueValue` `symbology` produced a blank legend.**
+  `show_map` passed a spec that already carried `unique` through verbatim, skipping
+  legend derivation, so the viewer panel drew an empty/grey row under the layer while
+  the map styled correctly — inconsistent with the `classBreaks` shorthand and the
+  dataset saved-renderer paths, which both derive a legend. A shared
+  `ensure_legend` / `_legend_from_classes` builder (one source of truth for every
+  legend-producing path) now derives `legend` from the spec's own `unique`/`breaks`:
+  an entry label falls back to its value, the title is the field alias, and an
+  explicit caller `legend` is honoured as-is.
+
+### Verification
+
+- Full suite **791 tests** OK (was 784; +7 — 5 `ensure_legend` unit tests and 2
+  `show_map` caller-symbology tests).
+
+Touched files:
+- `src/geopack_sdk_mcp/sanitize/style_spec.py`
+- `src/geopack_sdk_mcp/tool_handlers/maps.py`
+- `tests/test_style_spec.py`
+- `tests/test_map_tools.py`
+- `pyproject.toml`, `src/geopack_sdk/__init__.py`, `CHANGELOG.md`
+
 ## 0.12.10 — 2026-11-23
 
 View-at-location and geometry-with-embedded-style (slice 033). Viewer lane +

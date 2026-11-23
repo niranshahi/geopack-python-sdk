@@ -549,6 +549,56 @@ class ShowMapTest(unittest.TestCase):
         self.assertEqual([e["label"] for e in sym["unique"]], ["اوقاف", "مستثنیات"])
         self.assertEqual(sym["legend"]["title"], "مالکیت")
 
+    def test_a_complete_caller_unique_value_spec_gets_a_derived_legend(self):
+        # A caller-supplied COMPLETE uniqueValue spec used to be passed through with
+        # no legend, so the panel rendered a blank/grey row. It must now derive a
+        # legend from its own classes (the same rule the dataset renderer follows).
+        payload = show_map(
+            _Client(),
+            layers=[
+                {
+                    "kind": "portal-dataset",
+                    "datasetId": 1577,
+                    "symbology": {
+                        "type": "uniqueValue",
+                        "field": "Landuse_Group",
+                        "unique": [
+                            {"value": "1", "label": "مسکونی", "style": {"fill": "#e6194b"}},
+                            {"value": "5", "label": "تجاری", "style": {"fill": "#0047ff"}},
+                        ],
+                        "default": {"fill": "#b0b0b0"},
+                    },
+                }
+            ],
+        )
+        sym = payload["layers"][0]["symbology"]
+        self.assertEqual(sym["type"], "uniqueValue")
+        self.assertEqual([e["label"] for e in sym["legend"]["entries"]], ["مسکونی", "تجاری"])
+        self.assertEqual(sym["legend"]["entries"][0]["style"]["fill"], "#e6194b")
+
+    def test_a_complete_caller_spec_keeps_its_explicit_legend(self):
+        payload = show_map(
+            _Client(),
+            layers=[
+                {
+                    "kind": "portal-dataset",
+                    "datasetId": 1577,
+                    "symbology": {
+                        "type": "uniqueValue",
+                        "field": "f",
+                        "unique": [{"value": "1", "style": {"fill": "#111111"}}],
+                        "legend": {
+                            "title": "دستی",
+                            "entries": [{"label": "mine", "style": {"fill": "#222222"}}],
+                        },
+                    },
+                }
+            ],
+        )
+        sym = payload["layers"][0]["symbology"]
+        self.assertEqual(sym["legend"]["title"], "دستی")
+        self.assertEqual(sym["legend"]["entries"][0]["label"], "mine")
+
     def test_a_dataset_layer_exposes_field_labels_and_domains_for_identify(self):
         # The manifest carries the dataset's field aliases + coded-value domains so
         # the viewer's identify popup can label a code with its human value.
