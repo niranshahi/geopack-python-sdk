@@ -285,16 +285,19 @@ function renderPanel(map, baseLayers, dataLayers) {
   const showList = TEMPLATE.layerList !== false;
   const showLegend = TEMPLATE.legend !== false;
   if (TEMPLATE.basemaps && TEMPLATE.basemaps.length) {
-    html += '<section><h2>Background</h2><select id="basemap">';
+    html += '<details class="gp-section" open><summary>Background</summary><div class="gp-section-body">';
+    html += '<select id="basemap">';
     TEMPLATE.basemaps.forEach(function (entry) {
       const selected = entry.id === (TEMPLATE.basemap || '');
       html += '<option value="' + entry.id + '"' + (selected ? ' selected' : '') + '>' +
         (entry.label || entry.id) + '</option>';
     });
-    html += '</select></section>';
+    html += '</select></div></details>';
   }
-  if (showList) html += '<section><h2>Layers</h2><div id="layers"></div></section>';
-  if (showLegend) html += '<section><h2>Legend</h2><div id="legend"></div></section>';
+  if (showList) html += '<details class="gp-section" open><summary>Layers</summary>' +
+    '<div id="layers" class="gp-section-body"></div></details>';
+  if (showLegend) html += '<details class="gp-section" open><summary>Legend</summary>' +
+    '<div id="legend" class="gp-section-body"></div></details>';
   panel.innerHTML = html;
 
   const select = document.getElementById('basemap');
@@ -317,28 +320,35 @@ function renderPanel(map, baseLayers, dataLayers) {
     dataLayers.forEach(function (layer) {
       const row = document.createElement('div');
       row.className = 'row';
+      const top = document.createElement('div');
+      top.className = 'row-top';
       const check = document.createElement('input');
       check.type = 'checkbox';
       check.checked = layer.getVisible();
       check.addEventListener('change', function () { layer.setVisible(check.checked); });
       const label = document.createElement('span');
+      label.className = 'gp-name';
       label.textContent = layer.get('title');
-      label.style.flex = '1';
-      const slider = document.createElement('input');
-      slider.type = 'range';
-      slider.min = '0'; slider.max = '1'; slider.step = '0.05';
-      slider.value = String(layer.getOpacity());
-      slider.addEventListener('input', function () { layer.setOpacity(parseFloat(slider.value)); });
+      label.title = layer.get('title');
       const zoom = document.createElement('button');
       zoom.type = 'button';
       zoom.className = 'gp-zoom';
       zoom.title = 'Zoom to layer';
       zoom.setAttribute('aria-label', 'Zoom to layer');
-      zoom.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" ' +
+      // Magnifier glyph (🔍) as a clean monochrome SVG so it stays legible on mobile.
+      zoom.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" ' +
         'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-        '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
+        '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-5-5"/></svg>';
       zoom.addEventListener('click', function () { zoomToLayer(map, layer); });
-      row.appendChild(check); row.appendChild(label); row.appendChild(slider); row.appendChild(zoom);
+      top.appendChild(check); top.appendChild(label); top.appendChild(zoom);
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = '0'; slider.max = '1'; slider.step = '0.05';
+      slider.value = String(layer.getOpacity());
+      slider.title = 'Opacity';
+      slider.setAttribute('aria-label', 'Opacity');
+      slider.addEventListener('input', function () { layer.setOpacity(parseFloat(slider.value)); });
+      row.appendChild(top); row.appendChild(slider);
       listEl.appendChild(row);
     });
   }
@@ -655,6 +665,20 @@ async function main() {
   if (TEMPLATE.attribution === false) {
     map.getControls().forEach(function (c) {
       if (c instanceof ol.control.Attribution) { map.removeControl(c); }
+    });
+  }
+
+  // Status bar: live WGS84 coordinates under the pointer (room for future tools
+  // such as a measure readout; the container exists in the page shell).
+  const statusbar = document.getElementById('statusbar');
+  if (statusbar) {
+    map.on('pointermove', function (evt) {
+      if (evt.dragging) return;
+      const lonlat = ol.proj.toLonLat(evt.coordinate);
+      statusbar.textContent = 'Lon ' + lonlat[0].toFixed(5) + '   Lat ' + lonlat[1].toFixed(5);
+    });
+    map.getTargetElement().addEventListener('mouseleave', function () {
+      statusbar.textContent = '';
     });
   }
 

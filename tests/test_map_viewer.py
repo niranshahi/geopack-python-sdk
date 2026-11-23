@@ -250,6 +250,22 @@ class RenderHtmlTest(unittest.TestCase):
         self.assertIn("gpBbox", js)
         self.assertIn("getView().fit", js)
 
+    def test_the_panel_is_responsive_and_collapsible(self):
+        # The panel uses collapsible <details> sections, a two-line layer row (so
+        # the opacity slider + zoom button never overflow a narrow panel), a
+        # mobile media query, and a coordinate status bar (room for future tools).
+        js = viewer.default_viewer_js()
+        html = viewer.default_viewer_html()
+        self.assertIn("gp-section", js)
+        self.assertIn("<summary>", js)
+        self.assertIn("row-top", js)
+        self.assertIn("gp-name", js)
+        self.assertIn("statusbar", js)
+        self.assertIn("pointermove", js)
+        self.assertIn('id="statusbar"', html)
+        self.assertIn("@media", html)
+        self.assertIn("box-sizing", html)
+
     def test_a_cog_layer_reads_its_pixel_value_on_click(self):
         # A COG layer is a WebGLTile; `getData(pixel)` reads the band value the
         # renderer already decoded (client-side, no server round-trip).

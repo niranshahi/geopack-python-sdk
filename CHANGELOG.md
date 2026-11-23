@@ -3,6 +3,36 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.9 — 2026-11-23
+
+Responsive viewer layout (slice 033). Viewer-only; no new tool (31), no new
+Python dependency.
+
+### Changed
+
+- **Fixed the box-sizing reset** in the viewer shell (it was malformed — a
+  missing `*`), the root cause of the panel's controls overflowing.
+- **Two-line layer rows** — checkbox + name (ellipsized, with tooltip) + a zoom
+  button on the first line, the opacity slider full-width on the second, so the
+  slider and zoom control never overflow a narrow panel.
+- **Collapsible sections** — Background / Layers / Legend are `<details>` blocks
+  (open by default) with a chevron.
+- **Responsive panel** — `min(300px, 92vw)`; on `max-width: 640px` it becomes a
+  bottom sheet and the header shrinks; the identify popup is width-capped.
+- **Zoom icon** — a monochrome magnifier SVG (clearer than the corner-arrows).
+- **Coordinate status bar** — `#statusbar` shows the live WGS84 Lon/Lat under the
+  pointer (a dedicated container for future tools such as a measure readout).
+
+### Verification
+
+- Full suite **781 tests** OK (was 780; +1 responsive-layout viewer test).
+
+Touched files:
+- `src/geopack_sdk_mcp/maps/templates/default/viewer.html`
+- `src/geopack_sdk_mcp/maps/templates/default/viewer.js`
+- `tests/test_map_viewer.py`
+- `pyproject.toml`, `src/geopack_sdk/__init__.py`, `CHANGELOG.md`
+
 ## 0.12.8 — 2026-11-23
 
 Shared viewer runtime, COG raster layers, click identify and zoom-to-layer
