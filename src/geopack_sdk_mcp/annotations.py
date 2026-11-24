@@ -62,6 +62,7 @@ TITLES: Dict[str, str] = {
     "geopack_sdk_submit_edit_document": "Submit an edit document",
     "geopack_sdk_show_map": "Show a local map data service",
     "geopack_sdk_geometry_op": "Run a local geometry op",
+    "geopack_sdk_render_chart": "Render a bar/line/pie chart from data",
 }
 
 OPEN_WORLD_TOOLS = frozenset(

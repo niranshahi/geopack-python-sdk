@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, List, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import Field
 
@@ -750,6 +750,55 @@ MapRemoveLayers = Annotated[
         ),
         default=None,
     ),
+]
+
+# --- Charts ---
+
+ChartRows = Annotated[
+    List[Dict[str, Any]],
+    Field(
+        description=(
+            "Tabular rows to plot: a list of objects, e.g. `aggregate_dataset`'s `rows` (or any "
+            "list of dict records). Each row must carry the `category` field and a numeric `value`."
+        )
+    ),
+]
+ChartType = Annotated[
+    Literal["bar", "line", "pie"],
+    Field(
+        description=(
+            "Chart kind: `bar`, `line` or `pie` (default `bar`). Use `pie` only for parts of a "
+            "whole; use `bar` for comparisons and `line` for a sequence (e.g. by month)."
+        ),
+        default="bar",
+    ),
+]
+ChartCategoryField = Annotated[
+    str,
+    Field(description="Field name used for the category / x-axis labels (e.g. a group-by field)."),
+]
+ChartValueField = Annotated[
+    str,
+    Field(
+        description=(
+            "Field name holding the numeric value / y-axis height (e.g. `aggregate_count` from "
+            "`aggregate_dataset`, or `sum`). Non-numeric values in the column are skipped."
+        )
+    ),
+]
+ChartSeriesField = Annotated[
+    Optional[str],
+    Field(
+        description=(
+            "Optional field that splits a bar/line chart into multiple series (one colour per "
+            "distinct value); ignored for a pie chart."
+        ),
+        default=None,
+    ),
+]
+ChartTitle = Annotated[
+    Optional[str],
+    Field(description="Optional chart title shown above the plot.", default=None),
 ]
 
 # --- Return types (geocode only) ---

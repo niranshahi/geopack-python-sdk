@@ -97,6 +97,7 @@ _READ_TOOLS = (
     "geopack_sdk_geocode_place",
     "geopack_sdk_get_mcp_safety_policy",
     "geopack_sdk_geometry_op",
+    "geopack_sdk_render_chart",
 )
 
 #: Operations that are NOT exposed as tools — the stated exclusion list that

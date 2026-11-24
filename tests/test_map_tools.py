@@ -997,10 +997,24 @@ class ShowMapTest(unittest.TestCase):
         )
         self.assertFalse(any("18648" in w for w in payload["templateWarnings"]))
 
-    def test_mvt_render_is_not_warned_about_the_geojson_cap(self):
+    def test_an_mvt_layer_warns_that_its_data_url_is_truncated(self):
+        # An MVT layer's MAP is full coverage, but its advertised `dataUrl` still
+        # comes from the GeoJSON lane and is capped at 1,000 (issue report
+        # 2026-11-24, N5). The warning must disclose the dataUrl truncation — not
+        # claim the map is truncated.
         payload = show_map(
             _Client(feature_total=18648),
             layers=[{"kind": "portal-dataset", "datasetId": 1577, "render": "mvt"}],
+        )
+        warning = next(w for w in payload["templateWarnings"] if "18648" in w)
+        self.assertIn("dataUrl", warning)
+        self.assertIn("1000", warning)
+        self.assertNotIn("a GeoJSON layer", warning)
+
+    def test_an_mvt_layer_with_full_limit_does_not_warn_about_truncation(self):
+        payload = show_map(
+            _Client(feature_total=18648),
+            layers=[{"kind": "portal-dataset", "datasetId": 1577, "render": "mvt", "limit": 0}],
         )
         self.assertFalse(any("18648" in w for w in payload["templateWarnings"]))
 
@@ -1020,13 +1034,14 @@ class ShowMapTest(unittest.TestCase):
 
 
 class SurfacePinTest(unittest.TestCase):
-    def test_the_surface_is_thirty_one_tools(self):
+    def test_the_surface_is_thirty_two_tools(self):
         from geopack_sdk_mcp.server import mcp
 
         names = {tool.name for tool in mcp._tool_manager.list_tools()}  # noqa: SLF001
-        self.assertEqual(len(names), 31)
+        self.assertEqual(len(names), 32)
         self.assertIn("geopack_sdk_show_map", names)
         self.assertIn("geopack_sdk_geometry_op", names)
+        self.assertIn("geopack_sdk_render_chart", names)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,44 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.13.0 — 2026-11-24
+
+Adds the **charting lane** (issue 5 / SDK-011): a local `geopack_sdk_render_chart` tool draws a
+bar/line/pie chart from rows the agent already has, closing the gap where `aggregate_dataset`
+returned numbers and `show_map` drew a map but nothing drew a statistical chart. The in-app
+harness gains the matching agent-side ```chart fence (see the portal changelog). **32 tools**;
+still no new Python dependency (the SVG is built from the standard library).
+
+### Added
+
+- **`geopack_sdk_render_chart`** — takes `rows` (e.g. `geopack_sdk_aggregate_dataset`'s `rows`)
+  plus `category`/`value` (and optional `series`/`title`) and returns a self-contained **SVG**
+  chart inline as `image/svg+xml`, with the same numeric `points` echoed in the structured
+  payload (a client that does not render SVG still receives the data). Pure local compute: no
+  portal call, no third-party graphics dependency. `chart_type` is `bar`/`line`/`pie`; points
+  are capped at 200 with the remainder disclosed; non-numeric rows are skipped and reported.
+  Bad input is a coded `invalid_args`.
+
+### Fixed
+
+- **An MVT/WFS layer's `dataUrl` truncation is now disclosed.** `show_map` emitted the
+  GeoJSON-cap warning only for `render:'geojson'`, so an MVT layer advertised a `dataUrl`
+  capped at the first 1,000 features with no signal while its tiles were full coverage (issue
+  report 2026-11-24, N5). The warning is render-aware now: a GeoJSON render names the capped
+  MAP, an MVT/WFS render names the capped `dataUrl` (and says the map itself is full).
+
+### Verification
+
+- Full suite **838 tests** OK (was 826; +12 — the chart handler/tool and the N5 warning).
+
+Touched files:
+- `src/geopack_sdk_mcp/tool_handlers/charts.py` (new)
+- `src/geopack_sdk_mcp/tools/charts.py` (new), `tools/__init__.py`, `tools/policy.py`
+- `src/geopack_sdk_mcp/tool_handlers/maps.py`, `src/geopack_sdk_mcp/tool_schema.py`
+- `src/geopack_sdk_mcp/annotations.py`, `src/geopack_sdk_mcp/guide.py`, `content/guide.md`
+- `tests/test_mcp_chart_tool.py` (new), `tests/test_map_tools.py`, `tests/test_mcp_read_tools.py`
+- `pyproject.toml`, `src/geopack_sdk/__init__.py`, `README.md`, `CHANGELOG.md`
+
 ## 0.12.13 — 2026-11-24
 
 Follow-up to the live issue report: exact, filter-aware class breaks; a `uniqueValue`

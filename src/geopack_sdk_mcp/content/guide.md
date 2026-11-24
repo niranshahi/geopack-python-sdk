@@ -126,6 +126,18 @@ image** — the user opens the URL in a browser.
 length, centroid, intersect, union, ...). No portal call, no data leaves the machine. The
 result feeds straight into an `inline-geometry` map layer.
 
+### Chart your data
+`geopack_sdk_render_chart` draws a **bar / line / pie** chart from tabular rows you already
+have — local compute, no portal call. Feed it `geopack_sdk_aggregate_dataset`'s `rows`:
+
+- `rows` = the aggregate rows (a list of objects); `category` = the label/group field;
+  `value` = the numeric field (e.g. `aggregate_count`, `sum`).
+- `chart_type` = `bar` (comparisons) · `line` (a sequence) · `pie` (shares). An optional
+  `series` field splits a bar/line chart into multiple series; an optional `title` labels it.
+- The result is an inline **SVG** image (`image/svg+xml`), with the same `points` echoed in
+  the payload so a client that does not display SVG still receives the data. This is the
+  charting lane — `show_map` draws a map, not a statistical chart.
+
 ### Edit records
 1. Build an EditDoc and call `geopack_sdk_submit_edit_document` with `mode='validate'`
    (or `'preview'`) — it writes nothing.

@@ -437,12 +437,22 @@ def _apply_extent(
 def _warn_about_geojson_cap(client: Any, layer: Any, warnings: List[str]) -> None:
     """Say how many features a GeoJSON cap hides — never decide for the caller.
 
-    A portal-dataset GeoJSON layer loads the first 1,000 features by default. The
-    MCP does NOT silently switch to tiles or raise the limit; it names the numbers
-    and the levers (`limit`, `render:'mvt'`) so the AGENT (with the user) chooses.
+    A portal-dataset layer's ``dataUrl`` is always served by the GeoJSON lane, so
+    it returns the first 1,000 features by default regardless of renderer. The MCP
+    does NOT silently switch to tiles or raise the limit; it names the numbers and
+    the levers (`limit`, `render:'mvt'`) so the AGENT (with the user) chooses.
+
+    The warning used to be emitted only for ``render:'mvt'`` layers, so an MVT
+    layer advertised a ``dataUrl`` truncated to 1/18th of the rows with no signal
+    while its tiles were full coverage (issue report 2026-11-24, N5). It now names
+    what is actually capped: the MAP for a GeoJSON render, or the ``dataUrl`` for
+    an MVT/WFS render (whose map is already full coverage).
     """
-    if layer.kind != "portal-dataset" or layer.resolved_render() != "geojson":
+    if layer.kind != "portal-dataset":
         return
+    render = layer.resolved_render()
+    if render not in ("geojson", "mvt", "wfs"):
+        return  # no feature rows to truncate (raster/image render)
     cap = layer.limit if layer.limit is not None else _GEOJSON_DEFAULT_LIMIT
     if cap is not None and cap <= 0:
         return  # the caller already asked for the whole dataset
@@ -450,10 +460,18 @@ def _warn_about_geojson_cap(client: Any, layer: Any, warnings: List[str]) -> Non
     if total is None or total <= cap:
         return
     label = layer.title or layer.id
+    if render == "geojson":
+        warnings.append(
+            f"layer '{label}': dataset {layer.dataset_id} has {total} features but a GeoJSON layer "
+            f"loads the first {cap}. To show all, set the layer `limit` to 0 (whole dataset) or use "
+            "render:'mvt' (tiled, full coverage) — choose the appropriate one (ask the user if unsure)."
+        )
+        return
     warnings.append(
-        f"layer '{label}': dataset {layer.dataset_id} has {total} features but a GeoJSON layer "
-        f"loads the first {cap}. To show all, set the layer `limit` to 0 (whole dataset) or use "
-        "render:'mvt' (tiled, full coverage) — choose the appropriate one (ask the user if unsure)."
+        f"layer '{label}': dataset {layer.dataset_id} has {total} features; the map renders all "
+        f"via {render}, but the layer's `dataUrl` returns only the first {cap}. Fetch the tiles for "
+        "full coverage, or set the layer `limit` to 0 to make `dataUrl` return the whole dataset "
+        "(ask the user if unsure)."
     )
 
 

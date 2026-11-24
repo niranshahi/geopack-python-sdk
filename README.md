@@ -158,7 +158,7 @@ client.auth.login(username="my_user", password="my_password")
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks` (`partial_success` is terminal and returned like `completed`).
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (**31 tools** + 2 resource templates, v0.12.0+; read lanes for schema/aggregate/relationships/workflow-spec, workflow execution incl. typed analysis tools, the edit ladder, upload, a loopback-only local map data service with a built-in viewer, and local geometry ops; no create/edit/delete of workflows via MCP, no delete at all, no map-image/print export).
+- GeoPandas integration; **Geopack SDK MCP** server (**32 tools** + 2 resource templates, v0.12.0+; read lanes for schema/aggregate/relationships/workflow-spec, workflow execution incl. typed analysis tools, the edit ladder, upload, a loopback-only local map data service with a built-in viewer, local geometry ops, and a local chart renderer; no create/edit/delete of workflows via MCP, no delete at all, no map-image/print export).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
@@ -285,7 +285,7 @@ geometry engine uses `shapely`/`pyproj`, already pulled in by `geopandas`.
 
 **Local geometry ops (v0.11.0+, `geopack_sdk_geometry_op`).** A **local** compute lane (shapely/pyproj behind a GeoJSON-only engine port) — **no portal call**: `buffer`, `overlay` (`union|intersection|difference|xor|clip`), `convex_hull`, `envelope`, `dissolve`, `simplify`, `validate`, `fix`, `convert`, `project`, `measure`, `distance`, `nearest`, `line_between`, `point_on_surface`, `smooth`, `create`, `describe`. Metric ops auto-project to a local UTM; results carry provenance (`engine`/`methodUsed`/`crsUsed`). Geodesic buffer is not available in v1 (honest code).
 
-**Tools (31, v0.11.0+):**
+**Tools (32, v0.11.0+):**
 
 | Tool | Purpose |
 |------|---------|
@@ -320,6 +320,7 @@ geometry engine uses `shapely`/`pyproj`, already pulled in by `geopandas`.
 | `geopack_sdk_submit_edit_document` | EditDoc ladder `validate` → `preview` → `apply`. **Mutating** — `apply` writes records |
 | `geopack_sdk_show_map` | Start/update the **loopback-only** local map service, declare layers and return a live **`viewerUrl`** (OpenLayers page) plus layer `dataUrl`·`tileUrl`·`wmsUrl`/`wmtsUrl`/`wfsUrl` and a low-sensitivity session token; themeable via `template`/`style`/`basemap` and a user `template.json`. Opt-in (`GEOPACK_MCP_MAP_SERVICE=1`). Holds the portal credential server-side; produces **no map image** |
 | `geopack_sdk_geometry_op` | Run one **local** geometry op (buffer, overlay, hull, envelope, dissolve, simplify, validate/fix, convert, project, measure, distance, nearest, line_between, point_on_surface, smooth, create, describe). No portal call; WGS84 output with provenance |
+| `geopack_sdk_render_chart` | Render a **bar/line/pie** chart from rows you already have (e.g. `aggregate_dataset` rows) as an inline **SVG** image (`image/svg+xml`) with the points echoed in the payload. Local compute; no portal call. The charting lane — `show_map` draws a map, not a chart |
 
 **Error contract (v0.7.0+):** a failed call answers `isError: true` with `structuredContent` = `{error, code, type, statusCode, message, hint, invalidArgs?}`. `code` is the server's coded error when it sends one, otherwise derived from the exception class (`DATASET_READ_ONLY`, `AGGREGATION_UNSUPPORTED`, `EDIT_CONFLICT`, `QUOTA_EXCEEDED`, …). `hint` names the next tool to call; `invalidArgs` lists the arguments a client-side validator refused before any network call. `get_dataset_relationships` still degrades to `catalogUnavailable: true` with `isError: false` (a state, not a failure); `get_mcp_safety_policy` never fails.
 
