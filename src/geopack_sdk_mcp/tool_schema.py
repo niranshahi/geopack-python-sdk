@@ -95,7 +95,13 @@ IsoDate = Annotated[
 FeatureQuery = Annotated[
     Optional[Dict[str, Any]],
     Field(
-        description="Optional FeatureQuery DSL. If omitted, use limit/offset/return_geometry instead.",
+        description=(
+            "Optional FeatureQuery DSL. If omitted, use limit/offset/return_geometry instead. "
+            "Its `filter` is an attribute node: {type:'rule', field, operator, value} or "
+            "{type:'group', operator:'AND'|'OR', children:[...]}. A flat {field, operator, value} "
+            "rule (and a list of rules, combined with AND) is accepted and normalized; a different "
+            "shape is refused as invalid_args, not sent to the portal."
+        ),
         default=None,
     ),
 ]
@@ -245,8 +251,12 @@ FeatureFilter = Annotated[
     Optional[Dict[str, Any]],
     Field(
         description=(
-            "Optional attribute scope as the portal's FeatureQuery DSL filter node. "
-            "Omit it for no attribute filter — an empty value is not the same as 'match all'."
+            "Optional attribute scope as a filter node. Shape: "
+            "{type:'rule', field, operator, value} (operator tokens like '=', '$ilike', 'IN') or "
+            "{type:'group', operator:'AND'|'OR', children:[...]}. A flat {field, operator, value} "
+            "rule (and a list of rules, combined with AND) is accepted and normalized; any other "
+            "shape is refused as invalid_args before the round trip. Omit it for no attribute "
+            "filter — an empty value is not the same as 'match all'."
         ),
         default=None,
     ),
@@ -713,6 +723,28 @@ MapZoom = Annotated[
         description=(
             "Initial zoom level (0-24). Sugar for `template.view.zoom`; also sets "
             "`view.mode='center'` (unless a mode was given)."
+        ),
+        default=None,
+    ),
+]
+MapReplaceLayers = Annotated[
+    bool,
+    Field(
+        description=(
+            "When updating an existing map (map_id), drop its current layers before adding "
+            "`layers`, so the map holds exactly this call's layers instead of appending "
+            "(`layersReplaced: true` in the result). Default false (append)."
+        ),
+        default=False,
+    ),
+]
+MapRemoveLayers = Annotated[
+    Optional[List[str]],
+    Field(
+        description=(
+            "Layer ids (from a previous show_map result) to drop from an existing map before "
+            "adding `layers`. Removing layers needs map_id; unknown ids are ignored with a "
+            "templateWarning naming them. The dropped ids come back as `removedLayers`."
         ),
         default=None,
     ),

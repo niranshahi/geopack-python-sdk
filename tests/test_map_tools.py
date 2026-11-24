@@ -86,6 +86,37 @@ class _Datasets:
 
         return _Page()
 
+    def _distinct(self, field):
+        seen = []
+        for feature in (self._feature_collection or {}).get("features") or []:
+            props = feature.get("properties") if isinstance(feature, dict) else None
+            if isinstance(props, dict) and field in props:
+                key = "" if props.get(field) is None else str(props.get(field))
+                if key not in [entry[0] for entry in seen]:
+                    seen.append((key, props.get(field)))
+        return [value for _key, value in seen]
+
+    class _Aggregate:
+        def __init__(self, rows):
+            self.rows = rows
+
+    def aggregate(self, dataset_id, *, aggregation=None, filter=None, spatial_filter=None):
+        self.calls.append(
+            {"dataset_id": dataset_id, "aggregation": aggregation, "filter": filter}
+        )
+        field = None
+        for group in (aggregation or {}).get("groupBy") or []:
+            if isinstance(group, dict) and group.get("field"):
+                field = group["field"]
+                break
+        rows = [{field: value, "n": 1} for value in self._distinct(field)]
+        return self._Aggregate(rows)
+
+    def count(self, dataset_id, *, filter=None, spatial_filter=None, field=None, distinct=False):
+        if distinct and field:
+            return len(self._distinct(field))
+        return len((self._feature_collection or {}).get("features") or [])
+
     def get(self, dataset_id):
         record = {"id": dataset_id, "dataType": self._data_type, "details": self._details}
         record.update(self._extra)
@@ -695,7 +726,10 @@ class ShowMapTest(unittest.TestCase):
         )
         self.assertEqual(payload["layers"][0]["symbology"]["field"], "Ownership")
 
-    def test_a_high_cardinality_shorthand_warns_and_is_dropped(self):
+    def test_a_high_cardinality_shorthand_styles_up_to_the_cap_and_warns(self):
+        # A field above the documented cap is styled up to the cap (the distinct
+        # values are counted by grouping the column, not by a feature sample) and
+        # the remainder is disclosed — never silently under-styled.
         features = {
             "type": "FeatureCollection",
             "features": [_feature({"Parcel_Number": str(i)}) for i in range(40)],
@@ -707,8 +741,66 @@ class ShowMapTest(unittest.TestCase):
                  "symbology": {"type": "uniqueValue", "field": "Parcel_Number"}}
             ],
         )
-        self.assertNotIn("symbology", payload["layers"][0])
-        self.assertTrue(any("distinct values" in w for w in payload["templateWarnings"]))
+        sym = payload["layers"][0]["symbology"]
+        self.assertEqual(sym["type"], "uniqueValue")
+        self.assertEqual(len(sym["unique"]), 30)
+        warning = next(w for w in payload["templateWarnings"] if "distinct values" in w)
+        self.assertIn("40", warning)
+
+    def test_a_unique_value_shorthand_counts_all_categories_not_a_sample(self):
+        # 18 categories, but the first 1000 features only carried 7 of them: a
+        # feature sample under-counts, so the shorthand groups the whole column.
+        properties = [{"Landuse_Group": str(i % 18)} for i in range(1200)]
+        features = {
+            "type": "FeatureCollection",
+            "features": [_feature(props) for props in properties],
+        }
+        payload = show_map(
+            _Client(feature_collection=features),
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 1577,
+                 "symbology": {"type": "uniqueValue", "field": "Landuse_Group"}}
+            ],
+        )
+        sym = payload["layers"][0]["symbology"]
+        self.assertEqual(len(sym["unique"]), 18)
+
+    def test_replace_layers_rebuilds_an_existing_map(self):
+        first = show_map(
+            _Client(),
+            layers=[
+                {"kind": "inline-geometry", "geojson": SQUARE},
+                {"kind": "inline-geometry", "geojson": SQUARE},
+            ],
+        )
+        second = show_map(
+            _Client(),
+            map_id=first["mapId"],
+            layers=[{"kind": "inline-geometry", "geojson": SQUARE}],
+            replace_layers=True,
+        )
+        self.assertEqual(second["mapId"], first["mapId"])
+        self.assertEqual(len(second["layers"]), 1)
+        self.assertTrue(second["layersReplaced"])
+
+    def test_remove_layers_drops_named_layers(self):
+        first = show_map(
+            _Client(),
+            layers=[
+                {"kind": "inline-geometry", "geojson": SQUARE},
+                {"kind": "inline-geometry", "geojson": SQUARE},
+            ],
+        )
+        victim = first["layers"][0]["id"]
+        second = show_map(_Client(), map_id=first["mapId"], remove_layers=[victim])
+        self.assertEqual([layer["id"] for layer in second["layers"]], [first["layers"][1]["id"]])
+        self.assertIn(victim, second["removedLayers"])
+
+    def test_removing_an_unknown_layer_warns(self):
+        first = show_map(_Client(), layers=[{"kind": "inline-geometry", "geojson": SQUARE}])
+        second = show_map(_Client(), map_id=first["mapId"], remove_layers=["layer_missing"])
+        self.assertEqual(len(second["layers"]), 1)
+        self.assertTrue(any("unknown layer id" in w for w in second["templateWarnings"]))
 
     def test_a_symbology_on_an_image_render_warns(self):
         payload = show_map(

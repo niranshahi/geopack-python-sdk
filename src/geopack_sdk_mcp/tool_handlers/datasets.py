@@ -33,6 +33,7 @@ from ..sanitize.dataset_details import (
 )
 from ..sanitize.dataset_schema import build_dataset_schema, build_relationship_rows
 from ..sanitize.dataset_symbology import styled_publications
+from ..sanitize.filter_dsl import normalize_filter_node
 from ..sanitize.query_results import clamp_query_limit, trim_feature_collection_for_mcp
 from ..sanitize.task_results import sanitize_async_task_start, sanitize_task_payload
 from ..serialize import to_jsonable
@@ -207,6 +208,11 @@ def query_dataset(
         )
     else:
         dsl = normalize_feature_query_dsl(dict(query))
+        if dsl.get("filter") is not None:
+            # Coerce a flat/list/Mongo-ish filter into the portal's typed node
+            # grammar client-side; a bad node becomes a coded invalid_args 4xx
+            # instead of the portal's opaque 500 (issue report 2026-11-24).
+            dsl["filter"] = normalize_filter_node(dsl["filter"], key="query")
         pagination = dict(dsl.get("pagination") or {})
         req_limit = pagination.get("limit", limit)
         effective_limit = clamp_query_limit(
@@ -648,11 +654,16 @@ def aggregate_dataset(
     if ordered:
         aggregation["orderBy"] = ordered
 
+    # Coerce the attribute scope into the portal's typed node grammar before the
+    # round trip: a flat/Mongo-ish node used to reach the portal and answer an
+    # opaque 500 (issue report 2026-11-24).
+    normalized_filter = normalize_filter_node(filter, key="filter")
+
     try:
         result = client.datasets.aggregate(
             dataset_id,
             aggregation=aggregation,
-            filter=filter,
+            filter=normalized_filter,
             spatial_filter=spatial_filter,
         )
     except AggregationUnsupported as exc:

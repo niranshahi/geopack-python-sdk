@@ -150,6 +150,14 @@ class MapManifest:
         self.layers[layer.id] = layer
         return layer
 
+    def remove_layer(self, layer_id: str) -> bool:
+        """Drop one layer by id; ``True`` when it existed (so a typo is disclosed)."""
+        return self.layers.pop(layer_id, None) is not None
+
+    def clear_layers(self) -> None:
+        """Drop every layer (used by ``show_map(replace_layers=True)``)."""
+        self.layers.clear()
+
     def public(self, base_url: str) -> Dict[str, Any]:
         return {
             "mapId": self.map_id,

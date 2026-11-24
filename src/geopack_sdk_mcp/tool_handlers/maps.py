@@ -18,7 +18,9 @@ from ..maps import get_or_start_service, layer_from_spec
 from ..maps import viewer
 from ..maps.errors import SERVICE_ERROR, MapServiceError
 from ..maps.sources import (
+    dataset_distinct_count,
     dataset_feature_count,
+    dataset_field_distinct_values,
     dataset_field_values,
     dataset_info,
     publication_dataset_id,
@@ -182,14 +184,15 @@ def _resolve_caller_symbology(
         layer.symbology = None
         return
 
-    if layer.kind == "portal-dataset":
-        values = dataset_field_values(
-            client, int(layer.dataset_id), field, limit=_SYMBOLOGY_SAMPLE_LIMIT
-        )
-    else:
-        values = field_values_from_geojson(layer.geojson, field)
-
     if stype == "classBreaks":
+        # Quantile breaks need a representative distribution: a feature sample is
+        # the right input here (a value-per-row field grouped by value is not).
+        if layer.kind == "portal-dataset":
+            values = dataset_field_values(
+                client, int(layer.dataset_id), field, limit=_SYMBOLOGY_SAMPLE_LIMIT
+            )
+        else:
+            values = field_values_from_geojson(layer.geojson, field)
         classes = symbology.get("classes")
         classes = (
             int(classes)
@@ -206,18 +209,49 @@ def _resolve_caller_symbology(
         layer.symbology = breaks_spec(field, breaks, title=title)
         return
 
+    # uniqueValue (the default): one class per DISTINCT value. A feature sample
+    # silently under-counts the categories of a large dataset (it styled only 7 of
+    # 18 classes by reading the first 1,000 of 18,648 rows), so the portal lane
+    # groups the whole access-scoped column instead (issue report 2026-11-24).
+    truncated = False
+    if layer.kind == "portal-dataset":
+        try:
+            values, truncated = dataset_field_distinct_values(
+                client, int(layer.dataset_id), field, max_values=_MAX_DERIVED_CLASSES
+            )
+        except Exception:  # noqa: BLE001 - a bad field must not fail the whole map
+            warnings.append(
+                f"layer '{label}': could not read distinct values for field '{field}' "
+                "(check the field name with geopack_sdk_get_dataset_schema); symbology ignored."
+            )
+            layer.symbology = None
+            return
+    else:
+        values = field_values_from_geojson(layer.geojson, field)
+
     spec = categorical_spec(field, values, domain=domain, title=title)
     if not spec["unique"]:
         warnings.append(f"layer '{label}': symbology field '{field}' has no values; ignored.")
         layer.symbology = None
         return
-    if len(spec["unique"]) > _MAX_DERIVED_CLASSES:
-        warnings.append(
-            f"layer '{label}': symbology field '{field}' has {len(spec['unique'])} distinct values "
-            f"(limit {_MAX_DERIVED_CLASSES}); use a lower-cardinality field or an explicit 'breaks' spec."
+    if truncated:
+        shown = len(spec["unique"])
+        total = (
+            dataset_distinct_count(client, int(layer.dataset_id), field)
+            if layer.kind == "portal-dataset"
+            else None
         )
-        layer.symbology = None
-        return
+        if total is not None and total > shown:
+            detail = f"has {total} distinct values"
+            remainder = f"the other {total - shown} render with the default style"
+        else:
+            detail = f"has more than {_MAX_DERIVED_CLASSES} distinct values"
+            remainder = "the rest render with the default style"
+        warnings.append(
+            f"layer '{label}': symbology field '{field}' {detail} (cap {_MAX_DERIVED_CLASSES}); "
+            f"showing {shown} classes — {remainder}. Use an explicit 'unique' spec or a "
+            "lower-cardinality field."
+        )
     layer.symbology = spec
 
 
@@ -423,6 +457,8 @@ def show_map(
     style: Optional[Dict[str, Any]] = None,
     center: Optional[List[float]] = None,
     zoom: Optional[int] = None,
+    replace_layers: bool = False,
+    remove_layers: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     service = get_or_start_service(client)
 
@@ -469,6 +505,24 @@ def show_map(
     warnings = view_warnings + warnings
     manifest.options = template_obj
     _, viewer_source, viewer_warnings = viewer.load_viewer_html(service.templates_dir)
+
+    # Editing an existing map: remove named layers and/or replace the whole set.
+    # Without this, show_map(map_id=...) could only APPEND, so a corrected map kept
+    # serving its stale layers (issue report 2026-11-24).
+    removed_ids: List[str] = []
+    missing_ids: List[str] = []
+    for layer_id in remove_layers or []:
+        key = str(layer_id)
+        if manifest.remove_layer(key):
+            removed_ids.append(key)
+        else:
+            missing_ids.append(key)
+    if missing_ids:
+        warnings.append(
+            "remove_layers: unknown layer id(s) " + ", ".join(missing_ids) + "; ignored."
+        )
+    if replace_layers:
+        manifest.clear_layers()
 
     added = 0
     for spec in layers or []:
@@ -526,6 +580,10 @@ def show_map(
             ),
         }
     )
+    if replace_layers:
+        payload["layersReplaced"] = True
+    if removed_ids:
+        payload["removedLayers"] = removed_ids
 
     if open_browser:
         try:

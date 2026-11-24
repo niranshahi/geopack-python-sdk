@@ -3,6 +3,80 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.12 — 2026-11-24
+
+Server self-documentation plus query/aggregate/map hardening from a live issue report.
+Still 31 tools; no new Python dependency.
+
+### Added
+
+- **MCP `instructions`** — the server now sends `initialize` instructions
+  (`guide.SERVER_INSTRUCTIONS`, ~1.4 KB): what the server is, the discover-first flow
+  (find → `get_dataset_schema` → `query_dataset` → run → `show_map` → edit) and the
+  consent / axis-order / paging rules. Clients that support MCP instructions inject it
+  at connect, so an agent no longer needs a hand-written reminder to use the tools.
+- **`geopack://guide` resource** (Markdown) — a **holistic** playbook, read on demand via
+  `resources/read`: the portal object model (dataset/field/publication/relationship/task),
+  a **tool inventory generated from `TOOL_POLICY`** (grouped by safety), task recipes
+  (find→query, filter/query grammar, aggregate semantics, run an analysis/workflow, follow
+  a relationship, show a map, local geometry, edit records) and the gotchas. It explains
+  how the tools fit together, not merely what each one does; the long form never bloats
+  the system prompt.
+- **Editable content files** — both texts live as plain Markdown under
+  `src/geopack_sdk_mcp/content/` (`instructions.md`, `guide.md`), viewable and editable
+  without touching Python. Only the tool list is derived; it is injected at the
+  `%%TOOL_INVENTORY%%` token so the prose stays hand-written and the inventory stays exact.
+
+### Fixed
+
+- **A flat or Mongo-ish `filter` node answered an opaque HTTP 500.** `query_dataset`
+  (its `query.filter`) and `aggregate_dataset(filter=...)` now normalize the attribute
+  scope to the portal's typed node grammar client-side (`sanitize/filter_dsl.py`): a flat
+  `{field, operator, value}` rule is wrapped as a `rule`, a bare list of rules becomes an
+  `AND` group, and a group without `type` is typed. Anything else — including a
+  Mongo-style `{"field": {"$eq": 5}}` — is refused as `invalid_args` naming the accepted
+  shapes, before any round trip. The grammar is documented on the tool surface
+  (`tool_schema.FeatureFilter` / `FeatureQuery`).
+- **A `uniqueValue` shorthand silently styled only a sample of the categories.**
+  `show_map` derived one class per distinct value from the first 1,000 features, so an
+  18,648-row dataset with 18 categories produced only 7 classes. It now groups the whole
+  access-scoped column (via `aggregate` groupBy): all categories up to the documented cap
+  (30) are styled, and above the cap the manifest warns with the exact distinct count and
+  how many were left unstyled — never a silent under-style. (Class-breaks still samples;
+  a quantile needs a representative distribution.)
+- **`show_map(map_id=...)` could only append layers.** A corrected map kept serving its
+  stale layers. `show_map` now accepts `replace_layers=true` (rebuild the map with exactly
+  this call's layers) and `remove_layers` (drop named layer ids); unknown ids are reported
+  in `templateWarnings` and the dropped ids come back as `removedLayers`.
+
+### Notes
+
+- Single source of truth: the inventory is built from the safety registry, and a
+  completeness test fails if a registered tool has no guide line, so the guide cannot
+  drift from the surface. The guide re-states — never weakens — the consent rules.
+- A leading HTML comment in each content file is stripped from the served text, so the
+  files can carry editing notes without leaking them to the model.
+
+### Verification
+
+- Full suite **820 tests** OK (was 791; +29 — guide/instructions, filter normalization,
+  distinct-value symbology and map layer replacement).
+
+Touched files:
+- `src/geopack_sdk_mcp/guide.py`
+- `src/geopack_sdk_mcp/content/guide.md`
+- `src/geopack_sdk_mcp/content/instructions.md`
+- `src/geopack_sdk_mcp/server.py`
+- `src/geopack_sdk_mcp/resources/guide.py`
+- `src/geopack_sdk_mcp/resources/__init__.py`
+- `src/geopack_sdk_mcp/sanitize/filter_dsl.py`
+- `src/geopack_sdk_mcp/tool_handlers/datasets.py`
+- `src/geopack_sdk_mcp/tool_handlers/maps.py`
+- `src/geopack_sdk_mcp/maps/manifest.py`, `maps/sources.py`
+- `src/geopack_sdk_mcp/tool_schema.py`, `src/geopack_sdk_mcp/tools/maps.py`
+- `tests/test_mcp_guide.py`, `tests/test_mcp_filter_dsl.py`, `tests/test_map_tools.py`
+- `pyproject.toml`, `src/geopack_sdk/__init__.py`, `CHANGELOG.md`
+
 ## 0.12.11 — 2026-11-23
 
 Legend derivation for a caller-supplied complete style spec (slice 033; SDK-008).

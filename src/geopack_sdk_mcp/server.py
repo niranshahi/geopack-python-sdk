@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .auth_bootstrap import AppContext, bootstrap_geopack_client
 from .context import set_lifespan_client
+from .guide import SERVER_INSTRUCTIONS
 from .resources import register_all_resources
 from .tools import register_all_tools
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ async def _app_lifespan(_server: FastMCP) -> AsyncIterator[AppContext]:
 
 mcp = FastMCP(
     "Geopack SDK MCP",
+    instructions=SERVER_INSTRUCTIONS,
     lifespan=_app_lifespan,
     json_response=True,
 )

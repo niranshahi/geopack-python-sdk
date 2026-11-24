@@ -180,14 +180,73 @@ def dataset_feature_count(client: Any, dataset_id: int) -> Optional[int]:
 def dataset_field_values(
     client: Any, dataset_id: int, field: str, *, limit: int = 1000
 ) -> List[Any]:
-    """A sample of one ``field``'s values, to derive a caller-requested symbology.
+    """A sample of one ``field``'s values, to derive a class-breaks symbology.
 
     Reads the same GeoJSON lane the viewer uses and keeps only the requested
-    attribute, so a ``uniqueValue``/``classBreaks`` spec can be computed from the
-    real distribution rather than a caller-guessed set of classes.
+    attribute, so a quantile ``classBreaks`` spec can be computed from a
+    representative distribution rather than a caller-guessed set of classes. For a
+    *categorical* spec use :func:`dataset_field_distinct_values` instead — a sample
+    silently under-counts the categories of a large dataset.
     """
     geojson = query_dataset_geojson(client, int(dataset_id), limit=int(limit))
     return field_values_from_geojson(geojson, field)
+
+
+#: The aggregate lane caps buckets at 50 (server rule), so a distinct-value probe
+#: cannot ask for more than that in one call.
+_AGGREGATE_MAX_BUCKETS = 50
+
+
+def _group_value(row: Dict[str, Any], field: str) -> Any:
+    """The groupBy value of a row (its ``field`` key, or the first non-count key)."""
+    if field in row:
+        return row.get(field)
+    for key, value in row.items():
+        if key not in ("n", "count", "aggregate_count"):
+            return value
+    return None
+
+
+def dataset_field_distinct_values(
+    client: Any, dataset_id: int, field: str, *, max_values: int
+) -> Tuple[List[Any], bool]:
+    """The DISTINCT values of one field, via the aggregate groupBy lane.
+
+    Returns ``(values, truncated)``. Sampling the first N features of a large
+    dataset silently under-counts categories (an 18,648-row dataset sampled 1,000
+    rows and styled only 7 of 18 classes — issue report 2026-11-24); grouping the
+    whole access-scoped column is exact. ``truncated`` is ``True`` when the store
+    holds more distinct values than ``max_values`` — the caller decides what to do
+    (never silently under-style). The bucket cap (50) is a server rule, so the
+    probe asks for ``max_values + 1`` clamped to it. Raises on a bad field name so
+    the caller can warn instead of failing the whole map.
+    """
+    probe = max(1, min(int(max_values) + 1, _AGGREGATE_MAX_BUCKETS))
+    aggregation: Dict[str, Any] = {
+        "aggregates": [{"aggregate": "count", "alias": "n"}],
+        "groupBy": [{"field": field}],
+        "limit": probe,
+    }
+    result = client.datasets.aggregate(int(dataset_id), aggregation=aggregation)
+    rows = [
+        row for row in (getattr(result, "rows", None) or []) if isinstance(row, dict)
+    ]
+    values = [_group_value(row, field) for row in rows]
+    truncated = len(values) > int(max_values)
+    return values[: int(max_values)], truncated
+
+
+def dataset_distinct_count(
+    client: Any, dataset_id: int, field: str
+) -> Optional[int]:
+    """Best-effort exact count of distinct ``field`` values (``None`` if unknown).
+
+    Used only to make a truncation warning precise; it never changes the result.
+    """
+    try:
+        return int(client.datasets.count(int(dataset_id), field=field, distinct=True))
+    except Exception:  # noqa: BLE001 - the warning degrades without the exact total
+        return None
 
 
 def _repair_to_wgs84(

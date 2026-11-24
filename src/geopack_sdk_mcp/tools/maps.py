@@ -24,6 +24,8 @@ from ..tool_schema import (
     MapCenter,
     MapIdArg,
     MapLayers,
+    MapRemoveLayers,
+    MapReplaceLayers,
     MapStyle,
     MapTemplate,
     MapTitle,
@@ -51,8 +53,11 @@ def register(mcp: Any) -> None:
             "Rasters and external OGC services must use a portal-publication layer; a raster "
             "portal-dataset layer is vector-only and warns. Each layer's WGS84 extent is read from "
             "its source dataset when `bbox` is omitted. A page can also reference the URLs directly "
-            "instead of embedding data. Opt-in: requires GEOPACK_MCP_MAP_SERVICE=1. The portal "
-            "credential never reaches the browser. No map image is rendered."
+            "instead of embedding data. To change an existing map (map_id) pass replace_layers "
+            "to rebuild it with exactly this call's layers, or remove_layers with layer ids to "
+            "drop specific layers — otherwise layers append. Opt-in: requires "
+            "GEOPACK_MCP_MAP_SERVICE=1. The portal credential never reaches the browser. No map "
+            "image is rendered."
         ),
     )
     def geopack_sdk_show_map(
@@ -66,6 +71,8 @@ def register(mcp: Any) -> None:
         style: MapStyle = None,
         center: MapCenter = None,
         zoom: MapZoom = None,
+        replace_layers: MapReplaceLayers = False,
+        remove_layers: MapRemoveLayers = None,
     ) -> CallToolResult:
         try:
             client = get_client(ctx)
@@ -81,6 +88,8 @@ def register(mcp: Any) -> None:
                     style=style,
                     center=center,
                     zoom=zoom,
+                    replace_layers=replace_layers,
+                    remove_layers=remove_layers,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - the error contract renders it
