@@ -9,13 +9,6 @@ import unittest
 from geopack_sdk_mcp.errors import ToolArgumentError, tool_result_with_image
 from geopack_sdk_mcp.tool_handlers.charts import render_chart
 
-try:  # the optional PNG engine (geopack-sdk[charts])
-    import cairosvg  # noqa: F401
-
-    _HAS_CAIRO = True
-except Exception:  # noqa: BLE001
-    _HAS_CAIRO = False
-
 ROWS = [
     {"Landuse_Group": "1", "aggregate_count": 120},
     {"Landuse_Group": "2", "aggregate_count": 30},
@@ -117,16 +110,49 @@ class RenderChartTest(unittest.TestCase):
         self.assertFalse(result.payload["saved"])
         self.assertTrue(result.payload["saveSkipped"])
 
-    @unittest.skipIf(_HAS_CAIRO, "cairosvg installed; the png path is available")
-    def test_png_without_the_optional_engine_is_a_coded_refusal(self):
+    def test_png_is_refused_because_no_bundled_engine_shapes_complex_scripts(self):
         with self.assertRaises(ToolArgumentError) as ctx:
             render_chart(ROWS, category="Landuse_Group", value="aggregate_count", format="png")
         self.assertEqual(ctx.exception.invalid_args, ["format"])
+        self.assertIn("svg", ctx.exception.hint.lower())
 
     def test_an_unknown_format_is_refused(self):
         with self.assertRaises(ToolArgumentError) as ctx:
             render_chart(ROWS, category="Landuse_Group", value="aggregate_count", format="pdf")
         self.assertEqual(ctx.exception.invalid_args, ["format"])
+
+    def test_the_svg_is_returned_as_text_with_logical_persian_labels(self):
+        rows = [
+            {"Landuse_Group": "مسکونی", "aggregate_count": 120},
+            {"Landuse_Group": "صنعتی", "aggregate_count": 26},
+        ]
+        result = render_chart(rows, chart_type="bar", category="Landuse_Group",
+                              value="aggregate_count")
+        svg = result.payload["svg"]
+        self.assertTrue(svg.startswith("<svg"))
+        # Labels verbatim, in LOGICAL order (never shaped).
+        self.assertIn("مسکونی", svg)
+        self.assertIn("صنعتی", svg)
+        # No Arabic presentation forms and no joiners — the SVG must not pre-shape.
+        for char in svg:
+            self.assertFalse("\ufb50" <= char <= "\ufeff", f"presentation form {char!r}")
+            self.assertNotIn(char, ("\u200c", "\u200d"))
+        # A Persian/Arabic-capable font stack is declared, and RTL labels are flagged.
+        self.assertIn("Noto Naskh Arabic", svg)
+        self.assertIn('direction="rtl"', svg)
+
+    def test_group_labels_are_used_for_the_category_when_present(self):
+        rows = [
+            {"Landuse_Group": 1, "aggregate_count": 120, "groupLabels": {"Landuse_Group": "مسکونی"}},
+            {"Landuse_Group": 2, "aggregate_count": 26, "groupLabels": {"Landuse_Group": "صنعتی"}},
+        ]
+        result = render_chart(rows, category="Landuse_Group", value="aggregate_count")
+        self.assertEqual(result.payload["categories"], ["مسکونی", "صنعتی"])
+
+    def test_a_missing_category_field_names_category_not_value(self):
+        with self.assertRaises(ToolArgumentError) as ctx:
+            render_chart([{"other": 1}], category="Landuse_Group", value="aggregate_count")
+        self.assertEqual(ctx.exception.invalid_args, ["category"])
 
     def test_the_result_travels_as_an_image_block_plus_text(self):
         result = render_chart(ROWS, category="Landuse_Group", value="aggregate_count")

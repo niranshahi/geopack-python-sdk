@@ -3,6 +3,49 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.13.2 — 2026-11-24
+
+Makes the charting lane own non-Latin text, and corrects/extends `geopack://guide`.
+
+### Changed
+
+- **`render_chart` is SVG-only and inspectable.** `format:'png'` is now a coded refusal:
+  no bundled raster engine shapes complex scripts (cairo's toy text API and Pillow without
+  Raqm do not), so a rasterised Persian label would be wrong — SVG keeps text in LOGICAL
+  order and lets the renderer join/shape it. The SVG source is echoed as a string in the
+  payload (`svg`), so a caller can inspect/verify/embed/post-process the chart (it was an
+  opaque image payload before). The SVG declares an Arabic-capable font stack
+  (`Tahoma, 'Segoe UI', 'Noto Naskh Arabic', …`) and RTL labels carry `direction="rtl"`;
+  the text is never pre-shaped (no U+FB50–U+FEFF, no ZWJ/ZWNJ). `save_path` writes the SVG.
+- **Coded-value labels.** `render_chart` now reads `groupLabels[<category field>]` from the
+  aggregate rows and uses the human label automatically, so a Persian-coded field charts
+  with names, not integer codes — no manual row flattening.
+
+### Fixed
+
+- **`invalidArgs` names the right argument (report G5).** A chart whose category field does
+  not exist in the rows now refuses with `invalidArgs:["category"]` (and a `groupLabels`
+  hint) instead of blaming `value`.
+
+### Docs
+
+- **`geopack://guide` corrected and extended (report B).** Fixed the `order_by` key rules
+  (alias vs `aggregate_<kind>_<field>`), the MVT `dataUrl` cap (bounded for every renderer;
+  only tiles are full coverage), the session-scoped links (token rotates; stale `?t=` → a
+  readable 401 page), the consent split (`explicit` vs `brief`), and the chart recipe (SVG +
+  `groupLabels`). Added: the export→download chain, thumbnail-vs-publication, task lifecycle,
+  the MCP resources (`geopack://guide`, `dataset://…/thumbnail`, `generated-file://…/download`),
+  RTL/script guidance, and a recurring-code troubleshooting table.
+
+### Verification
+
+- Full suite **849 tests** OK (was 846; +3 — Persian-SVG, `groupLabels`, category error).
+
+Touched files:
+- `src/geopack_sdk_mcp/tool_handlers/charts.py`, `src/geopack_sdk_mcp/tool_schema.py`
+- `src/geopack_sdk_mcp/content/guide.md`, `README.md`
+- `tests/test_mcp_chart_tool.py`; `pyproject.toml`, `src/geopack_sdk/__init__.py`, `CHANGELOG.md`
+
 ## 0.13.1 — 2026-11-24
 
 Adds a file form + labelled slices to the charting lane and makes an expired map link

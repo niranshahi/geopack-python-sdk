@@ -6,16 +6,24 @@ payload. Pure local compute: no portal call and **no third-party graphics
 dependency** — the SVG is built from the standard library only, so the shipped
 package stays dependency-light.
 
-Why SVG (not PNG): the MCP image-content path passes any ``image/*`` mime through,
-and ``image/svg+xml`` is text that needs no rasteriser. A host that does not draw
-SVG still receives the points in the payload (``points``) plus a note, so the data
-is never lost. Rows feed straight from ``geopack_sdk_aggregate_dataset`` (its
-``rows`` list) or any list of dict records.
+Why **SVG only** (no raster): SVG keeps the label text in LOGICAL order (ordinary
+Unicode letters, never pre-shaped presentation forms) so the renderer applies the
+correct Persian/Arabic joining and bidi. Any rasteriser we could bundle (cairo's toy
+text API, Pillow without Raqm) does NOT shape complex scripts, so a PNG would render
+broken Persian — worse than useless. The SVG is therefore the artifact: the same
+markup is echoed as a string in the payload (``svg``) so the caller can inspect,
+verify and post-process it, and an optional ``save_path`` writes it to a file.
+
+SVG is also dependency-free (built from the standard library); rows feed straight
+from ``geopack_sdk_aggregate_dataset`` (its ``rows`` list) or any list of dict
+records. When a row carries ``groupLabels[<category field>]`` (the aggregate lane
+does), that human label is used instead of the raw code.
 """
 
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -25,8 +33,16 @@ from ..errors import ToolArgumentError
 
 CHART_TYPES = ("bar", "line", "pie")
 _DEFAULT_TYPE = "bar"
-CHART_FORMATS = ("svg", "png")
+CHART_FORMATS = ("svg",)
 _DEFAULT_FORMAT = "svg"
+
+#: A font stack that includes Persian/Arabic-capable fonts before the generic
+#: fallback, so a client that lacks the first pick still shapes the text.
+_FONT_STACK = "Tahoma, 'Segoe UI', 'Noto Naskh Arabic', 'Noto Sans Arabic', Arial, sans-serif"
+
+#: Any RTL script codepoint (Hebrew block through Arabic/Arabic Supplement, plus
+#: the Arabic presentation-form block) — used only to add ``direction`` hints.
+_RTL_RE = re.compile("[\u0590-\u08ff\ufb1d-\ufdfd\ufe70-\ufefc]")
 
 #: Points drawn before the tail is summarised (keeps the SVG small and legible).
 _MAX_POINTS = 200
@@ -79,18 +95,28 @@ def _unique(items: Sequence[Any]) -> List[Any]:
     return out
 
 
+def _dir_attr(text: str) -> str:
+    """`` direction="rtl"`` for a right-to-left label, else ``""``.
+
+    The text stays in LOGICAL order; this only tells the renderer the base
+    direction so mixed label/digit runs order correctly. It never pre-shapes.
+    """
+    return ' direction="rtl"' if _RTL_RE.search(text) else ""
+
+
 def _open(title: Optional[str]) -> List[str]:
     parts = [
         (
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{_WIDTH}" height="{_HEIGHT}" '
-            f'viewBox="0 0 {_WIDTH} {_HEIGHT}" font-family="Segoe UI, Arial, sans-serif">'
+            f'viewBox="0 0 {_WIDTH} {_HEIGHT}" font-family="{_FONT_STACK}">'
         ),
         f'<rect width="{_WIDTH}" height="{_HEIGHT}" fill="#ffffff"/>',
     ]
     if title:
+        text = str(title)
         parts.append(
-            f'<text x="24" y="26" font-size="16" font-weight="600" fill="#111827">'
-            f"{escape(str(title))}</text>"
+            f'<text x="24" y="26" font-size="16" font-weight="600" fill="#111827"'
+            f"{_dir_attr(text)}>{escape(text)}</text>"
         )
     return parts
 
@@ -151,13 +177,14 @@ def _render_xy(
         if rotated:
             parts.append(
                 f'<text x="{x:.1f}" y="{label_y:.1f}" text-anchor="end" font-size="10" '
-                f'fill="#374151" transform="rotate(-35 {x:.1f} {label_y:.1f})">'
+                f'fill="#374151"{_dir_attr(name)} '
+                f'transform="rotate(-35 {x:.1f} {label_y:.1f})">'
                 f"{escape(name)}</text>"
             )
         else:
             parts.append(
                 f'<text x="{x:.1f}" y="{label_y:.1f}" text-anchor="middle" font-size="11" '
-                f'fill="#374151">{escape(name)}</text>'
+                f'fill="#374151"{_dir_attr(name)}>{escape(name)}</text>'
             )
 
     table: Dict[str, Dict[str, float]] = {name: {} for name in series_names}
@@ -282,23 +309,6 @@ def _pie_slices(points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ]
 
 
-def _svg_to_png(svg_bytes: bytes, scale: float = 2.0) -> Optional[bytes]:
-    """Rasterise the SVG to PNG via the OPTIONAL ``cairosvg`` engine, or ``None``.
-
-    No rasteriser is a hard dependency (the shipped SVG needs none), so a PNG is
-    offered only when ``cairosvg`` is importable (the ``geopack-sdk[charts]``
-    extra). The caller turns ``None`` into a coded, actionable refusal.
-    """
-    try:
-        import cairosvg  # type: ignore[import-not-found]
-    except Exception:  # noqa: BLE001 - optional engine
-        return None
-    try:
-        return cairosvg.svg2png(bytestring=svg_bytes, scale=scale)
-    except Exception:  # noqa: BLE001 - a bad render must degrade, not crash
-        return None
-
-
 def _save_bytes(payload: Dict[str, Any], body: bytes, save_path: Any, default_name: str) -> None:
     """Best-effort local write — mirrors the thumbnail lane (never fatal)."""
     if not save_path:
@@ -342,6 +352,16 @@ def render_chart(
             key="chart_type",
         )
     fmt = (format or _DEFAULT_FORMAT).strip().lower()
+    if fmt == "png":
+        raise ToolArgumentError(
+            "format 'png' is not offered: no shaping-capable raster engine is bundled, and a "
+            "rasterised chart breaks Persian/Arabic joining (it would render the labels wrong).",
+            key="format",
+            hint=(
+                "Use format 'svg' (the default and only format): it keeps labels in logical order "
+                "so the renderer shapes them, and `save_path` writes it as a file."
+            ),
+        )
     if fmt not in CHART_FORMATS:
         raise ToolArgumentError(
             f"format must be one of: {', '.join(CHART_FORMATS)} (got {format!r}).",
@@ -360,15 +380,23 @@ def render_chart(
 
     points: List[Dict[str, Any]] = []
     skipped = 0
+    saw_category = False
     for row in rows:
         if not isinstance(row, dict) or category not in row:
             skipped += 1
             continue
+        saw_category = True
         number = _as_float(row.get(value))
         if number is None:
             skipped += 1
             continue
         raw_category = row.get(category)
+        # The aggregate lane puts the human label of a coded value in
+        # `groupLabels[<field>]`; prefer it so a Persian-coded field charts with
+        # its names, not its integer codes (report G4).
+        labels = row.get("groupLabels")
+        if isinstance(labels, dict) and labels.get(category) is not None:
+            raw_category = labels.get(category)
         if series and row.get(series) is not None:
             series_name = str(row.get(series))
         else:
@@ -382,6 +410,16 @@ def render_chart(
         )
 
     if not points:
+        if not saw_category:
+            raise ToolArgumentError(
+                f"no row carries the category field '{category}'.",
+                key="category",
+                hint=(
+                    "Pass a field that exists in the rows — for geopack_sdk_aggregate_dataset use "
+                    "your groupBy field. The human label is in `groupLabels.<field>` and is used "
+                    "automatically."
+                ),
+            )
         raise ToolArgumentError(
             f"no rows carried a numeric '{value}' for category '{category}'.",
             key="value",
@@ -408,21 +446,8 @@ def render_chart(
         numbers = [point["value"] for point in points]
         value_range = [min(numbers), max(numbers)]
 
-    svg_bytes = "".join(parts).encode("utf-8")
-    if fmt == "png":
-        png = _svg_to_png(svg_bytes)
-        if png is None:
-            raise ToolArgumentError(
-                "format 'png' needs the optional raster engine (cairosvg), which is not installed.",
-                key="format",
-                hint=(
-                    "Install `geopack-sdk[charts]` (cairosvg) to write PNG, or use format 'svg' "
-                    "(vector, faithful for Persian labels) and read `points`/`slices` for the data."
-                ),
-            )
-        body, mime_type = png, "image/png"
-    else:
-        body, mime_type = svg_bytes, "image/svg+xml"
+    svg_text = "".join(parts)
+    body, mime_type = svg_text.encode("utf-8"), "image/svg+xml"
 
     payload: Dict[str, Any] = {
         "chartType": kind,
@@ -441,9 +466,15 @@ def render_chart(
         "valueRange": value_range,
         "mimeType": mime_type,
         "sizeBytes": len(body),
+        # The SVG SOURCE, so the caller can INSPECT/verify/embed/post-process it
+        # (a Persian chart must be checkable — report A.2). Text stays in LOGICAL
+        # order; it is never pre-shaped, so a renderer shapes it correctly.
+        "svg": svg_text,
         "note": (
-            "Chart rendered inline as an image block. If your client does not display it, the "
-            "same points (and, for a pie, `slices` with labels + percentages) are in the payload."
+            "Chart delivered inline as image/svg+xml; `svg` holds the same markup as a string so "
+            "you can inspect it. `points` (and, for a pie, `slices` with labels + percentages) "
+            "carry the data. Labels are logical Unicode (never shaped) so renderers apply the "
+            "correct Persian/Arabic joining and bidi."
         ),
     }
     _save_bytes(payload, body, save_path, f"chart.{fmt}")
