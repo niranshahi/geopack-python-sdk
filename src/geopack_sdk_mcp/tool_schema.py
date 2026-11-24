@@ -122,7 +122,7 @@ OutSrid = Annotated[
             "EPSG code to override. Applies to both the simple and query-DSL lanes. If the portal "
             "cannot reproject, the result is still returned with a `crsNote` (and `outSridApplied`)."
         ),
-        default=None,
+        default=4326,
     ),
 ]
 SavePath = Annotated[
@@ -248,15 +248,17 @@ AggregateLimit = Annotated[
     Field(description="Max buckets to return (1-50, default 20).", ge=1, le=50),
 ]
 FeatureFilter = Annotated[
-    Optional[Dict[str, Any]],
+    Optional[Union[Dict[str, Any], List[Any]]],
     Field(
         description=(
             "Optional attribute scope as a filter node. Shape: "
             "{type:'rule', field, operator, value} (operator tokens like '=', '$ilike', 'IN') or "
             "{type:'group', operator:'AND'|'OR', children:[...]}. A flat {field, operator, value} "
-            "rule (and a list of rules, combined with AND) is accepted and normalized; any other "
-            "shape is refused as invalid_args before the round trip. Omit it for no attribute "
-            "filter — an empty value is not the same as 'match all'."
+            "rule is wrapped as a rule, and a bare list of rules is combined with AND — both are "
+            "accepted and normalized client-side (the schema accepts an object, an array or null). "
+            "Any other shape (e.g. a Mongo-style {field:{$eq:v}}) is refused as invalid_args "
+            "before the round trip. Omit it for no attribute filter — an empty value is not the "
+            "same as 'match all'."
         ),
         default=None,
     ),

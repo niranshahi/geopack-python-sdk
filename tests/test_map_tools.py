@@ -86,26 +86,65 @@ class _Datasets:
 
         return _Page()
 
-    def _distinct(self, field):
-        seen = []
+    def _field_values(self, field):
+        values = []
         for feature in (self._feature_collection or {}).get("features") or []:
             props = feature.get("properties") if isinstance(feature, dict) else None
             if isinstance(props, dict) and field in props:
-                key = "" if props.get(field) is None else str(props.get(field))
-                if key not in [entry[0] for entry in seen]:
-                    seen.append((key, props.get(field)))
+                values.append(props.get(field))
+        return values
+
+    def _distinct(self, field):
+        seen = []
+        for value in self._field_values(field):
+            key = "" if value is None else str(value)
+            if key not in [entry[0] for entry in seen]:
+                seen.append((key, value))
         return [value for _key, value in seen]
 
     class _Aggregate:
         def __init__(self, rows):
             self.rows = rows
 
+    def _percentile(self, numbers, p):
+        if not numbers:
+            return None
+        index = max(0, min(len(numbers) - 1, int(float(p) * len(numbers))))
+        return numbers[index]
+
+    def _scalar_row(self, aggregation):
+        row = {}
+        for spec in aggregation.get("aggregates") or []:
+            if not isinstance(spec, dict):
+                continue
+            alias = spec.get("alias") or spec.get("aggregate")
+            field = spec.get("field")
+            numbers = sorted(
+                float(value)
+                for value in self._field_values(field)
+                if isinstance(value, (int, float)) and not isinstance(value, bool)
+            )
+            kind = spec.get("aggregate")
+            if kind == "min":
+                row[alias] = numbers[0] if numbers else None
+            elif kind == "max":
+                row[alias] = numbers[-1] if numbers else None
+            elif kind == "percentile":
+                row[alias] = self._percentile(numbers, spec.get("p"))
+            else:
+                row[alias] = None
+        return row
+
     def aggregate(self, dataset_id, *, aggregation=None, filter=None, spatial_filter=None):
         self.calls.append(
             {"dataset_id": dataset_id, "aggregation": aggregation, "filter": filter}
         )
+        aggregation = aggregation or {}
+        group_by = aggregation.get("groupBy") or []
+        if not group_by:
+            return self._Aggregate([self._scalar_row(aggregation)])
         field = None
-        for group in (aggregation or {}).get("groupBy") or []:
+        for group in group_by:
             if isinstance(group, dict) and group.get("field"):
                 field = group["field"]
                 break
@@ -701,6 +740,89 @@ class ShowMapTest(unittest.TestCase):
         self.assertEqual(sym["breaks"][0]["min"], 100.0)
         self.assertEqual(sym["breaks"][-1]["max"], 300.0)
         self.assertNotEqual(sym["breaks"][0]["style"]["fill"], sym["breaks"][-1]["style"]["fill"])
+
+    def test_class_breaks_use_server_quantiles_honouring_the_layer_filter(self):
+        # A filtered layer's breaks must describe the FILTERED column, not a local
+        # sample: the layer's own filter is forwarded to the aggregate lane and the
+        # breaks span the whole column (issue report 2026-11-24, N2 — a 356-row
+        # filtered layer reproduced the whole 18,648-row dataset's sampled breaks).
+        features = {
+            "type": "FeatureCollection",
+            "features": [
+                _feature({"DB_SHAPE_Area": value})
+                for value in (10000.0, 20000.0, 30000.0, 40000.0)
+            ],
+        }
+        client = _Client(feature_collection=features)
+        payload = show_map(
+            client,
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 1577,
+                 "query": {"filter": {"field": "DB_SHAPE_Area", "operator": ">", "value": 1000}},
+                 "symbology": {"type": "classBreaks", "field": "DB_SHAPE_Area", "classes": 2}}
+            ],
+        )
+        sym = payload["layers"][0]["symbology"]
+        self.assertEqual(len(sym["breaks"]), 2)
+        self.assertEqual(sym["breaks"][0]["min"], 10000.0)
+        self.assertEqual(sym["breaks"][-1]["max"], 40000.0)
+        agg_calls = [call for call in client.datasets.calls if "aggregation" in call]
+        self.assertTrue(agg_calls)
+        sent_filter = agg_calls[-1]["filter"]
+        self.assertEqual(sent_filter["type"], "rule")
+        self.assertEqual(sent_filter["field"], "DB_SHAPE_Area")
+
+    def test_class_breaks_fall_back_to_a_sample_with_a_warning(self):
+        # When the store cannot aggregate, a sampled estimate is used BUT disclosed —
+        # a sampled legend must never be passed off as exact.
+        client = _Client(feature_collection=_sample_features())
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("aggregation unsupported")
+
+        client.datasets.aggregate = _boom
+        payload = show_map(
+            client,
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 1577,
+                 "symbology": {"type": "classBreaks", "field": "DB_SHAPE_Area", "classes": 5}}
+            ],
+        )
+        sym = payload["layers"][0]["symbology"]
+        self.assertEqual(sym["type"], "classBreaks")
+        warning = next(w for w in payload["templateWarnings"] if "server-side" in w)
+        self.assertIn("sample", warning)
+
+    def test_a_class_breaks_count_is_capped_with_a_warning(self):
+        payload = show_map(
+            _Client(feature_collection=_sample_features()),
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 1577,
+                 "symbology": {"type": "classBreaks", "field": "DB_SHAPE_Area", "classes": 50}}
+            ],
+        )
+        sym = payload["layers"][0]["symbology"]
+        self.assertEqual(len(sym["breaks"]), 12)
+        self.assertTrue(any("capped" in w for w in payload["templateWarnings"]))
+
+    def test_a_unique_value_palette_does_not_repeat_under_the_cap(self):
+        # 18 categories must get 18 DISTINCT colours; the palette used to cycle at
+        # 12, drawing two unrelated categories the same (issue report 2026-11-24, N3).
+        features = {
+            "type": "FeatureCollection",
+            "features": [_feature({"Landuse_Group": str(i)}) for i in range(18)],
+        }
+        payload = show_map(
+            _Client(feature_collection=features),
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 1577,
+                 "symbology": {"type": "uniqueValue", "field": "Landuse_Group"}}
+            ],
+        )
+        unique = payload["layers"][0]["symbology"]["unique"]
+        fills = [entry["style"]["fill"] for entry in unique]
+        self.assertEqual(len(fills), 18)
+        self.assertEqual(len(set(fills)), 18)
 
     def test_a_caller_symbology_wins_over_the_dataset_renderer(self):
         details = {

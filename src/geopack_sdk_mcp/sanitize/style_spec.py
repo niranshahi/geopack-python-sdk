@@ -290,10 +290,18 @@ def esri_renderer_to_spec(
     return None
 
 
-#: Colours for a data-derived categorical (unique-value) symbology.
+#: Colours for a data-derived categorical (unique-value) symbology. Sized to the
+#: derived-symbology class cap (``_MAX_DERIVED_CLASSES`` = 30) so a caller's
+#: ``uniqueValue`` shorthand gets a DISTINCT colour for every category up to the
+#: cap — 12 colours used to cycle after the twelfth, drawing unrelated categories
+#: (e.g. the two largest land-use groups) in the SAME colour (issue report
+#: 2026-11-24, N3). Grow this list whenever the cap grows.
 CATEGORICAL_PALETTE = (
     "#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02",
     "#a6761d", "#666666", "#1f78b4", "#b2df8a", "#fb9a99", "#cab2d6",
+    "#e31a1c", "#fdbf6f", "#ff7f00", "#6a3d9a", "#b15928", "#33a02c",
+    "#a6cee3", "#00bcd4", "#009688", "#795548", "#607d8b", "#9c27b0",
+    "#3f51b5", "#8bc34a", "#ff5722", "#ffc107", "#03a9f4", "#673ab7",
 )
 
 #: Sequential ramp for a data-derived class-breaks symbology (low → high).

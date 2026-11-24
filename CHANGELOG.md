@@ -3,6 +3,62 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.12.13 — 2026-11-24
+
+Follow-up to the live issue report: exact, filter-aware class breaks; a `uniqueValue`
+palette that cannot collide under the class cap; a list `filter` accepted at the schema;
+and the documented default output CRS actually applied. Still 31 tools; no new dependency.
+
+### Fixed
+
+- **`classBreaks` breaks ignored the layer filter and came from a sample.** A
+  `classBreaks` shorthand was computed from the first 1,000 features, so a **filtered**
+  layer reported the whole dataset's breaks — a 356-row layer (`DB_SHAPE_Area > 10000`,
+  true min ≈ 10,004) reproduced the unfiltered 18,648-row dataset's sampled breaks
+  (`48.76 – 199.97`, … all below the layer's own minimum). The portal dataset lane now
+  computes the breaks **server-side** over the full, access-scoped column
+  (`maps/sources.dataset_field_quantiles`, aggregate `min`/`max`/`percentile`), and the
+  layer's own `query.filter` is forwarded so the breaks describe exactly the rows the
+  layer draws. If the store cannot aggregate (or the filter is unparsable) it falls back
+  to a sample AND says so in `templateWarnings` — a sampled estimate is never passed off
+  as exact. Caller-requested `classes` are capped at **12** (a higher count is not
+  legible on a quantile map) with a warning.
+- **A `uniqueValue` shorthand could draw unrelated categories the same colour.** The
+  categorical palette held 12 colours but the derived class cap is 30, so an 18-class
+  field cycled after the twelfth and two categories shared a fill (6 colliding pairs of
+  18). The palette is now **30** distinct colours (sized to the cap), so every category
+  up to the cap gets its own colour; a guard warns if the palette ever falls below the cap.
+- **A bare list `filter` was rejected by the argument schema.** `aggregate_dataset`
+  refused `filter=[{...}, {...}]` with a raw Pydantic `Input should be a valid dictionary`
+  (no `code`/`invalidArgs`). `tool_schema.FeatureFilter` now accepts an object **or** an
+  array (the handler already combined a list with `AND`), so a list reaches the portal as
+  a normalized `AND` group instead of a schema error.
+- **`query_dataset` did not apply its documented default `out_srid`.** With the parameter
+  omitted the portal lane returned metre coordinates in the native CRS (no
+  `outSridApplied`), while passing `out_srid: 4326` returned lon/lat. The default is now
+  applied on both the tool and the handler (`4326`, guarding a null/0 echo), so an omitted
+  `out_srid` answers WGS84 like the documented default.
+
+### Notes
+
+- Supersedes the 0.12.12 note that "class-breaks still samples": breaks are now
+  server-side and filter-aware for portal-dataset layers; a local `inline-geometry`
+  layer still quantiles over its own features.
+
+### Verification
+
+- Full suite **826 tests** OK (was 820; +6 — server-side class breaks, sample fallback,
+  class-cap, palette-collision, list-filter and filter-schema).
+
+Touched files:
+- `src/geopack_sdk_mcp/maps/sources.py`
+- `src/geopack_sdk_mcp/tool_handlers/maps.py`
+- `src/geopack_sdk_mcp/tool_handlers/datasets.py`
+- `src/geopack_sdk_mcp/sanitize/style_spec.py`
+- `src/geopack_sdk_mcp/tool_schema.py`, `src/geopack_sdk_mcp/tools/datasets.py`
+- `tests/test_map_tools.py`, `tests/test_mcp_filter_dsl.py`, `tests/test_mcp_read_tools.py`
+- `pyproject.toml`, `src/geopack_sdk/__init__.py`, `CHANGELOG.md`
+
 ## 0.12.12 — 2026-11-24
 
 Server self-documentation plus query/aggregate/map hardening from a live issue report.

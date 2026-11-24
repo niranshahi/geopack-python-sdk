@@ -806,6 +806,14 @@ class ToolSurfaceTest(unittest.TestCase):
         for kind in AGGREGATE_KINDS:
             self.assertIn(kind, description)
 
+    def test_the_aggregate_filter_argument_accepts_a_list(self):
+        # A bare list of rules must pass the argument schema (2026-11-24, N1) —
+        # it used to be refused with a raw "Input should be a valid dictionary".
+        schema = self.tools["geopack_sdk_aggregate_dataset"].parameters["properties"]["filter"]
+        blob = json.dumps(schema)
+        self.assertIn("array", blob)
+        self.assertIn("object", blob)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,7 @@ from ..maps.sources import (
     dataset_distinct_count,
     dataset_feature_count,
     dataset_field_distinct_values,
+    dataset_field_quantiles,
     dataset_field_values,
     dataset_info,
     publication_dataset_id,
@@ -29,6 +30,7 @@ from ..maps.sources import (
 )
 from ..sanitize.dataset_symbology import styled_publications
 from ..sanitize.style_spec import (
+    CATEGORICAL_PALETTE,
     breaks_spec,
     categorical_spec,
     ensure_legend,
@@ -54,6 +56,10 @@ _GEOJSON_DEFAULT_LIMIT = 1000
 _SYMBOLOGY_SAMPLE_LIMIT = 1000
 #: Default class count for a caller-requested ``classBreaks`` symbology.
 _DEFAULT_BREAK_CLASSES = 5
+#: A caller-requested ``classBreaks`` count above this is capped: a quantile class
+#: map beyond a handful of classes is unreadable and the sequential ramp cannot
+#: separate the bands.
+_MAX_BREAK_CLASSES = 12
 #: A data-derived categorical symbology above this many classes is refused (a
 #: high-cardinality field like an id would render an unreadable legend).
 _MAX_DERIVED_CLASSES = 30
@@ -129,6 +135,19 @@ def _valid_lonlat(value: Any) -> Optional[List[float]]:
     return [lon, lat]
 
 
+def _layer_filter(layer: Any) -> Optional[Any]:
+    """The attribute filter a portal-dataset layer draws with (``None`` = all rows).
+
+    A layer spec carries its scope in ``query`` (the FeatureQuery DSL); the server
+    applies ``query.filter`` to the GeoJSON the layer loads, so a data-derived
+    symbology must honour the SAME filter to describe what is on screen.
+    """
+    query = getattr(layer, "query", None)
+    if isinstance(query, dict):
+        return query.get("filter")
+    return None
+
+
 def _resolve_caller_symbology(
     client: Any, layer: Any, warnings: List[str], field_meta: Optional[Dict[str, Any]] = None
 ) -> None:
@@ -185,21 +204,49 @@ def _resolve_caller_symbology(
         return
 
     if stype == "classBreaks":
-        # Quantile breaks need a representative distribution: a feature sample is
-        # the right input here (a value-per-row field grouped by value is not).
-        if layer.kind == "portal-dataset":
-            values = dataset_field_values(
-                client, int(layer.dataset_id), field, limit=_SYMBOLOGY_SAMPLE_LIMIT
-            )
-        else:
-            values = field_values_from_geojson(layer.geojson, field)
         classes = symbology.get("classes")
         classes = (
             int(classes)
             if isinstance(classes, int) and not isinstance(classes, bool) and classes > 0
             else _DEFAULT_BREAK_CLASSES
         )
-        breaks = quantile_breaks(values, classes)
+        if classes > _MAX_BREAK_CLASSES:
+            warnings.append(
+                f"layer '{label}': symbology requested {classes} classes; capped at "
+                f"{_MAX_BREAK_CLASSES} (a higher count is not legible on a quantile map)."
+            )
+            classes = _MAX_BREAK_CLASSES
+        breaks: Optional[List[Any]] = None
+        if layer.kind == "portal-dataset":
+            # Break on the FULL, filtered column server-side. A feature SAMPLE both
+            # under-counts a large dataset's tails and IGNORES the layer's filter, so
+            # a sampled legend can be wrong by orders of magnitude (issue report
+            # 2026-11-24, N2: a 356-row filtered layer reproduced the whole 18,648-row
+            # dataset's breaks, all below the layer's own minimum). The layer filter
+            # is forwarded so the breaks describe exactly the rows the layer draws.
+            breaks = dataset_field_quantiles(
+                client,
+                int(layer.dataset_id),
+                field,
+                classes=classes,
+                where_filter=_layer_filter(layer),
+            )
+            if breaks is None:
+                # Store cannot aggregate (or the filter is unparsable): fall back to a
+                # sample, but SAY so — never present a sampled estimate as exact.
+                warnings.append(
+                    f"layer '{label}': could not compute server-side class breaks for "
+                    f"field '{field}'; used a {_SYMBOLOGY_SAMPLE_LIMIT}-feature sample "
+                    "instead (breaks may not match the layer's filter)."
+                )
+        if breaks is None:
+            if layer.kind == "portal-dataset":
+                values = dataset_field_values(
+                    client, int(layer.dataset_id), field, limit=_SYMBOLOGY_SAMPLE_LIMIT
+                )
+            else:
+                values = field_values_from_geojson(layer.geojson, field)
+            breaks = quantile_breaks(values, classes)
         if not breaks:
             warnings.append(
                 f"layer '{label}': symbology field '{field}' has no numeric values; ignored."
@@ -234,6 +281,16 @@ def _resolve_caller_symbology(
         warnings.append(f"layer '{label}': symbology field '{field}' has no values; ignored.")
         layer.symbology = None
         return
+    # Guard the palette/class-cap invariant: if the palette is shorter than the
+    # class cap, `categorical_spec` cycles and two categories share a colour (the
+    # original N3 defect). The cap and palette are kept equal, so this only fires
+    # if one is changed without the other — say so instead of hiding it.
+    if len(spec["unique"]) > len(CATEGORICAL_PALETTE):
+        warnings.append(
+            f"layer '{label}': symbology field '{field}' has {len(spec['unique'])} "
+            f"distinct values, more than the {len(CATEGORICAL_PALETTE)} palette colours; "
+            "some classes share a colour."
+        )
     if truncated:
         shown = len(spec["unique"])
         total = (

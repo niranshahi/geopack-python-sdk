@@ -271,7 +271,7 @@ def register(mcp: Any) -> None:
         limit: QueryLimit = 100,
         offset: QueryOffset = 0,
         return_geometry: ReturnGeometry = True,
-        out_srid: OutSrid = None,
+        out_srid: OutSrid = 4326,
     ) -> CallToolResult:
         try:
             return tool_result(

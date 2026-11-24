@@ -113,6 +113,24 @@ class AggregateFilterTest(unittest.TestCase):
         sent = self.client.datasets.aggregate.call_args.kwargs["filter"]
         self.assertEqual(sent, {"type": "rule", "field": "a", "operator": "=", "value": 1})
 
+    def test_a_bare_list_filter_reaches_the_aggregate_as_an_and_group(self):
+        # A list of rules used to be rejected by the argument schema with a raw
+        # Pydantic "Input should be a valid dictionary" error (2026-11-24, N1); it
+        # is now accepted and combined with AND before the round trip.
+        aggregate_dataset(
+            self.client,
+            7,
+            filter=[
+                {"field": "a", "operator": "=", "value": 1},
+                {"field": "b", "operator": ">", "value": 2},
+            ],
+        )
+        sent = self.client.datasets.aggregate.call_args.kwargs["filter"]
+        self.assertEqual(sent["type"], "group")
+        self.assertEqual(sent["operator"], "AND")
+        self.assertEqual(len(sent["children"]), 2)
+        self.assertEqual(sent["children"][0]["type"], "rule")
+
     def test_a_mongo_filter_is_refused_without_a_round_trip(self):
         with self.assertRaises(ToolArgumentError):
             aggregate_dataset(self.client, 7, filter={"a": {"$eq": 1}})

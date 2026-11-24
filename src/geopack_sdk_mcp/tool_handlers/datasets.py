@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Sequence
+from typing import Any, Dict, List, Literal, Optional, Sequence, Union
 
 from geopack_sdk import GeopackClient
 from geopack_sdk.datasets import normalize_feature_query_dsl
@@ -195,7 +195,10 @@ def query_dataset(
     in the payload; when it cannot be repaired, a ``crsNote`` says so — the output
     is never passed off as WGS84 when it is not.
     """
-    effective_srid = 4326 if out_srid is None else out_srid
+    # Default (and guard None/0, e.g. a client echoing a null default) to 4326:
+    # a projected dataset otherwise answers metre coordinates a WGS84 caller
+    # plots nowhere (issue report 2026-11-24, N4).
+    effective_srid = int(out_srid) if out_srid else 4326
     if query is None:
         effective_limit = clamp_query_limit(limit)
         result = client.datasets.query(
@@ -622,7 +625,7 @@ def aggregate_dataset(
     group_by: Any = None,
     order_by: Any = None,
     limit: int = AGGREGATE_DEFAULT_LIMIT,
-    filter: Optional[Dict[str, Any]] = None,
+    filter: Optional[Union[Dict[str, Any], List[Any]]] = None,
     spatial_filter: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """The answer-first lane: counts, sums, distributions and top-N in one call.

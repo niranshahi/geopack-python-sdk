@@ -28,6 +28,7 @@ from ..sanitize.dataset_symbology import (
     styled_publications,
     summarise_symbology,
 )
+from ..sanitize.filter_dsl import normalize_filter_node
 from ..sanitize.style_spec import dataset_style_spec, field_values_from_geojson
 from ..serialize import to_jsonable
 
@@ -247,6 +248,93 @@ def dataset_distinct_count(
         return int(client.datasets.count(int(dataset_id), field=field, distinct=True))
     except Exception:  # noqa: BLE001 - the warning degrades without the exact total
         return None
+
+
+def _as_float(value: Any) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def dataset_field_quantiles(
+    client: Any,
+    dataset_id: int,
+    field: str,
+    *,
+    classes: int,
+    where_filter: Optional[Any] = None,
+) -> Optional[List[Tuple[float, float]]]:
+    """Server-side quantile class breaks over the FULL, optionally filtered column.
+
+    A feature sample both under-counts a large dataset's tails and IGNORES the
+    layer's filter, so a sampled ``classBreaks`` legend can be wrong by orders of
+    magnitude (issue report 2026-11-24, N2 — a filtered 356-row layer produced the
+    same breaks as the whole 18,648-row dataset, every one below the layer's
+    minimum). ``percentile`` / ``min`` / ``max`` come from the aggregate lane, so
+    the breaks span the true extremes of exactly the rows the layer draws.
+
+    Returns ``None`` when the store cannot aggregate, the field is unusable, or the
+    filter cannot be normalized — the caller then falls back to a sampled estimate
+    AND says so in ``templateWarnings``.
+    """
+    class_count = int(classes)
+    if class_count < 1:
+        return None
+    normalized: Optional[Any] = None
+    if where_filter is not None:
+        try:
+            normalized = normalize_filter_node(where_filter, key="query")
+        except Exception:  # noqa: BLE001 - fall back rather than send a bad node
+            return None
+    aggregates: List[Dict[str, Any]] = [
+        {"aggregate": "min", "field": field, "alias": "mn"},
+        {"aggregate": "max", "field": field, "alias": "mx"},
+    ]
+    for index in range(1, class_count):
+        aggregates.append(
+            {
+                "aggregate": "percentile",
+                "field": field,
+                "p": round(index / class_count, 6),
+                "alias": f"q{index}",
+            }
+        )
+    try:
+        result = client.datasets.aggregate(
+            int(dataset_id),
+            aggregation={"aggregates": aggregates, "limit": 1},
+            filter=normalized,
+        )
+    except Exception:  # noqa: BLE001 - the caller falls back to a sample
+        return None
+    rows = [
+        row for row in (getattr(result, "rows", None) or []) if isinstance(row, dict)
+    ]
+    if not rows:
+        return None
+    row = rows[0]
+    low = _as_float(row.get("mn"))
+    high = _as_float(row.get("mx"))
+    if low is None or high is None:
+        return None
+    edges: List[float] = [low]
+    for index in range(1, class_count):
+        value = _as_float(row.get(f"q{index}"))
+        if value is None:
+            return None
+        edges.append(value)
+    edges.append(high)
+    edges.sort()
+    breaks: List[Tuple[float, float]] = []
+    for index in range(class_count):
+        lo, hi = edges[index], edges[index + 1]
+        if hi < lo:
+            hi = lo
+        breaks.append((lo, hi))
+    return breaks
 
 
 def _repair_to_wgs84(
