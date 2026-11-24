@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, List, Optional, Union
 
 from pydantic import Field
 
@@ -747,79 +747,6 @@ MapRemoveLayers = Annotated[
             "Layer ids (from a previous show_map result) to drop from an existing map before "
             "adding `layers`. Removing layers needs map_id; unknown ids are ignored with a "
             "templateWarning naming them. The dropped ids come back as `removedLayers`."
-        ),
-        default=None,
-    ),
-]
-
-# --- Charts ---
-
-ChartRows = Annotated[
-    List[Dict[str, Any]],
-    Field(
-        description=(
-            "Tabular rows to plot: a list of objects, e.g. `aggregate_dataset`'s `rows` (or any "
-            "list of dict records). Each row must carry the `category` field and a numeric `value`."
-        )
-    ),
-]
-ChartType = Annotated[
-    Literal["bar", "line", "pie"],
-    Field(
-        description=(
-            "Chart kind: `bar`, `line` or `pie` (default `bar`). Use `pie` only for parts of a "
-            "whole; use `bar` for comparisons and `line` for a sequence (e.g. by month)."
-        ),
-        default="bar",
-    ),
-]
-ChartCategoryField = Annotated[
-    str,
-    Field(description="Field name used for the category / x-axis labels (e.g. a group-by field)."),
-]
-ChartValueField = Annotated[
-    str,
-    Field(
-        description=(
-            "Field name holding the numeric value / y-axis height (e.g. `aggregate_count` from "
-            "`aggregate_dataset`, or `sum`). Non-numeric values in the column are skipped."
-        )
-    ),
-]
-ChartSeriesField = Annotated[
-    Optional[str],
-    Field(
-        description=(
-            "Optional field that splits a bar/line chart into multiple series (one colour per "
-            "distinct value); ignored for a pie chart."
-        ),
-        default=None,
-    ),
-]
-ChartTitle = Annotated[
-    Optional[str],
-    Field(description="Optional chart title shown above the plot.", default=None),
-]
-ChartFormat = Annotated[
-    Literal["svg"],
-    Field(
-        description=(
-            "Image format: `svg` only. SVG keeps label text in logical order so the renderer "
-            "shapes Persian/Arabic correctly; no raster (PNG) is offered because no bundled "
-            "engine shapes complex scripts and a broken raster is worse than none. The SVG "
-            "source is also returned as a string in `svg`."
-        ),
-        default="svg",
-    ),
-]
-ChartSavePath = Annotated[
-    Optional[str],
-    Field(
-        description=(
-            "Optional path on the MCP host to ALSO write the chart SVG (a directory gets "
-            "`chart.svg`). Best-effort: a refused write answers `saved:false` + `saveError`, "
-            "never an error result. Omit to receive the image inline only (the `svg` string is "
-            "always in the payload)."
         ),
         default=None,
     ),

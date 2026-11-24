@@ -137,26 +137,13 @@ page (401), not a blank map; re-run `show_map` for a fresh `viewerUrl`.
 length, centroid, intersect, union, ...). No portal call, no data leaves the machine. The
 result feeds straight into an `inline-geometry` map layer.
 
-### Chart your data
-`geopack_sdk_render_chart` draws a **bar / line / pie** chart from tabular rows you already
-have — local compute, no portal call. Feed it `geopack_sdk_aggregate_dataset`'s `rows`:
-
-- `rows` = the aggregate rows (a list of objects); `category` = the group field you grouped
-  by; `value` = the numeric field (e.g. `aggregate_count`, `sum`, an alias).
-- **Coded values:** a row's raw `category` is an integer **code**; its human label is in
-  `groupLabels[<field>]`. The tool reads `groupLabels` **automatically**, so a
-  Persian-coded field charts with its names — you do not flatten the rows yourself.
-- `chart_type` = `bar` (comparisons) · `line` (a sequence) · `pie` (shares). An optional
-  `series` field splits a bar/line chart into multiple series; an optional `title` labels it.
-- **Output is SVG only** (`image/svg+xml`): the payload also carries the same markup as a
-  string in `svg` (so you can inspect/verify/embed/post-process it), the data as `points`,
-  and, for a pie, `slices` with `{label, value, percent}`. There is **no PNG/raster** — no
-  bundled engine shapes complex scripts, and a rasterised Persian label would be wrong.
-- **Labels are logical Unicode** (never pre-shaped), the SVG declares an Arabic-capable
-  font stack, and RTL labels carry `direction="rtl"`; the renderer applies the correct
-  Persian/Arabic joining and bidi. **As a file:** pass `save_path` to also write the SVG
-  (best-effort; `saved`/`savePath`/`saveError` in the payload).
-- This is the charting lane — `show_map` draws a map, not a statistical chart.
+### Charts (render them yourself)
+There is deliberately **no chart tool** on this server: chart quality — correct Persian
+joining, digit/separator order, units and layout — is controlled far better by your own
+renderer than by a generic server-side one. The server's job is the **data**: call
+`geopack_sdk_aggregate_dataset` (each row carries `groupLabels[<field>]`, the human label of
+a coded value) or `geopack_sdk_query_dataset`, then draw the chart with a script/library
+under your control. `show_map` draws a map, not a statistical chart.
 
 ### Edit records
 1. Build an EditDoc and call `geopack_sdk_submit_edit_document` with `mode='validate'`

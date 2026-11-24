@@ -33,7 +33,7 @@ from .tasks import (
 )
 from .workflow_runs import inspect_workflow_run_outcome
 
-__version__ = "0.13.2"
+__version__ = "0.14.0"
 __all__ = [
     "AsyncGeopackClient",
     "GeopackClient",

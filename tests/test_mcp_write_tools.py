@@ -247,7 +247,6 @@ class PolicyRegistryTest(unittest.TestCase):
                 "geopack_sdk_get_dataset_thumbnail",
                 "geopack_sdk_download_generated_file",
                 "geopack_sdk_download_workflow_artifact",
-                "geopack_sdk_render_chart",
             },
         )
         for name in payload["localWrites"]:

@@ -3,6 +3,37 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.14.0 — 2026-11-24
+
+**Removed `geopack_sdk_render_chart`.** The bundled chart renderer (added across 0.13.0–0.13.2)
+did not meet the bar: Persian digit/separator order was wrong, a dwarfed second series was drawn
+at zero width, long Persian category labels crowded the axis, and an `image/svg+xml` result does
+not preview in a chat client — so an operator could not review it. Chart QUALITY (fonts, shaping,
+digits, units, layout) is controlled far better by a renderer the caller owns, so the server now
+stops at the DATA.
+
+### Removed
+
+- The chart tool is no longer registered; the surface is back to **31 tools**. The data lanes
+  that feed a chart are untouched: `geopack_sdk_aggregate_dataset` (rows carry `groupLabels`),
+  `geopack_sdk_query_dataset`, `geopack_sdk_list_datasets`, `geopack_sdk_get_dataset`/`_schema`,
+  `geopack_sdk_export_dataset`, `geopack_sdk_geocode_place` and the local `geopack_sdk_geometry_op`.
+- Recommended path: get the numbers from the MCP, then render the chart with a script/library
+  under your own control. The in-app assistant harness keeps its own client-side ```chart fence
+  (drawn with the app's `c3`) for that purpose.
+- Deleted `tools/charts.py`, `tool_handlers/charts.py`, `tests/test_mcp_chart_tool.py`, and the
+  `Chart*` schema aliases; the guide's chart recipe now says to render client-side.
+
+### Verification
+
+- Full suite **830 tests** OK (was 849 at 0.13.2; the chart-tool suite and its schema were removed).
+
+Touched files:
+- `src/geopack_sdk_mcp/tools/__init__.py`, `tools/policy.py`, `annotations.py`, `guide.py`, `tool_schema.py`, `content/guide.md`, `README.md`
+- removed `src/geopack_sdk_mcp/tools/charts.py`, `src/geopack_sdk_mcp/tool_handlers/charts.py`, `tests/test_mcp_chart_tool.py`
+- `tests/test_mcp_read_tools.py`, `tests/test_map_tools.py`, `tests/test_mcp_write_tools.py`
+- `pyproject.toml`, `src/geopack_sdk/__init__.py`, `CHANGELOG.md`
+
 ## 0.13.2 — 2026-11-24
 
 Makes the charting lane own non-Latin text, and corrects/extends `geopack://guide`.

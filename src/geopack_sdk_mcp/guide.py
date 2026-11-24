@@ -68,9 +68,6 @@ PURPOSES: Dict[str, str] = {
     "geopack_sdk_geometry_op": (
         "Local geometry ops (buffer/area/intersect/...) on supplied GeoJSON/WKT."
     ),
-    "geopack_sdk_render_chart": (
-        "Draw a bar/line/pie chart from rows you already have (e.g. aggregate results)."
-    ),
     # --- Local file writes --------------------------------------------------
     "geopack_sdk_get_dataset_thumbnail": "Dataset preview PNG, delivered inline.",
     "geopack_sdk_download_generated_file": "Save a generated file to disk (best-effort).",
