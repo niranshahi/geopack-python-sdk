@@ -262,6 +262,36 @@ class ShowMapTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["type"], "Polygon")
 
+    def test_a_viewer_link_with_a_bad_token_answers_an_expired_page(self):
+        # A `?t=` token is visible to the server, so a stale/foreign one must 401
+        # with a readable page — not 200 + a blank canvas (N6).
+        payload = show_map(_Client(), layers=[{"kind": "inline-geometry", "geojson": SQUARE}])
+        port = int(payload["serviceUrl"].rsplit(":", 1)[1])
+
+        status, body = _get(port, f"/map/{payload['mapId']}", "not-the-token")
+
+        self.assertEqual(status, 401)
+        self.assertIn(b"no longer valid", body)
+        self.assertIn(b"show_map", body)
+
+    def test_a_viewer_link_with_a_valid_token_serves_the_shell(self):
+        payload = show_map(_Client(), layers=[{"kind": "inline-geometry", "geojson": SQUARE}])
+        port = int(payload["serviceUrl"].rsplit(":", 1)[1])
+
+        status, body = _get(port, f"/map/{payload['mapId']}", payload["accessToken"])
+
+        self.assertEqual(status, 200)
+        self.assertIn(b"<html", body.lower())
+
+    def test_an_unknown_map_id_answers_an_expired_page(self):
+        payload = show_map(_Client(), layers=[{"kind": "inline-geometry", "geojson": SQUARE}])
+        port = int(payload["serviceUrl"].rsplit(":", 1)[1])
+
+        status, body = _get(port, "/map/map_does_not_exist", payload["accessToken"])
+
+        self.assertEqual(status, 404)
+        self.assertIn(b"no longer exists", body)
+
     def test_updating_a_map_by_id_keeps_the_same_id(self):
         first = show_map(_Client(), layers=[{"kind": "inline-geometry", "geojson": SQUARE}])
         second = show_map(

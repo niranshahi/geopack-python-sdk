@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 from xml.sax.saxutils import escape
 
@@ -24,6 +25,8 @@ from ..errors import ToolArgumentError
 
 CHART_TYPES = ("bar", "line", "pie")
 _DEFAULT_TYPE = "bar"
+CHART_FORMATS = ("svg", "png")
+_DEFAULT_FORMAT = "svg"
 
 #: Points drawn before the tail is summarised (keeps the SVG small and legible).
 _MAX_POINTS = 200
@@ -261,6 +264,65 @@ def _render_pie(points: List[Dict[str, Any]], title: Optional[str]) -> List[str]
     return parts
 
 
+def _pie_slices(points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Per-slice ``{label, value, percent}`` for a pie (so a text-only client reads it)."""
+    totals: Dict[str, float] = {}
+    order: List[str] = []
+    for point in points:
+        if point["value"] > 0:
+            label = str(point["category"])
+            if label not in totals:
+                order.append(label)
+                totals[label] = 0.0
+            totals[label] += point["value"]
+    total = sum(totals.values()) or 1.0
+    return [
+        {"label": label, "value": totals[label], "percent": round(totals[label] / total * 100, 2)}
+        for label in order
+    ]
+
+
+def _svg_to_png(svg_bytes: bytes, scale: float = 2.0) -> Optional[bytes]:
+    """Rasterise the SVG to PNG via the OPTIONAL ``cairosvg`` engine, or ``None``.
+
+    No rasteriser is a hard dependency (the shipped SVG needs none), so a PNG is
+    offered only when ``cairosvg`` is importable (the ``geopack-sdk[charts]``
+    extra). The caller turns ``None`` into a coded, actionable refusal.
+    """
+    try:
+        import cairosvg  # type: ignore[import-not-found]
+    except Exception:  # noqa: BLE001 - optional engine
+        return None
+    try:
+        return cairosvg.svg2png(bytestring=svg_bytes, scale=scale)
+    except Exception:  # noqa: BLE001 - a bad render must degrade, not crash
+        return None
+
+
+def _save_bytes(payload: Dict[str, Any], body: bytes, save_path: Any, default_name: str) -> None:
+    """Best-effort local write — mirrors the thumbnail lane (never fatal)."""
+    if not save_path:
+        payload["saved"] = False
+        payload["saveSkipped"] = True
+        return
+    try:
+        target = Path(str(save_path)).expanduser()
+        if target.suffix == "" or target.is_dir():
+            target = target / default_name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+    except (OSError, ValueError) as exc:
+        payload["saved"] = False
+        payload["saveError"] = f"{type(exc).__name__} (errno {getattr(exc, 'errno', 'n/a')})"
+    else:
+        resolved = str(target.resolve())
+        from ..context import register_temp_file
+
+        register_temp_file(resolved)
+        payload["saved"] = True
+        payload["savedPath"] = resolved
+
+
 def render_chart(
     rows: Any,
     *,
@@ -269,6 +331,8 @@ def render_chart(
     value: str,
     series: Optional[str] = None,
     title: Optional[str] = None,
+    save_path: Any = None,
+    format: str = _DEFAULT_FORMAT,
 ) -> ChartResult:
     """Build an SVG chart (bar/line/pie) from ``rows`` and its structured payload."""
     kind = (chart_type or _DEFAULT_TYPE).strip().lower()
@@ -276,6 +340,12 @@ def render_chart(
         raise ToolArgumentError(
             f"chart_type must be one of: {', '.join(CHART_TYPES)} (got {chart_type!r}).",
             key="chart_type",
+        )
+    fmt = (format or _DEFAULT_FORMAT).strip().lower()
+    if fmt not in CHART_FORMATS:
+        raise ToolArgumentError(
+            f"format must be one of: {', '.join(CHART_FORMATS)} (got {format!r}).",
+            key="format",
         )
     if not isinstance(rows, (list, tuple)) or not rows:
         raise ToolArgumentError(
@@ -329,13 +399,30 @@ def render_chart(
     categories = _unique([str(point["category"]) for point in points])
     series_names = _unique([point["series"] for point in points])
 
+    slices = _pie_slices(points) if kind == "pie" else []
     if kind == "pie":
         parts = _render_pie(points, title)
-        value_range = [0.0, float(sum(p["value"] for p in points if p["value"] > 0))]
+        value_range = [0.0, float(sum(slice_["value"] for slice_ in slices))]
     else:
         parts = _render_xy(points, categories, series_names, kind, title)
         numbers = [point["value"] for point in points]
         value_range = [min(numbers), max(numbers)]
+
+    svg_bytes = "".join(parts).encode("utf-8")
+    if fmt == "png":
+        png = _svg_to_png(svg_bytes)
+        if png is None:
+            raise ToolArgumentError(
+                "format 'png' needs the optional raster engine (cairosvg), which is not installed.",
+                key="format",
+                hint=(
+                    "Install `geopack-sdk[charts]` (cairosvg) to write PNG, or use format 'svg' "
+                    "(vector, faithful for Persian labels) and read `points`/`slices` for the data."
+                ),
+            )
+        body, mime_type = png, "image/png"
+    else:
+        body, mime_type = svg_bytes, "image/svg+xml"
 
     payload: Dict[str, Any] = {
         "chartType": kind,
@@ -343,18 +430,21 @@ def render_chart(
         "category": category,
         "value": value,
         "series": series,
+        "format": fmt,
         "categories": categories,
         "seriesNames": [] if series_names == [_SINGLE] else series_names,
         "points": points,
+        "slices": slices,
         "pointCount": len(points),
         "skippedRows": skipped,
         "truncatedPoints": truncated,
         "valueRange": value_range,
-        "mimeType": "image/svg+xml",
+        "mimeType": mime_type,
+        "sizeBytes": len(body),
         "note": (
-            "Chart rendered inline as image/svg+xml. If your client does not display SVG, the "
-            "same points are in `points`."
+            "Chart rendered inline as an image block. If your client does not display it, the "
+            "same points (and, for a pie, `slices` with labels + percentages) are in the payload."
         ),
     }
-    body = "".join(parts).encode("utf-8")
-    return ChartResult(payload=payload, body=body, mime_type="image/svg+xml")
+    _save_bytes(payload, body, save_path, f"chart.{fmt}")
+    return ChartResult(payload=payload, body=body, mime_type=mime_type)

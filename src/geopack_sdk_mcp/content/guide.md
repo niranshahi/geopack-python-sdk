@@ -135,8 +135,12 @@ have — local compute, no portal call. Feed it `geopack_sdk_aggregate_dataset`'
 - `chart_type` = `bar` (comparisons) · `line` (a sequence) · `pie` (shares). An optional
   `series` field splits a bar/line chart into multiple series; an optional `title` labels it.
 - The result is an inline **SVG** image (`image/svg+xml`), with the same `points` echoed in
-  the payload so a client that does not display SVG still receives the data. This is the
-  charting lane — `show_map` draws a map, not a statistical chart.
+  the payload (and, for a pie, `slices` with `{label, value, percent}`) so a client that
+  does not display SVG still receives the data. This is the charting lane — `show_map`
+  draws a map, not a statistical chart.
+- **As a file:** pass `save_path` to also write the chart (best-effort; `saved`/`savePath`/
+  `saveError` in the payload) and `format` `svg` (default; needs nothing) or `png`
+  (rasterises via the optional `cairosvg` engine, `geopack-sdk[charts]`).
 
 ### Edit records
 1. Build an EditDoc and call `geopack_sdk_submit_edit_document` with `mode='validate'`

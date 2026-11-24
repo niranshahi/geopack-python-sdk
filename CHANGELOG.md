@@ -3,6 +3,54 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.13.1 — 2026-11-24
+
+Adds a file form + labelled slices to the charting lane and makes an expired map link
+legible. N5/N7 from the v5 report were re-tested and already behave correctly on 0.13.0
+(see "Re-verified").
+
+### Added
+
+- **`render_chart` file output + pie labels.** Optional `save_path` writes the chart
+  (best-effort, like the thumbnail lane — `saved`/`savePath`/`saveError`, never an error
+  result), and `format:'svg'|'png'` selects the artifact: `svg` needs nothing (faithful for
+  Persian labels and a normal downloadable file); `png` rasterises via the optional
+  `cairosvg` engine (`geopack-sdk[charts]`) and is otherwise a coded `invalid_args`. A pie
+  also returns `slices` (`{label, value, percent}`) so a text-only client can read it.
+  Because it may write, `render_chart` is now classified under `localWrites` (still
+  non-mutating; inline delivery is unchanged).
+
+### Fixed
+
+- **Expired/invalid viewer links are legible (N6).** The viewer shell is token-free by
+  design (the token rides `?t=` or the URL fragment), so a bad `?t=` used to answer 200 and
+  leave a blank canvas. The server now answers **401** with a readable "link expired" page
+  for an invalid `?t=`, **404** with a "map no longer exists" page for an unknown map id,
+  and the viewer shows an explicit "expired — re-run show_map" message when its manifest
+  fetch is 401/403 (the fragment-token case). Maps and the session token remain per-run
+  (in memory): links are intentionally session-scoped.
+
+### Re-verified (no code change)
+
+- **N5** — the MVT/WFS `dataUrl` truncation warning fires: a live `show_map` of dataset
+  1577 `render:'mvt'` returned the "1,000 of 18,648" `templateWarnings` entry.
+- **N7** — `order_by` on a non-count aggregate alias works: a live `aggregate_dataset`
+  (count AS n + sum(area) AS area, group Landuse_Group, filter >10000) ordered by `area`
+  returned 200 with the largest area first; an unknown key is a coded `INVALID_ARGS`. Pinned
+  by unit tests. Both look like the mixed `~eopack_sdk-*` install the report flagged; a
+  clean reinstall is advised.
+
+### Verification
+
+- Full suite **846 tests** OK (was 838; +8 — the chart file/slices and N6 page tests).
+
+Touched files:
+- `src/geopack_sdk_mcp/tool_handlers/charts.py`, `src/geopack_sdk_mcp/tools/charts.py`, `tools/policy.py`
+- `src/geopack_sdk_mcp/tool_schema.py`, `src/geopack_sdk_mcp/content/guide.md`, `README.md`
+- `src/geopack_sdk_mcp/maps/service.py`, `maps/templates/default/viewer.js`
+- `tests/test_mcp_chart_tool.py`, `tests/test_map_tools.py`, `tests/test_mcp_write_tools.py`
+- `pyproject.toml`, `src/geopack_sdk/__init__.py`, `CHANGELOG.md`
+
 ## 0.13.0 — 2026-11-24
 
 Adds the **charting lane** (issue 5 / SDK-011): a local `geopack_sdk_render_chart` tool draws a

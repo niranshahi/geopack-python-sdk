@@ -436,11 +436,13 @@ class ViewerRoutesTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn('token: "localtoken"', body.decode("utf-8"))
 
-    def test_an_invalid_query_token_is_not_embedded(self):
+    def test_an_invalid_query_token_answers_an_expired_page(self):
+        # N6: a `?t=` token is visible to the server, so a wrong/expired one is
+        # refused with a readable page instead of a shell that fails later.
         status, body, _ = _http(self.port, f"/map/{self.manifest.map_id}", token="wrong")
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 401)
         text = body.decode("utf-8")
-        self.assertIn('token: ""', text)
+        self.assertIn("no longer valid", text)
         self.assertNotIn('token: "wrong"', text)
 
     def test_the_manifest_route_requires_the_token(self):

@@ -62,6 +62,28 @@ VIEWER_CSP = (
 )
 
 
+def _expired_link_html(message: str) -> bytes:
+    """A tiny, self-contained page shown when a viewer link is stale/invalid.
+
+    The viewer shell is token-free by design (the token rides ``?t=`` or the URL
+    fragment), so an expired/foreign link used to answer 200 and leave the page
+    blank with only a small banner. Answering a clear page instead makes the
+    failure legible (issue report 2026-11-24, N6).
+    """
+    body = (
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        "<title>Geopack map - link expired</title>"
+        "<style>body{font-family:system-ui,'Segoe UI',Arial,sans-serif;margin:0;"
+        "padding:2rem;color:#111827;background:#f9fafb}h1{font-size:1.15rem;margin:0 0 .6rem}"
+        "p{max-width:46rem;line-height:1.55;color:#374151}"
+        "code{background:#eef2f7;padding:.05rem .35rem;border-radius:.25rem}</style>"
+        "</head><body><h1>This map link is no longer valid</h1>"
+        f"<p>{message}</p></body></html>"
+    )
+    return body.encode("utf-8")
+
+
 def _env_flag(name: str) -> bool:
     return str(os.getenv(name, "")).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -532,7 +554,18 @@ class _Handler(BaseHTTPRequestHandler):
         map_id = rest.strip("/")
         manifest = service.find_map(map_id)
         if manifest is None:
-            raise MapServiceError(SERVICE_ERROR, "unknown map id.")
+            # The shell route answers a readable "expired" page, not a JSON 404 —
+            # a human opened this link in a browser (N6).
+            self._send(
+                404,
+                _expired_link_html(
+                    "This map no longer exists. Maps are held in memory by the local map "
+                    "service and are re-created each time it starts. Run "
+                    "<code>geopack_sdk_show_map</code> again to get a fresh link."
+                ),
+                "text/html; charset=utf-8",
+            )
+            return
         template = manifest.options or viewer.load_template(service.templates_dir)[0]
         html_template, _viewer_source, _viewer_warnings = viewer.load_viewer_html(
             service.templates_dir
@@ -541,8 +574,26 @@ class _Handler(BaseHTTPRequestHandler):
         # keeps the viewer working when a host drops the URL fragment.
         embedded = None
         supplied = (query.get("t") or [None])[0] if query else None
-        if supplied and hmac.compare_digest(str(supplied), service.token):
-            embedded = str(supplied)
+        if supplied:
+            if hmac.compare_digest(str(supplied), service.token):
+                embedded = str(supplied)
+            else:
+                # A `?t=` token is VISIBLE to the server, so a wrong/expired one is
+                # refused here (401 + a readable page) instead of serving a shell
+                # that would only fail its manifest fetch (N6). A fragment token
+                # (#t=) never reaches the server; the viewer's own 401 handling
+                # covers that case.
+                self._send(
+                    401,
+                    _expired_link_html(
+                        "The session token in this link is invalid or has expired. The local "
+                        "map service issues a fresh token on every start (and after its idle "
+                        "timeout), so a saved link stops working after a restart. Run "
+                        "<code>geopack_sdk_show_map</code> again to get a fresh link."
+                    ),
+                    "text/html; charset=utf-8",
+                )
+                return
         html = viewer.render_viewer_html(
             title=manifest.title or template.get("title") or "Geopack map",
             manifest_url=f"{service.base_url}/map/{map_id}/manifest.json",

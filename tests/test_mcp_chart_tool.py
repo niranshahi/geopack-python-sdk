@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
 
 from geopack_sdk_mcp.errors import ToolArgumentError, tool_result_with_image
 from geopack_sdk_mcp.tool_handlers.charts import render_chart
+
+try:  # the optional PNG engine (geopack-sdk[charts])
+    import cairosvg  # noqa: F401
+
+    _HAS_CAIRO = True
+except Exception:  # noqa: BLE001
+    _HAS_CAIRO = False
 
 ROWS = [
     {"Landuse_Group": "1", "aggregate_count": 120},
@@ -84,6 +93,40 @@ class RenderChartTest(unittest.TestCase):
             render_chart(ROWS, chart_type="radar", category="Landuse_Group",
                          value="aggregate_count")
         self.assertEqual(ctx.exception.invalid_args, ["chart_type"])
+
+    def test_a_pie_exposes_labelled_slices_with_percentages(self):
+        result = render_chart(ROWS, chart_type="pie", category="Landuse_Group",
+                              value="aggregate_count")
+        self.assertEqual([s["label"] for s in result.payload["slices"]], ["1", "2", "5"])
+        self.assertAlmostEqual(sum(s["percent"] for s in result.payload["slices"]), 100.0, places=1)
+        # The SVG itself carries the labels (a renderer shows them).
+        self.assertIn("1 —", result.body.decode("utf-8"))
+
+    def test_save_path_writes_the_file_and_reports_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "chart.svg")
+            result = render_chart(ROWS, category="Landuse_Group", value="aggregate_count",
+                                  save_path=target)
+            self.assertTrue(result.payload["saved"])
+            self.assertEqual(result.payload["savedPath"], os.path.realpath(target))
+            with open(target, "rb") as handle:
+                self.assertTrue(handle.read().startswith(b"<svg"))
+
+    def test_no_save_path_writes_nothing(self):
+        result = render_chart(ROWS, category="Landuse_Group", value="aggregate_count")
+        self.assertFalse(result.payload["saved"])
+        self.assertTrue(result.payload["saveSkipped"])
+
+    @unittest.skipIf(_HAS_CAIRO, "cairosvg installed; the png path is available")
+    def test_png_without_the_optional_engine_is_a_coded_refusal(self):
+        with self.assertRaises(ToolArgumentError) as ctx:
+            render_chart(ROWS, category="Landuse_Group", value="aggregate_count", format="png")
+        self.assertEqual(ctx.exception.invalid_args, ["format"])
+
+    def test_an_unknown_format_is_refused(self):
+        with self.assertRaises(ToolArgumentError) as ctx:
+            render_chart(ROWS, category="Landuse_Group", value="aggregate_count", format="pdf")
+        self.assertEqual(ctx.exception.invalid_args, ["format"])
 
     def test_the_result_travels_as_an_image_block_plus_text(self):
         result = render_chart(ROWS, category="Landuse_Group", value="aggregate_count")

@@ -800,6 +800,29 @@ ChartTitle = Annotated[
     Optional[str],
     Field(description="Optional chart title shown above the plot.", default=None),
 ]
+ChartFormat = Annotated[
+    Literal["svg", "png"],
+    Field(
+        description=(
+            "Image format. `svg` (default) is the dependency-free vector output (faithful for "
+            "non-Latin labels). `png` rasterises it and needs the optional `cairosvg` engine "
+            "(`geopack-sdk[charts]`); without it the call is refused with a coded error. `svg` "
+            "is a normal downloadable artifact too."
+        ),
+        default="svg",
+    ),
+]
+ChartSavePath = Annotated[
+    Optional[str],
+    Field(
+        description=(
+            "Optional path on the MCP host to ALSO write the chart file (a directory gets "
+            "`chart.svg`/`chart.png`). Best-effort: a refused write answers `saved:false` + "
+            "`saveError`, never an error result. Omit to receive the image inline only."
+        ),
+        default=None,
+    ),
+]
 
 # --- Return types (geocode only) ---
 

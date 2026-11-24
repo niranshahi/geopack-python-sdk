@@ -708,12 +708,22 @@ async function main() {
   if (!TOKEN) banner('No access token in the URL. Open the exact viewerUrl returned by show_map ' +
     '(it carries ?t=...); if a linker dropped it, re-open the full URL.');
   let manifest;
+  let manifestStatus = 0;
   try {
     const response = await fetch(withToken(MANIFEST_URL));
+    manifestStatus = response.status;
     if (!response.ok) throw new Error('manifest HTTP ' + response.status);
     manifest = await response.json();
   } catch (err) {
-    banner('Could not load the map manifest: ' + err.message);
+    // A 401/403 means the link's token is stale/foreign (the token travels in the
+    // fragment, so the server could not refuse the shell). Say so explicitly
+    // instead of a blank canvas (issue report 2026-11-24, N6).
+    if (manifestStatus === 401 || manifestStatus === 403) {
+      banner('This map link has expired — the local map service issues a new token each run. ' +
+        'Re-run show_map and open the fresh viewerUrl.');
+    } else {
+      banner('Could not load the map manifest: ' + err.message);
+    }
     return;
   }
 
