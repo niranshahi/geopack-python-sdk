@@ -1,29 +1,48 @@
 import os
 from typing import Optional
-from .token_registry import TokenRegistry
+from .auth_state import AuthState
 from .exceptions import GeopackAPIError
+
 
 class AuthManager:
     def __init__(self, client):
         self.client = client
-        self._registry = TokenRegistry()
+        # Per-client state (slice 034). Reuse ``client.auth_state`` when the
+        # client already exposes one (e.g. to share state across clients), else
+        # build and attach a fresh, independent state.
+        state = getattr(client, "auth_state", None)
+        if not isinstance(state, AuthState):
+            state = AuthState(
+                base_url=getattr(client, "base_url", "") or "",
+                profile=getattr(client, "auth_profile", "default") or "default",
+                store=getattr(client, "credential_store", None),
+            )
+            try:
+                client.auth_state = state
+            except Exception:
+                pass
+        self._state = state
+
+    @property
+    def _registry(self):
+        """Backward-compatible accessor for the underlying token registry."""
+        return self._state._registry
 
     @property
     def token(self) -> Optional[str]:
-        return self._registry.access_token
+        return self._state.access_token
 
     @token.setter
     def token(self, value: Optional[str]) -> None:
-        self._registry.access_token = value
+        self._state.access_token = value
 
     @property
     def refresh_token(self) -> Optional[str]:
-        return self._registry.refresh_token
+        return self._state.refresh_token
 
     @refresh_token.setter
     def refresh_token(self, value: Optional[str]) -> None:
-        self._registry.refresh_token = value
-
+        self._state.refresh_token = value
 
     def login(self, username: str = None, password: str = None):
         """
@@ -45,19 +64,22 @@ class AuthManager:
         endpoint = "/auth/login"
         # API expects 'userName' (or 'email') and 'password'
         payload = {"userName": user, "password": pwd}
-        
+
         try:
             response = self.client.post(endpoint, json=payload)
         except GeopackAPIError as e:
             if e.details:
                 print(f"Server Error Detail: {e.details}")
             raise
-        
+
         # In Geopack v2, login returns { accessToken, refreshToken, user }
         # We'll use accessToken for the Authorization header
-        self.token = response.get("accessToken") or response.get("token")
-        self.refresh_token = response.get("refreshToken")
-        
+        # Write-through persists the refresh token to the credential store (D4).
+        self._state.set_tokens(
+            response.get("accessToken") or response.get("token"),
+            response.get("refreshToken"),
+        )
+
         if self.token:
             self.client.session.headers.update({
                 "Authorization": f"Bearer {self.token}"
@@ -70,30 +92,47 @@ class AuthManager:
         if "Authorization" in self.client.session.headers:
             del self.client.session.headers["Authorization"]
 
-    def refresh(self):
+    def refresh(self, stale_token: Optional[str] = None):
         """
         Refresh the access token using the refresh token.
-        REST API: `POST /api/auth/refresh`
-        """
-        if not self.refresh_token:
-            raise ValueError("No refresh token available. Please login again.")
-        
-        endpoint = "/auth/refresh"
-        payload = {"token": self.refresh_token}
-        
-        # We use a direct request to avoid interceptors
-        url = f"{self.client.base_url}/{endpoint.lstrip('/')}"
-        response = self.client.session.post(url, json=payload, timeout=30)
 
-        if not response.ok:
-            raise GeopackAPIError.from_response(response)
-        data = response.json()
-        
-        self.token = data.get("accessToken") or data.get("token")
-        self.refresh_token = data.get("refreshToken") or self.refresh_token
-        
-        if self.token:
-            self.client.session.headers.update({
-                "Authorization": f"Bearer {self.token}"
-            })
-        return data
+        REST API: `POST /api/auth/refresh`
+
+        Single-flight (slice 034): the whole operation is serialized on the
+        state lock. ``stale_token`` is the access token that got the ``401``; if
+        another caller already rotated it while we waited for the lock, we skip
+        the redundant refresh and return the current tokens.
+        """
+        with self._state.refresh_lock:
+            if (
+                stale_token is not None
+                and self.token
+                and self.token != stale_token
+            ):
+                return {"accessToken": self.token, "refreshToken": self.refresh_token}
+
+            if not self.refresh_token:
+                raise ValueError("No refresh token available. Please login again.")
+
+            endpoint = "/auth/refresh"
+            payload = {"token": self.refresh_token}
+
+            # We use a direct request to avoid interceptors
+            url = f"{self.client.base_url}/{endpoint.lstrip('/')}"
+            response = self.client.session.post(url, json=payload, timeout=30)
+
+            if not response.ok:
+                raise GeopackAPIError.from_response(response)
+            data = response.json()
+
+            # Persist the rotated refresh token (falls back to the previous one).
+            self._state.set_tokens(
+                data.get("accessToken") or data.get("token"),
+                data.get("refreshToken") or self.refresh_token,
+            )
+
+            if self.token:
+                self.client.session.headers.update({
+                    "Authorization": f"Bearer {self.token}"
+                })
+            return data

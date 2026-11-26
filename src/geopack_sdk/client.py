@@ -127,7 +127,7 @@ class GeopackClient:
         self.organizations = OrganizationManager(self)
 
     def _request(self, method, endpoint, **kwargs):
-        # Sync session headers with centralized TokenRegistry
+        # Sync session headers with the per-client auth state (slice 034)
         token = getattr(self.auth, "token", None)
         if token:
             self.session.headers["Authorization"] = f"Bearer {token}"
@@ -176,8 +176,9 @@ class GeopackClient:
             and hasattr(self, "auth")
             and getattr(self.auth, "refresh_token", None)
         ):
+            stale_token = getattr(self.auth, "token", None)
             try:
-                self.auth.refresh()
+                self.auth.refresh(stale_token=stale_token)
                 response = self.session.request(method, url, **kwargs)
             except (GeopackAuthError, GeopackAPIError):
                 raise

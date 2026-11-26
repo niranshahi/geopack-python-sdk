@@ -179,7 +179,7 @@ class AsyncGeopackClient:
         return os.path.abspath(target_file)
 
     async def _request(self, method: str, endpoint: str, **kwargs: Any) -> Any:
-        # Sync session headers with centralized TokenRegistry
+        # Sync session headers with the per-client auth state (slice 034)
         token = getattr(self.auth, "token", None)
         if token:
             self._client.headers["Authorization"] = f"Bearer {token}"
@@ -241,8 +241,9 @@ class AsyncGeopackClient:
             last_response.status_code == 401
             and getattr(self.auth, "refresh_token", None)
         ):
+            stale_token = getattr(self.auth, "token", None)
             try:
-                await self.auth.refresh()
+                await self.auth.refresh(stale_token=stale_token)
                 last_response = await self._client.request(method, url, **kwargs)
             except (GeopackAuthError, GeopackAPIError):
                 raise

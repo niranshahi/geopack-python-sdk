@@ -85,7 +85,7 @@ class SyncDefaultHeadersTest(unittest.TestCase):
         with patch.object(
             self.client.session, "request", side_effect=responses
         ) as request, patch.object(
-            self.client.auth, "refresh", side_effect=lambda: None
+            self.client.auth, "refresh", side_effect=lambda *a, **k: None
         ):
             self.assertEqual(self.client.get("/datasets"), {"ok": True})
 
