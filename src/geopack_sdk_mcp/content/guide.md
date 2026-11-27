@@ -140,8 +140,8 @@ page (401), not a blank map; re-run `show_map` for a fresh `viewerUrl`.
   - **`reclass` is NOT a class-break switch.** It is a **boolean** that only affects the
     **named** ramps (`grayscale|pseudocolor|fire|bluered`): the portal converts the band to
     8-bit over `minimum`→`maximum` before colouring (`ST_Reclass`). It does not stop
-    colours from blending, it is **ignored when `colorMap:'custom'`**, and an object such
-    as `{"type":"equalInterval"}` is not accepted.
+    colours from blending, it is **ignored when `colorMap:'custom'` and for a COG**, and an
+    object such as `{"type":"equalInterval"}` is not accepted.
   - **Discrete (unblended) classes:** a `custom` ramp **interpolates** between stops, so a
     multi-stop ramp fades. For flat colour per class, give each class **two same-colour
     stops** — from just below its upper boundary to the boundary. For boundaries at
@@ -155,9 +155,12 @@ page (401), not a blank map; re-run `show_map` for a fresh `viewerUrl`.
 
   To pick sensible values, read the dataset first: `get_dataset` returns a **`symbology`**
   summary (`kind:'raster'`, `rasterDisplayType`, `band`/`colorMap` or `bands`), and
-  `details.bands` carries each band's `minimum`/`maximum`. A **COG** is drawn client-side
-  (`render:'cog'`) and an **MBTiles** raster is pre-rendered, so `display` does not
-  recolour either — the MCP warns and ignores it rather than failing the map.
+  `details.bands` carries each band's `minimum`/`maximum`. A **COG** (`render:'cog'`) applies
+  `display` **client-side** with an OpenLayers WebGL style: `colorMap` (named or `custom`) and
+  `RGB` work, but a ramp needs `minimum`/`maximum` (or band statistics) to resolve its
+  percentage stops; `reclass` is server-side only and is ignored for a COG. A declared
+  `noDataValue` is rendered **transparent**. An **MBTiles** raster is pre-rendered, so `display`
+  does not recolour it — the MCP warns and ignores it rather than failing the map.
 - **Editing an existing map:** `show_map(map_id=...)` **appends** layers by default. Pass
   `replace_layers=true` to rebuild it with exactly this call's layers, or `remove_layers`
   with layer ids to drop specific layers. Unknown ids are reported in `templateWarnings`.

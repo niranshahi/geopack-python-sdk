@@ -105,6 +105,10 @@ class MapLayer:
     #: forwards it upstream as the ``display`` query so the official symbology is
     #: applied by the portal renderer and never has to travel through the browser.
     raster_display: Optional[Dict[str, Any]] = None
+    #: An OpenLayers ``WebGLTile`` style translated from ``raster_display`` for the
+    #: client-side COG lane. Exposed in the manifest as ``rasterStyle``; the viewer
+    #: sets it on the ``ol/layer/WebGLTile`` (constructed with ``normalize: false``).
+    raster_style: Optional[Dict[str, Any]] = None
     #: Reference zoom for the raster-tile lane (the zoom whose resolution matches
     #: the raster's native pixel size). The portal uses it to pick/overview-create
     #: the right pyramid level; ``None`` lets the portal default apply.
@@ -155,6 +159,10 @@ class MapLayer:
             payload["rasterTileUrl"] = (
                 f"{base_url}/rasters/{self.id}/{{z}}/{{x}}/{{y}}.png"
             )
+        if self.resolved_render() == "cog" and self.raster_style:
+            # A COG is drawn client-side; this is the OpenLayers WebGL style built
+            # from the saved/caller `display` (colorMap or RGB).
+            payload["rasterStyle"] = self.raster_style
         if self.raster:
             payload["raster"] = True
         if self.style:

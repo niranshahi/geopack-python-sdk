@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from ..maps import get_or_start_service, layer_from_spec
 from ..maps import viewer
 from ..maps.errors import SERVICE_ERROR, MapServiceError
+from ..maps.ol_style import build_cog_style
 from ..maps.sources import (
     dataset_distinct_count,
     dataset_feature_count,
@@ -603,6 +604,12 @@ def _apply_extent(
             # The dataset ships a Cloud-Optimized GeoTIFF: byte-serve it directly
             # (the viewer draws it with ol/source/GeoTIFF) rather than vectorising.
             layer.has_cog = True
+            if layer.render == "rastertile":
+                warnings.append(
+                    f"layer '{label}': a COG uses the '/cog' byte lane; render "
+                    "'rastertile' does not apply — using 'cog'."
+                )
+                layer.render = None
         elif layer.render == "cog":
             warnings.append(
                 f"layer '{label}': render 'cog' needs a Cloud-Optimized GeoTIFF; dataset "
@@ -704,6 +711,39 @@ def _apply_extent(
                             layer.ref_zoom = normalized["referenceZoom"]
                         layer.raster_display = normalized
 
+        if layer.has_cog and layer.resolved_render() == "cog":
+            # A COG is rendered client-side (`ol/source/GeoTIFF` + WebGLTile).
+            # Translate the saved/caller `display` into an OpenLayers WebGL style
+            # so the portal's colouring is applied in the browser — unlike the
+            # server-rendered lane, nothing recolours a COG server-side.
+            saved_display = info.get("display")
+            if caller_display:
+                normalized = _normalize_raster_display(
+                    layer.raster_display, label, warnings
+                )
+                if normalized is None:
+                    layer.raster_display = (
+                        _prepare_saved_display(saved_display)
+                        if isinstance(saved_display, dict)
+                        else None
+                    )
+                else:
+                    layer.raster_display = normalized
+            elif isinstance(saved_display, dict) and saved_display:
+                layer.raster_display = _prepare_saved_display(saved_display)
+
+            if isinstance(layer.raster_display, dict) and layer.raster_display:
+                style, reason = build_cog_style(
+                    layer.raster_display, info.get("bands") or []
+                )
+                if style:
+                    layer.raster_style = style
+                else:
+                    warnings.append(
+                        f"layer '{label}': a COG cannot apply this `display` "
+                        f"({reason}); using the default COG rendering."
+                    )
+
     if layer.symbology:
         # A caller asked for a specific symbology. Resolve it (a shorthand spec is
         # derived from the layer's data) and never overwrite it with the dataset's
@@ -711,7 +751,8 @@ def _apply_extent(
         if layer.resolved_render() in _RASTER_RENDERS:
             warnings.append(
                 f"layer '{label}': symbology does not affect a "
-                f"{layer.resolved_render().upper()} image layer (the server renders it); ignored."
+                f"{layer.resolved_render().upper()} image layer (the raster is rendered as an "
+                "image); ignored."
             )
             layer.symbology = None
         else:
@@ -724,10 +765,10 @@ def _apply_extent(
         # palette colour.
         layer.symbology = info["style_spec"]
 
-    if layer.raster_display and layer.resolved_render() != "rastertile":
+    if layer.raster_display and layer.resolved_render() not in ("rastertile", "cog"):
         warnings.append(
-            f"layer '{label}': 'display' only applies to a server-rendered raster "
-            "(render 'rastertile'); ignored for this layer."
+            f"layer '{label}': 'display' only applies to a raster image layer "
+            "(render 'rastertile' or 'cog'); ignored for this layer."
         )
         layer.raster_display = None
 
@@ -795,6 +836,14 @@ def _warn_about_saved_symbology(
     if layer.resolved_render() == "rastertile":
         # The raster-tile lane forwards the dataset's saved `display`, so the portal
         # renders the official symbology — there is nothing left to disclose.
+        return
+    if layer.raster_style:
+        # A COG's saved `display` was translated into an OpenLayers style and is
+        # applied client-side; the official colouring IS on screen.
+        return
+    if layer.resolved_render() == "cog":
+        # The COG branch above already warns specifically when a display cannot be
+        # expressed; the generic "use a publication" note would be misleading.
         return
     if isinstance(layer.style, dict) and layer.style:
         return  # a caller style is deliberate; the disclosure is noise here

@@ -286,6 +286,13 @@ class RenderHtmlTest(unittest.TestCase):
         # The legend must show a raster swatch (not a fake vector fill).
         self.assertIn("render === 'rastertile'", js.split("function isRasterRender", 1)[1])
 
+    def test_a_cog_layer_applies_a_translated_webgl_style(self):
+        # A COG's `display` is translated server-side into an OpenLayers WebGL
+        # style; the source must read raw values for the style's stops to match.
+        js = viewer.default_viewer_js()
+        self.assertIn("cogSourceOptions.normalize = false", js)
+        self.assertIn("cogLayerOptions.style = spec.rasterStyle", js)
+
     def test_the_view_can_be_pointed_by_url_and_features_can_carry_style(self):
         # A URL override (?center=lon,lat&zoom=N) points an existing map at a place
         # and suppresses auto-fit; a GeoJSON feature's `properties.style` styles that
@@ -352,6 +359,16 @@ class LayerRenderTest(unittest.TestCase):
         self.assertTrue(public["wmsUrl"].endswith("/proxy/publication/5/wms"))
         self.assertTrue(public["wmtsUrl"].endswith("/proxy/publication/5/wmts"))
         self.assertTrue(public["wfsUrl"].endswith("/proxy/publication/5/wfs"))
+
+    def test_a_cog_layer_exposes_its_webgl_style(self):
+        layer = layer_from_spec({"kind": "portal-dataset", "datasetId": 1949})
+        layer.has_cog = True
+        layer.raster_style = {"color": ["interpolate", ["linear"], ["band", 1], 0, [0, 0, 0, 255]]}
+
+        public = layer.public("http://127.0.0.1:9")
+
+        self.assertEqual(public["render"], "cog")
+        self.assertEqual(public["rasterStyle"], layer.raster_style)
 
     def test_render_override_is_honoured(self):
         layer = layer_from_spec({

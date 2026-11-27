@@ -198,8 +198,15 @@ function buildLayer(spec, index) {
     // A Cloud-Optimized GeoTIFF is byte-served by the map service (/cog) with
     // Range forwarding; ol/source/GeoTIFF reads the IFDs and overviews on demand,
     // so the whole raster never downloads and the browser can pan/zoom into it.
-    source = new ol.source.GeoTIFF({ sources: [{ url: withToken(spec.cogUrl) }] });
-    layer = new ol.layer.WebGLTile({ source: source });
+    // When the MCP translated a raster `display` into an OpenLayers style, the
+    // source is read raw (`normalize: false`) so `['band', n]` is the real pixel
+    // value the style's stops were built from (the official COG examples do this).
+    const cogSourceOptions = { sources: [{ url: withToken(spec.cogUrl) }] };
+    if (spec.rasterStyle) cogSourceOptions.normalize = false;
+    source = new ol.source.GeoTIFF(cogSourceOptions);
+    const cogLayerOptions = { source: source };
+    if (spec.rasterStyle) cogLayerOptions.style = spec.rasterStyle;
+    layer = new ol.layer.WebGLTile(cogLayerOptions);
   } else if (render === 'rastertile') {
     // The portal renders a PostGIS/filesystem raster to PNG tiles
     // (`/datasets/{id}/rastertile/{z}/{x}/{y}.png`) with the dataset's saved

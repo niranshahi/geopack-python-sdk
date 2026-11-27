@@ -1285,6 +1285,69 @@ class ShowMapTest(unittest.TestCase):
         payload = show_map(_Client(), layers=[{"kind": "portal-dataset", "datasetId": 7}])
         self.assertNotIn("rasterBands", payload["layers"][0])
 
+    def test_a_cog_layer_applies_its_saved_display_as_an_ol_style(self):
+        # A COG is drawn client-side, so the MCP translates the saved `display`
+        # into an OpenLayers WebGL style instead of warning that it is unapplied.
+        details = {
+            "hasCOG": True,
+            "bands": [{"band": 1, "type": "Float32", "minimum": 0, "maximum": 100}],
+            "display": {
+                "displayType": "colorMap", "band": 1, "colorMap": "custom",
+                "minimum": 0, "maximum": 100,
+                "customColorMap": [
+                    {"value": 0, "r": 255, "g": 0, "b": 0, "a": 255},
+                    {"value": 100, "r": 0, "g": 0, "b": 255, "a": 255},
+                ],
+            },
+        }
+        payload = show_map(
+            _Client(details=details, data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 1949}],
+        )
+        layer = payload["layers"][0]
+        self.assertEqual(layer["render"], "cog")
+        self.assertEqual(
+            layer["rasterStyle"]["color"][:6],
+            ["interpolate", ["linear"], ["band", 1], 0, [255, 0, 0, 1.0], 100],
+        )
+        self.assertFalse(any("saved symbology" in w for w in payload["templateWarnings"]))
+
+    def test_a_caller_display_overrides_a_cog_saved_display(self):
+        details = {
+            "hasCOG": True,
+            "bands": [{"band": 1, "type": "Byte", "minimum": 0, "maximum": 100}],
+            "display": {"displayType": "colorMap", "band": 1, "colorMap": "grayscale"},
+        }
+        payload = show_map(
+            _Client(details=details, data_type="raster"),
+            layers=[{
+                "kind": "portal-dataset", "datasetId": 1949,
+                "display": {"displayType": "colorMap", "band": 1, "colorMap": "fire",
+                            "minimum": 0, "maximum": 100},
+            }],
+        )
+        color = payload["layers"][0]["rasterStyle"]["color"]
+        self.assertEqual(color[4], [0, 0, 0, 1.0])
+        self.assertEqual(color[-1], [243, 255, 221, 1.0])
+
+    def test_a_cog_display_that_cannot_be_styled_warns_and_keeps_default(self):
+        details = {"hasCOG": True, "bands": [{"band": 1, "type": "Float32"}]}
+        payload = show_map(
+            _Client(details=details, data_type="raster"),
+            layers=[{
+                "kind": "portal-dataset", "datasetId": 1949,
+                "display": {"displayType": "colorMap", "band": 1, "colorMap": "custom",
+                            "customColorMap": [
+                                {"value": "50%", "r": 1, "g": 2, "b": 3, "a": 255}
+                            ]},
+            }],
+        )
+        layer = payload["layers"][0]
+        self.assertNotIn("rasterStyle", layer)
+        self.assertTrue(
+            any("COG cannot apply" in w for w in payload["templateWarnings"])
+        )
+
     def test_render_cog_on_a_non_cog_dataset_warns_and_falls_back(self):
         payload = show_map(
             _Client(),

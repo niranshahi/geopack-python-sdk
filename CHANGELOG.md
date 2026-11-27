@@ -3,6 +3,35 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.17.0 — 2026-11-27
+
+**COG colorization (client-side OpenLayers style).** A COG layer (`render:'cog'`) now honors
+the dataset's saved/caller `display` instead of showing raw/default pixels. OpenLayers'
+`WebGLTile` supports a `style.color` expression over `['band', n]` (the official `cog-style`
+and `cog-colors` examples), so the MCP translates the display server-side and exposes the
+result as `rasterStyle`; the viewer builds `ol/source/GeoTIFF` with `normalize:false` so the
+style's stops see raw pixel values.
+
+### Added
+
+- `colorMap` (named ramps + `custom`, percentage stops resolved against min/max) →
+  `['interpolate', ['linear'], ['band', n], ...]`; `RGB` → `['array', ...]` with a per-band
+  min/max stretch.
+- COG custom stops are sorted ascending (an OL `interpolate` requirement); paired boundary
+  stops (`24.99%`/`25%`) remain distinct for discrete classes.
+- **Color contract fixed (live QA 2026-11-27):** OpenLayers takes RGB **0–255** but alpha
+  **0–1** and the fragment shader does `rgb *= alpha`. A `255` alpha blew mid-tones out to
+  white/cyan; styles now emit `a/255`. A declared `noDataValue` becomes a transparent
+  `['case', ['==', ['band', n], nodata], [0,0,0,0], color]`, so no-data is not coloured as the
+  first class.
+- The saved-symbology disclosure is suppressed when a COG style is applied, and a display
+  that cannot be expressed client-side (no min/max) warns and falls back to the default COG
+  rendering.
+- `display` now applies to both raster lanes; `reclass` is server-side only and is ignored for
+  a COG (guide/tool descriptions updated).
+- Tests: new `tests/test_map_ol_style.py` (named/custom ramps, RGB, percentages, paired stops,
+  alpha 0–1, transparent nodata, refusal reasons) plus COG manifest/viewer pins.
+
 ## 0.16.1 — 2026-11-27
 
 **Fix `colorMap: 'custom'` on the raster-tile lane (live-QA of 0.16.0).** A custom ramp
