@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geopack-sdk"
-version = "0.14.0"
+version = "0.15.0"
 authors = [
   { name="Geopack Team", email="info@geopack.com" },
 ]
@@ -27,7 +27,8 @@ dependencies = [
 
 [project.optional-dependencies]
 async = ["httpx>=0.27.0"]
-mcp = ["mcp>=1.27.1,<2"]
+keyring = ["keyring>=24.0.0"]
+mcp = ["mcp>=1.27.1,<2", "keyring>=24.0.0"]
 llm = ["openai>=1.0.0"]
 langchain = [
     "openai>=1.0.0",
@@ -40,6 +41,7 @@ langchain = [
 dev = ["mcp>=1.27.1,<2"]
 all = [
     "httpx>=0.27.0",
+    "keyring>=24.0.0",
     "mcp>=1.27.1,<2",
     "openai>=1.0.0",
     "langchain>=0.3.18",

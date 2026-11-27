@@ -96,6 +96,7 @@ _READ_TOOLS = (
     "geopack_sdk_get_quota_summary",
     "geopack_sdk_geocode_place",
     "geopack_sdk_get_mcp_safety_policy",
+    "geopack_sdk_auth_status",
     "geopack_sdk_geometry_op",
 )
 

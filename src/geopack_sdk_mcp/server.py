@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from mcp.server.fastmcp import FastMCP
 
 from .auth_bootstrap import AppContext, bootstrap_geopack_client
+from .auth_errors import GeopackMCPAuthError
 from .context import set_lifespan_client
 from .guide import SERVER_INSTRUCTIONS
 from .resources import register_all_resources
@@ -18,8 +19,22 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _app_lifespan(_server: FastMCP) -> AsyncIterator[AppContext]:
-    """Login once at process start; reuse session for all tool calls."""
-    client = bootstrap_geopack_client()
+    """Login once at process start; reuse session for all tool calls.
+
+    Degraded mode (slice 034 P6): if no credentials/session are available, the
+    server still starts. Tools answer an actionable ``AUTH_REQUIRED`` error and
+    ``geopack_sdk_auth_status`` explains how to log in — instead of the process
+    exiting with a message only visible in host logs.
+    """
+    client = None
+    try:
+        client = bootstrap_geopack_client()
+    except GeopackMCPAuthError as exc:
+        logger.error(
+            "Geopack SDK MCP: unauthenticated — starting in degraded mode. Tools will answer "
+            "AUTH_REQUIRED until `geopack-sdk login` is run.\n%s",
+            exc.format_message(),
+        )
     set_lifespan_client(client)
 
     # Preload the local geometry engine (slice 033, Lane C) so the FIRST

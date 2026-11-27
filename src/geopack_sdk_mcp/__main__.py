@@ -12,9 +12,6 @@ def main() -> None:
         format="%(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )
-    from .auth_bootstrap import bootstrap_geopack_client, precache_geopack_client
-    from .auth_errors import GeopackMCPAuthError
-    from .context import set_lifespan_client
     from .server import mcp
 
     logger = logging.getLogger(__name__)
@@ -22,14 +19,10 @@ def main() -> None:
         "Starting Geopack SDK MCP (stdio). Waiting for MCP host — "
         "Ctrl+C to stop. Errors go to stderr, not stdout."
     )
-    try:
-        client = bootstrap_geopack_client()
-    except GeopackMCPAuthError as exc:
-        print(exc.format_message(), file=sys.stderr)
-        raise SystemExit(1) from None
-
-    precache_geopack_client(client)
-    set_lifespan_client(client)
+    # Auth is resolved in the server lifespan. If it fails, the server starts in
+    # degraded mode (slice 034 P6): tools answer an actionable AUTH_REQUIRED error
+    # and `geopack_sdk_auth_status` reports the fix, instead of the process
+    # exiting with a message only visible in the host's logs.
     mcp.run(transport="stdio")
 
 

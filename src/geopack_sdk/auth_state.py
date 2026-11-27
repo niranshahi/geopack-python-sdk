@@ -89,19 +89,35 @@ class AuthState:
         if persist:
             self.persist()
 
-    def persist(self) -> None:
-        """Write-through the in-memory refresh token to the store (D4)."""
-        if self.store is None:
-            return
-        raw = self._registry.raw_refresh_token
-        if raw:
-            self.store.set_refresh_token(self._key(), raw)
+    def persist(self) -> bool:
+        """Write-through the in-memory refresh token to the store (D4).
 
-    def load_from_store(self) -> bool:
-        """Seed the refresh token from the store. Returns True when found."""
+        Best-effort: a missing/broken backend must never fail a login or a
+        refresh (the tokens stay valid in memory for this process).
+        """
         if self.store is None:
             return False
-        token = self.store.get_refresh_token(self._key())
+        raw = self._registry.raw_refresh_token
+        if not raw:
+            return False
+        try:
+            self.store.set_refresh_token(self._key(), raw)
+            return True
+        except Exception:  # noqa: BLE001 - persistence is best-effort
+            return False
+
+    def load_from_store(self) -> bool:
+        """Seed the refresh token from the store. Returns True when found.
+
+        A store error is treated as "no stored token" so callers fall back to the
+        legacy file / environment credentials instead of crashing.
+        """
+        if self.store is None:
+            return False
+        try:
+            token = self.store.get_refresh_token(self._key())
+        except Exception:  # noqa: BLE001 - treat as absent
+            return False
         if token:
             self._registry.refresh_token = token
             return True
@@ -110,7 +126,10 @@ class AuthState:
     def clear(self, *, clear_persisted: bool = False) -> None:
         self._registry.clear()
         if clear_persisted and self.store is not None:
-            self.store.delete_refresh_token(self._key())
+            try:
+                self.store.delete_refresh_token(self._key())
+            except Exception:  # noqa: BLE001 - deletion is best-effort
+                pass
 
 
 class AsyncAuthState:
@@ -171,17 +190,25 @@ class AsyncAuthState:
         if persist:
             self.persist()
 
-    def persist(self) -> None:
+    def persist(self) -> bool:
         if self.store is None:
-            return
+            return False
         raw = self._registry.raw_refresh_token
-        if raw:
+        if not raw:
+            return False
+        try:
             self.store.set_refresh_token(self._key(), raw)
+            return True
+        except Exception:  # noqa: BLE001 - best-effort
+            return False
 
     def load_from_store(self) -> bool:
         if self.store is None:
             return False
-        token = self.store.get_refresh_token(self._key())
+        try:
+            token = self.store.get_refresh_token(self._key())
+        except Exception:  # noqa: BLE001 - treat as absent
+            return False
         if token:
             self._registry.refresh_token = token
             return True
@@ -190,4 +217,7 @@ class AsyncAuthState:
     def clear(self, *, clear_persisted: bool = False) -> None:
         self._registry.clear()
         if clear_persisted and self.store is not None:
-            self.store.delete_refresh_token(self._key())
+            try:
+                self.store.delete_refresh_token(self._key())
+            except Exception:  # noqa: BLE001 - best-effort
+                pass

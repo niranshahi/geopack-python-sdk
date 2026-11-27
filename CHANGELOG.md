@@ -3,6 +3,57 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.15.0 — 2026-11-26
+
+**Authentication hardening (slice 034) — complete, not rewrite, the JWT+session flow.** A local MCP
+server now runs on a session created once by the CLI, with **no password in `mcp.json`**. No OAuth.
+
+### Added
+
+- `geopack-sdk login|logout|status|profiles` with `--profile`/`--store`. `login` reads the password
+  interactively (`getpass`, never an argv value) and persists only the **refresh token**; it also
+  prompts for the username when not supplied. `logout` revokes the server session (best-effort) then
+  clears the store; `logout --all` is a separate, explicit bulk action. `status` never prints a token.
+- Pluggable `CredentialStore`: OS secret store via the optional `keyring` package (default), an
+  explicit plaintext `file` fallback that **warns** (never selected silently), and `memory` for tests;
+  plus `ProfileRegistry` (`~/.geopack/profiles.json`, non-secret metadata) and atomic writes.
+- `AuthState` / `AsyncAuthState`: per-client token state with a single-flight refresh lock.
+- MCP bootstrap reads the stored profile and **refreshes at startup**; `GEOPACK_PROFILE` selects it.
+  Precedence: `GEOPACK_ACCESS_TOKEN` → stored profile → legacy token file → `GEOPACK_USERNAME`/`PASSWORD`.
+- New optional extra `geopack-sdk[keyring]` (also pulled in by `[mcp]` and `[all]`).
+- Backend `POST /api/auth/logout` (idempotent; revokes the token's `sid`) — used by CLI/MCP logout.
+- **Degraded auth mode (P6):** if no session is available at startup the MCP **still starts**; every tool answers a coded `AUTH_REQUIRED` error with the fix, and a new `geopack_sdk_auth_status` tool + `geopack://auth` resource explain how to log in. The process no longer exits with a message visible only in host logs. The surface is now **32 tools**.
+
+### Changed — BREAKING
+
+- `TokenRegistry` is **no longer a process-wide singleton**; each client owns an `AuthState`, so
+  clients/accounts/servers are independent. Code that relied on implicit token sharing between
+  clients must pass the same `AuthState` (new `auth_state=` argument).
+- `GeopackClient`/`AsyncGeopackClient` accept `auth_state` / `credential_store` / `auth_profile`.
+- `GEOPACK_USERNAME`/`GEOPACK_PASSWORD` in `mcp.json` are **deprecated** (dev only).
+
+### Fixed
+
+- Concurrent `401`s now perform **one** refresh (single-flight); a caller whose token was already
+  rotated while waiting skips the redundant refresh.
+- The rotated refresh token is persisted (write-through), so restarting the MCP no longer reuses a
+  stale token and forces a re-login.
+
+### Verification
+
+- Full suite **856 tests** OK (`python -m unittest discover -s tests`).
+
+Touched files:
+- `src/geopack_sdk/token_registry.py`, `auth_state.py` (new), `auth.py`, `async_auth.py`,
+  `client.py`, `async_client.py`, `credentials.py`, `cli/main.py`
+- `src/geopack_sdk_mcp/auth_bootstrap.py`, `server.py`, `context.py`, `errors.py`, `__main__.py`
+- `src/geopack_sdk_mcp/tools/auth.py` (new), `tools/__init__.py`, `tools/policy.py`,
+  `annotations.py`, `guide.py`, `resources/auth.py` (new), `resources/__init__.py`
+- `tests/test_token_registry.py`, `test_credentials_store.py` (new), `test_cli_profiles.py` (new),
+  `test_mcp_auth_bootstrap.py` (new), `test_mcp_degraded_auth.py` (new), `test_default_headers.py`,
+  `test_mcp_read_tools.py`, `test_map_tools.py`
+- `pyproject.toml`, `README.md`, `CHANGELOG.md`
+
 ## 0.14.0 — 2026-11-24
 
 **Removed `geopack_sdk_render_chart`.** The bundled chart renderer (added across 0.13.0–0.13.2)

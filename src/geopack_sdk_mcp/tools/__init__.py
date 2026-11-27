@@ -8,6 +8,7 @@ from typing import Any
 def register_all_tools(mcp: Any) -> None:
     from . import (
         analysis,
+        auth,
         datasets,
         edits,
         generated_files,
@@ -21,6 +22,7 @@ def register_all_tools(mcp: Any) -> None:
         workflows,
     )
 
+    auth.register(mcp)
     geocoding.register(mcp)
     policy.register(mcp)
     datasets.register(mcp)

@@ -158,11 +158,13 @@ client.auth.login(username="my_user", password="my_password")
 - Sync and **async** clients (`GeopackClient`, `AsyncGeopackClient`); parallel task polling via `wait_for_tasks` (`partial_success` is terminal and returned like `completed`).
 - Task message helpers aligned with the portal UI.
 - HTTP retries on 502/503/504; typed exceptions.
-- GeoPandas integration; **Geopack SDK MCP** server (**31 tools** + 2 resource templates, v0.12.0+; read lanes for schema/aggregate/relationships/workflow-spec, workflow execution incl. typed analysis tools, the edit ladder, upload, a loopback-only local map data service with a built-in viewer, and local geometry ops; no create/edit/delete of workflows via MCP, no delete at all, no map-image/print export).
+- GeoPandas integration; **Geopack SDK MCP** server (**32 tools** + 2 resource templates, v0.15.0+; read lanes for schema/aggregate/relationships/workflow-spec, workflow execution incl. typed analysis tools, the edit ladder, upload, a loopback-only local map data service with a built-in viewer, local geometry ops, and an auth-status tool for first-run guidance; no create/edit/delete of workflows via MCP, no delete at all, no map-image/print export).
 
 ## Geopack SDK MCP (Cursor / Claude Desktop)
 
-Typed REST proxy via MCP — not the in-portal assistant. Credentials stay in the MCP server **environment**, never in tool arguments.
+Typed REST proxy via MCP — not the in-portal assistant. Authenticate **once** with `geopack-sdk login`;
+the MCP server reads the stored session, so credentials never appear in tool arguments (and a password
+is no longer needed in `mcp.json`).
 
 **Use the project venv** (recommended — same as notebooks):
 
@@ -172,7 +174,7 @@ cd python-sdk
 pip install -e ".[mcp]" --disable-pip-version-check
 ```
 
-`mcp` is an **optional** dependency in `pyproject.toml` (`[project.optional-dependencies] mcp`) so `pip install geopack-sdk` alone does not pull it in. Install `geopack-sdk[mcp]` or `geopack-sdk[all]` when you need the MCP server.
+`mcp` is an **optional** dependency in `pyproject.toml` (`[project.optional-dependencies] mcp`) so `pip install geopack-sdk` alone does not pull it in. Install `geopack-sdk[mcp]` or `geopack-sdk[all]` when you need the MCP server. The `[mcp]` extra also installs `keyring` for OS credential storage; install it standalone with `geopack-sdk[keyring]`.
 
 > **Reinstalling after a code change:** `pip install -e ".[mcp]" --force-reinstall --no-deps --disable-pip-version-check` — skips dependency re-resolution (deps are already installed).
 >
@@ -195,16 +197,20 @@ pip install -e ".[mcp]" --disable-pip-version-check
 
 Always use `python script.py`, not `.\script.py` on Windows (wrong interpreter).
 
-**Auth (recommended):** run once in a terminal (with `GEOPACK_API_URL` in `.env` or env):
+**Auth (recommended):** run once in a terminal (with `GEOPACK_API_URL` in `.env` or env). The password is read interactively (never passed as an argument); only the **refresh token** is persisted, in the OS secret store (Windows Credential Manager / macOS Keychain / Linux Secret Service) via the optional `keyring` package:
 
 ```bash
-geopack-sdk login
-geopack-sdk status
+geopack-sdk login                 # prompts for username (or --username) and password
+geopack-sdk login --profile work  # optional named profile (default: 'default')
+geopack-sdk status                # api_url, user, profile, store, session presence (never the token)
+geopack-sdk profiles              # list stored profiles
+geopack-sdk logout                # revoke this session + clear local credentials
+geopack-sdk logout --all          # log out every stored profile (explicit, separate)
 ```
 
-Tokens are saved to `~/.geopack/credentials.json` (mode `0600`). MCP reads them at startup — no password in IDE config.
+The refresh token lives in the OS secret store; `~/.geopack/profiles.json` holds only non-secret metadata (`api_url`/username/profile). If the OS store is unavailable, `login` fails with guidance unless you explicitly opt into the plaintext fallback — `--store file` (or `GEOPACK_CREDENTIAL_STORE=file`), which warns; `--store memory` is for tests. `GEOPACK_PROFILE` selects the profile at runtime. The **access token is never written to disk** — the SDK mints a fresh one from the stored refresh token at startup and on `401`, and persists the **rotated** refresh token after every refresh.
 
-**Cursor** (`mcp.json` — use venv executable):
+**Cursor** (`mcp.json` — use venv executable). No username/password:
 
 ```json
 {
@@ -212,16 +218,16 @@ Tokens are saved to `~/.geopack/credentials.json` (mode `0600`). MCP reads them 
     "geopack-sdk-mcp": {
       "command": "D:\\Works\\geopack-geoportal\\geopack-geoportal-v2\\python-sdk\\venv\\Scripts\\geopack-sdk-mcp.exe",
       "env": {
-        "GEOPACK_API_URL": "http://localhost:3000/api",
-        "GEOPACK_USERNAME": "your_user",
-        "GEOPACK_PASSWORD": "your_password"
+        "GEOPACK_API_URL": "http://localhost:3000/api"
       }
     }
   }
 }
 ```
 
-Alternatives: `GEOPACK_ACCESS_TOKEN` in env, or username/password in `env` (dev only). See [MCP authentication options](../docs/09-sdk/mcp-design/mcp-auth.md).
+Alternatives (all optional): `GEOPACK_ACCESS_TOKEN` (+ `GEOPACK_REFRESH_TOKEN`) in `env` for a short-lived explicit token; `GEOPACK_PROFILE` to pick a stored profile. `GEOPACK_USERNAME`/`GEOPACK_PASSWORD` in `env` still work but are **deprecated** (dev only). See [MCP authentication options](../docs/09-sdk/mcp-design/mcp-auth.md).
+
+**First run / not logged in.** If the host starts without a stored session (or refresh fails), the server starts in **degraded mode**: it does not exit, every tool answers a coded `AUTH_REQUIRED` error with the fix, and the **`geopack_sdk_auth_status`** tool reports exactly what to do. The agent can then ask the user to run `geopack-sdk login` and restart the host — no need to dig through host logs.
 
 **MCP environment variables — where to set them.** Every `GEOPACK_*` value (auth **and** the optional
 map/geometry settings below) goes in the **same `env` object** as `GEOPACK_API_URL` in the host config:
@@ -237,6 +243,8 @@ host config, **restart the MCP host** — the server reads env once at startup.
 
 | Variable | Default | When / what to set |
 |---|---|---|
+| `GEOPACK_PROFILE` | `default` | Stored profile created by `geopack-sdk login` to use at startup. |
+| `GEOPACK_CREDENTIAL_STORE` | unset (keyring) | `file` opts into the plaintext fallback (warns), `memory` for tests; unset/`keyring` uses the OS secret store. |
 | `GEOPACK_MCP_MAP_SERVICE` | unset (off) | `"1"` to enable `geopack_sdk_show_map`. Without it, `show_map` answers `MAP_SERVICE_BLOCKED`; `geometry_op` works regardless. |
 | `GEOPACK_MCP_MAP_ROOT` | unset | **Absolute path** to an existing directory that holds the local layers you want `/local`·`/data` to serve. Files must be under it and use an allow-listed extension (`.geojson .json .gpkg .csv .kml .zip`). Omit it and only inline/portal layers are usable. |
 | `GEOPACK_MCP_MAP_CORS` | unset (off) | `"1"` only when an **agent-authored page on another origin** must fetch `/data`·`/tiles`. Same-origin pages need nothing. Keep off otherwise. |
@@ -259,8 +267,6 @@ Optional map/geometry block (add to the existing `env`; every value is optional)
       "command": "D:\\Works\\geopack-geoportal\\geopack-geoportal-v2\\python-sdk\\venv\\Scripts\\geopack-sdk-mcp.exe",
       "env": {
         "GEOPACK_API_URL": "http://localhost:3000/api",
-        "GEOPACK_USERNAME": "your_user",
-        "GEOPACK_PASSWORD": "your_password",
         "GEOPACK_MCP_MAP_SERVICE": "1",
         "GEOPACK_MCP_MAP_ROOT": "C:\\Users\\you\\geopack-maps",
         "GEOPACK_MCP_MAP_CORS": "0",

@@ -49,6 +49,7 @@ TITLES: Dict[str, str] = {
     "geopack_sdk_download_generated_file": "Download a generated file",
     "geopack_sdk_geocode_place": "Geocode a place",
     "geopack_sdk_get_mcp_safety_policy": "Get MCP safety policy",
+    "geopack_sdk_auth_status": "Get authentication status",
     "geopack_sdk_list_workflows": "List workflows",
     "geopack_sdk_get_workflow": "Get a workflow",
     "geopack_sdk_get_workflow_spec": "Read a workflow's graph as a spec",

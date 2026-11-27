@@ -77,6 +77,9 @@ class GeopackClient:
         retry_total: int = _DEFAULT_RETRY_TOTAL,
         retry_backoff_factor: float = _DEFAULT_RETRY_BACKOFF_FACTOR,
         retry_status_codes: tuple = _DEFAULT_RETRY_STATUS_CODES,
+        auth_state=None,
+        credential_store=None,
+        auth_profile: str = "default",
     ):
         # Priority: explicit parameter > environment variable
         self.base_url = (base_url or os.getenv("GEOPACK_API_URL", "")).rstrip('/')
@@ -100,6 +103,11 @@ class GeopackClient:
                 status_forcelist=retry_status_codes,
             )
         
+        # Per-client authentication state / credential storage (slice 034)
+        self.auth_state = auth_state
+        self.credential_store = credential_store
+        self.auth_profile = auth_profile
+
         # Initialize managers
         self.auth = AuthManager(self)
         self.datastores = DataStoreManager(self)

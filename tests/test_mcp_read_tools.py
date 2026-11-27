@@ -70,6 +70,7 @@ EXPECTED_TOOL_NAMES = {
     "geopack_sdk_download_generated_file",
     "geopack_sdk_geocode_place",
     "geopack_sdk_get_mcp_safety_policy",
+    "geopack_sdk_auth_status",
     "geopack_sdk_list_workflows",
     "geopack_sdk_get_workflow",
     "geopack_sdk_get_workflow_spec",
@@ -783,7 +784,7 @@ class ToolSurfaceTest(unittest.TestCase):
         cls.tools = {tool.name: tool for tool in mcp._tool_manager.list_tools()}  # noqa: SLF001
 
     def test_surface_is_thirty_one_tools(self):
-        self.assertEqual(len(self.tools), 31)
+        self.assertEqual(len(self.tools), 32)
         self.assertEqual(set(self.tools), EXPECTED_TOOL_NAMES)
 
     def test_no_tool_name_collides(self):

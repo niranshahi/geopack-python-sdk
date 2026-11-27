@@ -75,6 +75,9 @@ class AsyncGeopackClient:
         retry_total: int = _DEFAULT_RETRY_TOTAL,
         retry_backoff_factor: float = _DEFAULT_RETRY_BACKOFF_FACTOR,
         retry_status_codes: frozenset = _DEFAULT_RETRY_STATUS_CODES,
+        auth_state=None,
+        credential_store=None,
+        auth_profile: str = "default",
     ):
         self.base_url = (base_url or os.getenv("GEOPACK_API_URL", "")).rstrip("/")
         if not self.base_url:
@@ -96,6 +99,11 @@ class AsyncGeopackClient:
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(timeout), headers=dict(self.default_headers)
         )
+
+        # Per-client authentication state / credential storage (slice 034)
+        self.auth_state = auth_state
+        self.credential_store = credential_store
+        self.auth_profile = auth_profile
 
         self.auth = AsyncAuthManager(self)
         self.datastores = AsyncDataStoreManager(self)

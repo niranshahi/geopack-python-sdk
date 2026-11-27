@@ -30,6 +30,8 @@ from typing import Any, Dict, List, Optional
 
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from .auth_errors import GeopackMCPAuthError
+
 from geopack_sdk.exceptions import (
     AggregationInvalidArgs,
     AggregationUnsupported,
@@ -299,6 +301,23 @@ def tool_error_payload(exc: BaseException) -> Dict[str, Any]:
         payload["hint"] = hint
         payload.update(exc.extra)
         return payload
+
+    if isinstance(exc, GeopackMCPAuthError):
+        return {
+            "error": True,
+            "type": type(exc).__name__,
+            "code": "AUTH_REQUIRED",
+            "message": exc.summary,
+            "hint": (
+                "Run `geopack-sdk login` in a terminal (with GEOPACK_API_URL set), then "
+                "restart the MCP host. See docs/09-sdk/mcp-design/mcp-auth.md."
+            ),
+            "checks": [
+                {"label": check.label, "ok": check.ok, "detail": check.detail}
+                for check in exc.checks
+            ],
+            "fixes": list(exc.fixes),
+        }
 
     if isinstance(exc, GeopackAPIError):
         payload = {

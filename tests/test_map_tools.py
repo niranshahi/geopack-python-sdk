@@ -1064,13 +1064,14 @@ class ShowMapTest(unittest.TestCase):
 
 
 class SurfacePinTest(unittest.TestCase):
-    def test_the_surface_is_thirty_one_tools(self):
+    def test_the_surface_is_thirty_two_tools(self):
         from geopack_sdk_mcp.server import mcp
 
         names = {tool.name for tool in mcp._tool_manager.list_tools()}  # noqa: SLF001
-        self.assertEqual(len(names), 31)
+        self.assertEqual(len(names), 32)
         self.assertIn("geopack_sdk_show_map", names)
         self.assertIn("geopack_sdk_geometry_op", names)
+        self.assertIn("geopack_sdk_auth_status", names)
         self.assertNotIn("geopack_sdk_render_chart", names)
 
 

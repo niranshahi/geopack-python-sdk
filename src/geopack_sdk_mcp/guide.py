@@ -65,6 +65,9 @@ PURPOSES: Dict[str, str] = {
     "geopack_sdk_get_mcp_safety_policy": (
         "The safety policy: mutating tools + consent, local writes, upload caps."
     ),
+    "geopack_sdk_auth_status": (
+        "Is this MCP authenticated? If not, the exact `geopack-sdk login` step."
+    ),
     "geopack_sdk_geometry_op": (
         "Local geometry ops (buffer/area/intersect/...) on supplied GeoJSON/WKT."
     ),

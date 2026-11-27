@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Optional, Set
 
 from geopack_sdk import GeopackClient
 
-from .auth_bootstrap import AppContext
+from .auth_bootstrap import AppContext, authentication_required
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import Context
@@ -42,13 +42,25 @@ def set_lifespan_client(client: GeopackClient | None) -> None:
 def get_lifespan_client() -> GeopackClient:
     """Return SDK client for resource handlers (lifespan-scoped, no request Context)."""
     if _lifespan_client is None:
-        raise RuntimeError("Geopack SDK MCP client is not initialized")
+        raise authentication_required()
+    return _lifespan_client
+
+
+def peek_lifespan_client() -> Optional[GeopackClient]:
+    """Return the current client, or ``None`` in degraded mode — never raises."""
     return _lifespan_client
 
 
 def get_client(ctx: Any) -> GeopackClient:
-    """Return the SDK client from FastMCP tool Context, with lifespan fallback."""
+    """Return the SDK client from FastMCP tool Context, with lifespan fallback.
+
+    Raises :class:`~geopack_sdk_mcp.auth_errors.GeopackMCPAuthError` in degraded
+    mode so every tool answers an actionable ``AUTH_REQUIRED`` result.
+    """
     try:
-        return ctx.request_context.lifespan_context.client
+        client = ctx.request_context.lifespan_context.client
     except (ValueError, AttributeError):
-        return get_lifespan_client()
+        client = _lifespan_client
+    if client is None:
+        raise authentication_required()
+    return client
