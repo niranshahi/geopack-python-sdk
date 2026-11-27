@@ -112,9 +112,10 @@ token rotates on every service start and the `mapId` is per-run, so a saved link
 working after a restart. Open a stale `?t=` link and you get a readable "link expired"
 page (401), not a blank map; re-run `show_map` for a fresh `viewerUrl`.
 
-- **Layers:** `portal-dataset` (vector GeoJSON/MVT, or a COG when the dataset is a
-  Cloud-Optimized GeoTIFF), `portal-publication` (WMS/WMTS/WFS — the path that shows a
-  dataset's *official* symbology), `local-file` (under `GEOPACK_MCP_MAP_ROOT`), and
+- **Layers:** `portal-dataset` (vector GeoJSON/MVT; a raster becomes server-rendered PNG
+  tiles when it lives in PostGIS or MBTiles, or a COG when `details.hasCOG`),
+  `portal-publication` (WMS/WMTS/WFS — the path that shows a dataset's *official*
+  symbology), `local-file` (under `GEOPACK_MCP_MAP_ROOT`), and
   `inline-geometry` (GeoJSON you supply, e.g. from `geopack_sdk_geometry_op`).
 - **Extent:** omit `bbox` and each layer borrows its source dataset's WGS84 extent;
   `bbox` is `[west, south, east, north]` and `view.center` is `[lon, lat]`.
@@ -122,7 +123,28 @@ page (401), not a blank map; re-run `show_map` for a fresh `viewerUrl`.
   distinct value** (derived by grouping the whole column, up to a documented cap), or
   `{type:'classBreaks', field, classes?}` for quantile breaks. A complete
   `{unique:[...]}`/`{breaks:[...]}` spec is honoured, and a missing `legend` is derived for
-  you so the panel is never blank.
+  you so the panel is never blank. When you omit both `symbology` and `style`, a dataset's
+  own **saved vector renderer** is applied automatically if it is translatable; read it
+  first from `get_dataset`'s `symbology` summary (`rendererType`, `fields`, `classCount`).
+  For an untranslatable renderer (or a styled official SLD), use a `portal-publication`
+  layer — it renders the dataset's official symbology.
+- **Raster rendering (`display`):** a raster `portal-dataset` stored in a **PostGIS
+  raster table** or an **MBTiles** container is drawn as server-side PNG tiles — `render`
+  is auto-set to `'rastertile'`, no publication and no COG needed. Omit `display` and the
+  dataset's **saved** rendering is applied. To change it, pass a per-layer `display`:
+  - single band: `{displayType:'colorMap', band:1, colorMap:'grayscale|pseudocolor|fire|bluered|custom', minimum, maximum, reclass:true}`;
+    for `custom` add `customColorMap:[{value:<number|'NN%'>, r,g,b,a}]` (0..255;
+    `color:[r,g,b,a]` is accepted too).
+  - multi-band true colour: `{displayType:'RGB', RBand:1, GBand:2, BBand:3, ABand?}`;
+    the friendly `bands:{r,g,b,a}` (or `[r,g,b,a]`) form is accepted and normalized.
+  - optional `resampling:'NearestNeighbor'|'Bilinear'` and `refZoom` (the native pyramid
+    level; it is computed for you when omitted).
+
+  To pick sensible values, read the dataset first: `get_dataset` returns a **`symbology`**
+  summary (`kind:'raster'`, `rasterDisplayType`, `band`/`colorMap` or `bands`), and
+  `details.bands` carries each band's `minimum`/`maximum`. A **COG** is drawn client-side
+  (`render:'cog'`) and an **MBTiles** raster is pre-rendered, so `display` does not
+  recolour either — the MCP warns and ignores it rather than failing the map.
 - **Editing an existing map:** `show_map(map_id=...)` **appends** layers by default. Pass
   `replace_layers=true` to rebuild it with exactly this call's layers, or `remove_layers`
   with layer ids to drop specific layers. Unknown ids are reported in `templateWarnings`.
@@ -188,8 +210,13 @@ shows the account's per-dimension usage before a big export or upload.
 - **Local writes:** `download_*`, the thumbnail save and `render_chart(save_path=...)` are
   best-effort on a sandboxed host — they answer `saved=false` with the content still
   delivered inline rather than failing. No file appearing on disk is expected, not an error.
-- **Rasters:** a raster `portal-dataset` layer is vector-only and warns; use a raster
-  WMS/WMTS `portal-publication`, or rely on the COG lane when `details.hasCOG` is set.
+- **Rasters:** a raster `portal-dataset` is server-rendered PNG tiles when the dataset
+  lives in PostGIS or MBTiles (`render: 'rastertile'`, auto-selected — no publication and
+  no COG needed; the saved `display`/colorMap is applied, and a caller `display` can change
+  it for a PostGIS raster), or directly as a COG when `details.hasCOG` is set
+  (`render: 'cog'`). A raster WMS/WMTS `portal-publication` layer is still the option for
+  a published service. Only a raster with no tile source at all stays a vector footprint
+  and warns. See "Raster rendering" above for the `display` contract.
 - **Error contract:** branch on `code`, read `hint`, and fix `invalidArgs`. `invalidArgs`
   names the **specific** argument at fault — if it says `category`, the label field name is
   wrong (for an aggregate that is your `groupBy` field); if it says `value`, the value field

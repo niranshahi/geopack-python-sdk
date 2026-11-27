@@ -243,6 +243,32 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("{z}", str(self.service.client.publications.template))
 
+    def test_a_raster_tile_is_proxied_from_the_portal_raster_lane(self):
+        # A PostGIS raster with no publication and no COG is served by the portal's
+        # own raster-tile endpoint; the local proxy adds the credential and forwards
+        # the saved `display` + `ref_z` so the official symbology is applied.
+        layer = self.manifest.add_layer(
+            layer_from_spec({"kind": "portal-dataset", "datasetId": 426})
+        )
+        layer.raster_tile = True
+        layer.raster_display = {"displayType": "colorMap", "band": 1, "colorMap": "jet"}
+        layer.ref_zoom = 14
+
+        status, _, body = _request(
+            self.service.port,
+            f"/rasters/{layer.id}/12/2385/1630.png",
+            token=self.service.token,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertIn(b"tile", body)
+        sent = self.service.client.session.calls[-1]
+        self.assertIn("/datasets/426/rastertile/12/2385/1630.png", sent["url"])
+        self.assertEqual(sent["headers"]["Authorization"], f"Bearer {PORTAL_TOKEN}")
+        self.assertIn("ref_z=14", sent["url"])
+        self.assertIn("display=", sent["url"])
+        self.assertNotIn(PORTAL_TOKEN.encode(), body)
+
     def test_a_cog_byte_range_is_proxied_with_the_range_forwarded(self):
         status, headers, _ = _request(
             self.service.port, "/cog/1949", token=self.service.token, range_header="bytes=0-4"

@@ -11,6 +11,8 @@ Two families:
 
 from __future__ import annotations
 
+import json
+import math
 import os
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse, urlsplit, urlunsplit
@@ -25,6 +27,7 @@ from ..crs_utils import (
 )
 from ..sanitize.dataset_symbology import (
     field_meta_from_details,
+    resolve_raster_display,
     styled_publications,
     summarise_symbology,
 )
@@ -400,6 +403,160 @@ def _as_details(value: Any) -> Dict[str, Any]:
     return coerce_mapping(value)
 
 
+#: MBTiles container extensions (the filesystem adapter serves tiles from these).
+_MBTILES_EXTENSIONS = (".mbtiles",)
+#: Web Mercator metres per degree at the equator (for a native-zoom estimate).
+_MERCATOR_METRES_PER_DEGREE = 111319.49079327358
+#: Web Mercator world circumference in metres (matches the portal's own math).
+_MERCATOR_CIRCUMFERENCE = 40075016.686
+#: The portal renders 256-pixel raster tiles by default.
+_RASTER_TILE_SIZE = 256
+
+
+def raster_is_mbtiles(details: Dict[str, Any]) -> bool:
+    """True when the raster source is an MBTiles container (pre-rendered tiles).
+
+    An MBTiles raster is served by the raster-tile lane, but its pictures are
+    **stored**, so a caller ``display`` cannot recolour it (unlike a PostGIS
+    raster, which the portal renders on demand).
+    """
+    sub_type = str(details.get("subType") or details.get("subtype") or "").lower()
+    storage_type = str(details.get("storageType") or "").lower()
+    if (
+        "mbtiles" in sub_type
+        or storage_type == "mbtiles"
+        or details.get("hasMBTiles")
+        or isinstance(details.get("mbtiles_metadata"), dict)
+    ):
+        return True
+    file_path = details.get("filePath") or details.get("file_path") or details.get("path")
+    return isinstance(file_path, str) and file_path.lower().endswith(_MBTILES_EXTENSIONS)
+
+
+def raster_tile_capable(details: Dict[str, Any]) -> bool:
+    """True when the portal's raster-tile lane can render this dataset.
+
+    The portal serves ``GET /datasets/{id}/rastertile/{z}/{x}/{y}.png`` for:
+
+    * a raster stored in a **PostGIS raster table** (the Postgres adapter —
+      ``ST_AsPNG`` server-side), and
+    * an **MBTiles** dataset (the filesystem adapter reads the tile from the
+      SQLite container).
+
+    This is the lane that fills the gap the report named: a raster with **no
+    publication** and **no COG**. It is **not** used when the dataset has a COG
+    (``hasCOG``) — the direct ``/cog`` byte lane is better — nor for a plain
+    filesystem GeoTIFF, which the adapter cannot tile yet.
+    """
+    if details.get("hasCOG"):
+        return False
+    if raster_is_mbtiles(details):
+        return True
+    source = details.get("source") if isinstance(details.get("source"), dict) else {}
+    driver = str(source.get("driver") or details.get("driver") or "").lower()
+    if driver in ("postgresql", "postgres"):
+        return True
+    if details.get("dbTableName") and (
+        details.get("rasterDbColumn") or details.get("tableName")
+    ):
+        return True
+    return False
+
+
+def _zoom_for_resolution(resolution_metres: Any) -> Optional[int]:
+    """The XYZ zoom whose Web Mercator resolution matches ``resolution_metres``."""
+    try:
+        resolution = float(resolution_metres)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(resolution) or resolution <= 0:
+        return None
+    zoom = math.log2(_MERCATOR_CIRCUMFERENCE / (_RASTER_TILE_SIZE * resolution))
+    if not math.isfinite(zoom):
+        return None
+    return max(0, min(24, int(round(zoom))))
+
+
+def reference_zoom_for_raster(
+    details: Dict[str, Any], extent: Optional[List[float]]
+) -> Optional[int]:
+    """The zoom matching the raster's native pixel size (its best pyramid level).
+
+    The portal picks a raster overview with ``2 ** (ref_z - z)``, so a wrong
+    ``ref_z`` either wastes a full-resolution read or blurs the image with an
+    over-decimated overview. The frontend derives it from
+    ``details.metadata_3857.scalex``; when that is absent (PostGIS rasters often
+    omit it) this falls back to ``geo_extent`` width / ``rasterSize.x`` in Web
+    Mercator metres, which is the same quantity. ``None`` keeps the portal default.
+    """
+    metadata = details.get("metadata_3857")
+    if isinstance(metadata, dict):
+        zoom = _zoom_for_resolution(metadata.get("scalex"))
+        if zoom is not None:
+            return zoom
+    size = details.get("rasterSize")
+    size = size if isinstance(size, dict) else {}
+    width = size.get("x") or size.get("width")
+    if extent and width:
+        try:
+            degrees_per_pixel = (float(extent[2]) - float(extent[0])) / float(width)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+        if degrees_per_pixel > 0:
+            return _zoom_for_resolution(degrees_per_pixel * _MERCATOR_METRES_PER_DEGREE)
+    return None
+
+
+def _display_for_query(display: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip display keys the portal renderer does not accept.
+
+    Mirrors the SPA's ``MyRasterWebTileLayer``: a ``customColorMap`` entry's
+    ``caption`` is removed before the display is sent as a query value.
+    """
+    clean = dict(display)
+    color_map = clean.get("customColorMap")
+    if isinstance(color_map, list):
+        clean["customColorMap"] = [
+            {key: value for key, value in item.items() if key != "caption"}
+            if isinstance(item, dict)
+            else item
+            for item in color_map
+        ]
+    return clean
+
+
+def dataset_raster_tile_url(
+    client: Any,
+    dataset_id: int,
+    z: int,
+    x: int,
+    y: int,
+    *,
+    display: Optional[Dict[str, Any]] = None,
+    ref_zoom: Optional[int] = None,
+    tile_size: Optional[int] = None,
+) -> str:
+    """The portal's PNG raster-tile URL (the ``/n``/``rastertile`` lane).
+
+    ``display`` carries the dataset's saved raster display (bands / colorMap /
+    min-max) so the portal applies the official symbology; it is sent as a JSON
+    query value exactly like the SPA does. ``ref_zoom`` selects the pyramid level.
+    """
+    params: Dict[str, Any] = {}
+    if tile_size is not None:
+        params["tileSize"] = int(tile_size)
+    if ref_zoom is not None:
+        params["ref_z"] = int(ref_zoom)
+    if display:
+        params["display"] = json.dumps(
+            _display_for_query(display), ensure_ascii=False, separators=(",", ":")
+        )
+    url = portal_url(
+        client, f"/datasets/{int(dataset_id)}/rastertile/{int(z)}/{int(x)}/{int(y)}.png"
+    )
+    return f"{url}?{urlencode(params)}" if params else url
+
+
 def dataset_info(client: Any, dataset_id: int) -> Dict[str, Any]:
     """Best-effort raw dataset facts for extent hints (never raises).
 
@@ -443,6 +600,17 @@ def dataset_info(client: Any, dataset_id: int) -> Dict[str, Any]:
     bands = details.get("bands")
     if isinstance(bands, list) and bands:
         info["bands"] = [band for band in bands if isinstance(band, dict)]
+    display = resolve_raster_display(details)
+    if isinstance(display, dict) and display:
+        # The saved raster display (bands / colorMap / min-max). The map proxy
+        # forwards it to the portal renderer so the official symbology is applied.
+        info["display"] = display
+    if str(data_type or "").lower() == "raster" and raster_tile_capable(details):
+        info["raster_tile"] = True
+        info["mbtiles"] = raster_is_mbtiles(details)
+        ref_zoom = reference_zoom_for_raster(details, info.get("extent"))
+        if ref_zoom is not None:
+            info["ref_zoom"] = ref_zoom
     info["symbology"] = summarise_symbology(raw)
     field_meta = field_meta_from_details(details)
     if field_meta:

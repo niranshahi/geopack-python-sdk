@@ -120,7 +120,9 @@ def register(mcp: Any) -> None:
             "Get one dataset by id. details_level full (default) | standard | lite. "
             "Use fields to project top-level keys. For field names, types, domains and valid "
             "relationship names use geopack_sdk_get_dataset_schema instead of reading the "
-            "details blob."
+            "details blob. For a raster, the returned `symbology` names its saved rendering "
+            "(`rasterDisplayType`, `band`/`colorMap` or `bands`) — use it to choose a show_map "
+            "layer `display`."
         ),
     )
     def geopack_sdk_get_dataset(

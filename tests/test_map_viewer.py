@@ -276,6 +276,16 @@ class RenderHtmlTest(unittest.TestCase):
         self.assertIn("getData", js)
         self.assertIn("no data", js)
 
+    def test_a_rastertile_layer_is_drawn_as_png_xyz_tiles(self):
+        # A PostGIS/filesystem raster with no publication and no COG is drawn as
+        # the portal's server-rendered PNG tiles through the local `/rasters` proxy.
+        js = viewer.default_viewer_js()
+        self.assertIn("render === 'rastertile'", js)
+        self.assertIn("rasterTileUrl", js)
+        self.assertIn("render === 'rastertile'", js)
+        # The legend must show a raster swatch (not a fake vector fill).
+        self.assertIn("render === 'rastertile'", js.split("function isRasterRender", 1)[1])
+
     def test_the_view_can_be_pointed_by_url_and_features_can_carry_style(self):
         # A URL override (?center=lon,lat&zoom=N) points an existing map at a place
         # and suppresses auto-fit; a GeoJSON feature's `properties.style` styles that
@@ -350,6 +360,20 @@ class LayerRenderTest(unittest.TestCase):
             "render": "mvt",
         })
         self.assertEqual(layer.public("http://x")["render"], "mvt")
+
+    def test_a_raster_tile_layer_exposes_an_xyz_template(self):
+        layer = layer_from_spec({"kind": "portal-dataset", "datasetId": 426})
+        layer.raster_tile = True
+
+        public = layer.public("http://127.0.0.1:9")
+
+        self.assertEqual(public["render"], "rastertile")
+        self.assertEqual(
+            public["rasterTileUrl"],
+            f"http://127.0.0.1:9/rasters/{layer.id}/{{z}}/{{x}}/{{y}}.png",
+        )
+        # The saved raster display stays server-side (never in the browser manifest).
+        self.assertNotIn("rasterDisplay", public)
 
     def test_unknown_render_is_refused(self):
         from geopack_sdk_mcp.maps.errors import MapServiceError

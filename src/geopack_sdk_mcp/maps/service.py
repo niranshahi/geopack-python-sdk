@@ -11,6 +11,7 @@ Endpoints (token required on every one):
 ``GET /manifest/{mapId}``              the public layer manifest
 ``GET /data/{layerId}``                GeoJSON (portal dataset / inline) or a local file
 ``GET /tiles/{layerId}/{z}/{x}/{y}.pbf`` portal-native MVT or a minted publication tile
+``GET /rasters/{layerId}/{z}/{x}/{y}.png`` portal-rendered raster PNG tile (PostGIS / filesystem)
 ``GET /local/{layerId}``               an allow-listed local file
 ``GET /proxy/publication/{id}/{proto}`` minted WMS/WMTS/MVT/WFS passthrough
 ``POST /shutdown``                     stop the server
@@ -37,6 +38,7 @@ from . import viewer
 from .sources import (
     allowed_upstream,
     dataset_cog_url,
+    dataset_raster_tile_url,
     dataset_tile_url,
     merge_query,
     mint_publication_url,
@@ -296,6 +298,31 @@ class LocalService:
             SERVICE_ERROR, "this layer kind has no tile endpoint.", key="layer"
         )
 
+    def layer_raster_tile(self, layer: MapLayer, z: int, x: int, y: int) -> Any:
+        """Proxy one PNG raster tile from the portal's raster-tile lane.
+
+        The portal renders a PostGIS (or filesystem) raster server-side — applying
+        the dataset's saved ``display`` — so the browser never sees the raw pixels
+        or the portal credential. This is the lane for a raster that is neither
+        published (no WMS/WMTS) nor a COG.
+        """
+        if layer.kind != "portal-dataset" or layer.dataset_id is None:
+            raise MapServiceError(
+                SERVICE_ERROR,
+                "an HTTP raster-tile layer must be a portal-dataset.",
+                key="layer",
+            )
+        url = dataset_raster_tile_url(
+            self.client,
+            int(layer.dataset_id),
+            z,
+            x,
+            y,
+            display=layer.raster_display,
+            ref_zoom=layer.ref_zoom,
+        )
+        return self._proxy(url)
+
     def cog_resource(
         self, ref: str, range_header: Optional[str]
     ) -> Tuple[int, Dict[str, str], bytes]:
@@ -375,6 +402,7 @@ class _Handler(BaseHTTPRequestHandler):
         return (
             path.startswith("/data/")
             or path.startswith("/tiles/")
+            or path.startswith("/rasters/")
             or path.startswith("/cog/")
         )
 
@@ -532,6 +560,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._route_tiles(path[len("/tiles/"):], cors)
             return
 
+        if path.startswith("/rasters/"):
+            self._route_rasters(path[len("/rasters/"):], cors)
+            return
+
         if path.startswith("/cog/"):
             self._route_cog(path[len("/cog/"):], cors)
             return
@@ -645,6 +677,25 @@ class _Handler(BaseHTTPRequestHandler):
             raise MapServiceError(SERVICE_ERROR, "tile coordinates must be integers.") from exc
         status, content_type, body = tile
         self._send(status, body, content_type or "application/vnd.mapbox-vector-tile", cors=cors)
+
+    def _route_rasters(self, rest: str, cors: bool) -> None:
+        """Proxy one portal-rendered PNG raster tile (XYZ grid)."""
+        pieces = rest.split("/")
+        if len(pieces) != 4:
+            raise MapServiceError(
+                SERVICE_ERROR, "raster tile path must be /rasters/{layer}/{z}/{x}/{y}.png"
+            )
+        layer_id, z, x, y_ext = pieces
+        y = y_ext.rsplit(".", 1)[0]
+        layer = self.service.find_layer(layer_id)
+        if layer is None:
+            raise MapServiceError(SERVICE_ERROR, "unknown layer id.")
+        try:
+            tile = self.service.layer_raster_tile(layer, int(z), int(x), int(y))
+        except ValueError as exc:
+            raise MapServiceError(SERVICE_ERROR, "tile coordinates must be integers.") from exc
+        status, content_type, body = tile
+        self._send(status, body, content_type or "image/png", cors=cors)
 
     def _route_publication(self, rest: str, cors: bool,
                            query: Optional[Dict[str, List[str]]] = None) -> None:

@@ -47,7 +47,144 @@ _DEFAULT_LAYER_PALETTE = ("#3ba776", "#3b7fa7", "#c2703b", "#8b5cf6", "#d1477a",
 #: Raster renderers: the image is produced by the server or byte-served as a COG,
 #: so a per-layer vector ``style`` cannot recolour them and the legend shows a
 #: raster swatch (only vector renderers honour ``style``).
-_RASTER_RENDERS = frozenset({"wms", "wmts", "xyz", "cog"})
+_RASTER_RENDERS = frozenset({"wms", "wmts", "xyz", "cog", "rastertile"})
+
+#: Colour ramps the portal's ``ST_ColorMap`` raster renderer understands.
+_VALID_RASTER_COLOR_MAPS = frozenset(
+    {"grayscale", "pseudocolor", "fire", "bluered", "custom"}
+)
+
+#: Display keys a caller may send (backend-native names + friendly aliases).
+_RASTER_DISPLAY_KEYS = frozenset(
+    {
+        "displayType",
+        "band",
+        "colorMap",
+        "customColorMap",
+        "minimum",
+        "maximum",
+        "reclass",
+        "resampling",
+        "referenceZoom",
+        "RBand",
+        "GBand",
+        "BBand",
+        "ABand",
+        "bands",
+    }
+)
+
+
+def _normalize_raster_display(
+    display: Dict[str, Any], label: str, warnings: List[str]
+) -> Optional[Dict[str, Any]]:
+    """Normalize a caller ``display`` to the portal raster renderer's schema.
+
+    The friendly shapes an agent is likely to send are accepted and converted:
+
+    * ``bands:{r,g,b,a}`` / ``bands:[r,g,b,a]`` → ``RBand``/``GBand``/``BBand``/``ABand``;
+    * a ``customColorMap`` stop's ``color:[r,g,b,a]`` → ``r``/``g``/``b``/``a``.
+
+    ``displayType`` defaults from the supplied keys, ``colorMap`` is validated
+    against the portal's named ramps, and an unusable display returns ``None`` so
+    the dataset's saved rendering is used instead (with a warning).
+    """
+    normalized = {
+        key: value for key, value in display.items() if key in _RASTER_DISPLAY_KEYS
+    }
+    bands = normalized.pop("bands", None)
+    display_type = normalized.get("displayType")
+    if isinstance(display_type, str):
+        display_type = display_type.strip().lower()
+        if display_type in ("rgb", "truecolor", "true-color"):
+            normalized["displayType"] = "RGB"
+        elif display_type in ("colormap", "color-map", "colourmap", "colour-map"):
+            normalized["displayType"] = "colorMap"
+        else:
+            normalized["displayType"] = display.get("displayType")
+    if normalized.get("displayType") not in ("RGB", "colorMap"):
+        has_rgb = bool(bands) or any(
+            normalized.get(key) is not None for key in ("RBand", "GBand", "BBand")
+        )
+        normalized["displayType"] = "RGB" if has_rgb else "colorMap"
+
+    if isinstance(bands, dict):
+        for source, target in (("r", "RBand"), ("g", "GBand"), ("b", "BBand"), ("a", "ABand")):
+            if bands.get(source) is not None:
+                normalized[target] = bands[source]
+    elif isinstance(bands, (list, tuple)):
+        for index, target in enumerate(("RBand", "GBand", "BBand", "ABand")):
+            if index < len(bands) and bands[index] is not None:
+                normalized[target] = bands[index]
+
+    for key in ("band", "RBand", "GBand", "BBand", "ABand", "referenceZoom"):
+        value = normalized.get(key)
+        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+            normalized[key] = int(value.strip())
+    for key in ("minimum", "maximum"):
+        value = normalized.get(key)
+        if isinstance(value, str):
+            try:
+                normalized[key] = float(value)
+            except ValueError:
+                pass
+    if "reclass" in normalized:
+        value = normalized["reclass"]
+        if isinstance(value, str):
+            normalized["reclass"] = value.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            normalized["reclass"] = bool(value)
+
+    if normalized["displayType"] == "RGB":
+        missing = [
+            target
+            for target in ("RBand", "GBand", "BBand")
+            if normalized.get(target) is None
+        ]
+        if missing:
+            warnings.append(
+                f"layer '{label}': RGB display needs bands {', '.join(missing)}; "
+                "using the dataset's saved rendering instead."
+            )
+            return None
+        return normalized
+
+    color_map = str(normalized.get("colorMap") or "grayscale").strip().lower()
+    if color_map not in _VALID_RASTER_COLOR_MAPS:
+        warnings.append(
+            f"layer '{label}': colorMap {color_map!r} is not a portal ramp; use "
+            "grayscale|pseudocolor|fire|bluered|custom (using grayscale)."
+        )
+        color_map = "grayscale"
+    normalized["colorMap"] = color_map
+    if color_map == "custom":
+        stops = normalized.get("customColorMap")
+        cleaned: List[Dict[str, Any]] = []
+        if isinstance(stops, list):
+            for stop in stops:
+                if not isinstance(stop, dict):
+                    continue
+                entry = dict(stop)
+                color = entry.pop("color", None)
+                if isinstance(color, (list, tuple)) and len(color) >= 3:
+                    entry.setdefault("r", color[0])
+                    entry.setdefault("g", color[1])
+                    entry.setdefault("b", color[2])
+                    if len(color) >= 4:
+                        entry.setdefault("a", color[3])
+                if any(entry.get(key) is None for key in ("r", "g", "b")):
+                    continue
+                entry.setdefault("a", 255)
+                cleaned.append(entry)
+        if not cleaned:
+            warnings.append(
+                f"layer '{label}': colorMap 'custom' needs customColorMap stops with "
+                "value + r/g/b (or color:[r,g,b,a]); using grayscale."
+            )
+            normalized["colorMap"] = "grayscale"
+        else:
+            normalized["customColorMap"] = cleaned
+    return normalized
 
 #: Features a portal-dataset GeoJSON layer loads when no ``limit`` is set.
 _GEOJSON_DEFAULT_LIMIT = 1000
@@ -403,12 +540,81 @@ def _apply_extent(
 
     if info.get("data_type") == "raster":
         layer.raster = True
+        # Was the display supplied by the CALLER (vs. the dataset's saved one)?
+        caller_display = isinstance(layer.raster_display, dict) and bool(
+            layer.raster_display
+        )
         if layer.kind == "portal-dataset" and not layer.has_cog:
-            warnings.append(
-                f"layer '{label}': dataset {layer.dataset_id} is raster; a portal-dataset layer is "
-                "served as vector GeoJSON/MVT and will not show an image — use a portal-publication "
-                "layer (a raster WMS/WMTS publication) instead."
-            )
+            # A raster stored in PostGIS (or an MBTiles container) can be rendered
+            # by the portal's own PNG tile lane — no publication and no COG needed.
+            # This is the lane the frontend uses (`/datasets/{id}/rastertile/...`):
+            # the portal applies the dataset's saved display, so the map shows real
+            # pixels with the official symbology.
+            # A caller may override the saved raster rendering (`display`) and the
+            # reference zoom; otherwise the dataset's own display is used.
+            display = info.get("display")
+            if not caller_display and isinstance(display, dict) and display:
+                layer.raster_display = display
+            ref_zoom = info.get("ref_zoom")
+            if (
+                layer.ref_zoom is None
+                and isinstance(ref_zoom, int)
+                and not isinstance(ref_zoom, bool)
+            ):
+                layer.ref_zoom = ref_zoom
+            if info.get("raster_tile"):
+                layer.raster_tile = True
+                if layer.render in (None, "rastertile"):
+                    layer.render = "rastertile"
+                # An explicit vector render (geojson/mvt) is honoured: the caller
+                # consciously asked for the footprint instead of the image.
+            elif layer.render == "rastertile":
+                warnings.append(
+                    f"layer '{label}': render 'rastertile' needs a PostGIS/MBTiles raster "
+                    f"dataset; dataset {layer.dataset_id} is not served by that lane — using "
+                    "the default renderer."
+                )
+                layer.render = None
+            elif layer.render not in ("geojson", "mvt", "wfs"):
+                warnings.append(
+                    f"layer '{label}': dataset {layer.dataset_id} is raster and has no raster-tile "
+                    "support; a portal-dataset layer is served as vector GeoJSON/MVT and will not "
+                    "show an image — use a portal-publication layer (a raster WMS/WMTS publication) "
+                    "instead."
+                )
+
+            if caller_display:
+                if not info.get("raster_tile"):
+                    warnings.append(
+                        f"layer '{label}': 'display' only applies to a server-rendered raster "
+                        "(the raster-tile lane); ignored."
+                    )
+                    layer.raster_display = None
+                elif info.get("mbtiles"):
+                    # MBTiles stores finished pictures; the portal cannot recolour them.
+                    warnings.append(
+                        f"layer '{label}': dataset {layer.dataset_id} is MBTiles (pre-rendered "
+                        "tiles); 'display' cannot recolour it and was ignored."
+                    )
+                    layer.raster_display = None
+                else:
+                    normalized = _normalize_raster_display(
+                        layer.raster_display, label, warnings
+                    )
+                    if normalized is None:
+                        layer.raster_display = (
+                            info.get("display")
+                            if isinstance(info.get("display"), dict)
+                            else None
+                        )
+                    else:
+                        if (
+                            layer.ref_zoom is None
+                            and isinstance(normalized.get("referenceZoom"), int)
+                            and not isinstance(normalized.get("referenceZoom"), bool)
+                        ):
+                            layer.ref_zoom = normalized["referenceZoom"]
+                        layer.raster_display = normalized
 
     if layer.symbology:
         # A caller asked for a specific symbology. Resolve it (a shorthand spec is
@@ -429,6 +635,13 @@ def _apply_extent(
         # default style, so the map reproduces the portal colouring instead of a
         # palette colour.
         layer.symbology = info["style_spec"]
+
+    if layer.raster_display and layer.resolved_render() != "rastertile":
+        warnings.append(
+            f"layer '{label}': 'display' only applies to a server-rendered raster "
+            "(render 'rastertile'); ignored for this layer."
+        )
+        layer.raster_display = None
 
     _warn_about_saved_symbology(client, layer, info, warnings)
     _warn_about_geojson_cap(client, layer, warnings)
@@ -491,6 +704,10 @@ def _warn_about_saved_symbology(
         return
     if layer.symbology:
         return  # the dataset's saved vector symbology IS applied; nothing to warn
+    if layer.resolved_render() == "rastertile":
+        # The raster-tile lane forwards the dataset's saved `display`, so the portal
+        # renders the official symbology — there is nothing left to disclose.
+        return
     if isinstance(layer.style, dict) and layer.style:
         return  # a caller style is deliberate; the disclosure is noise here
     label = layer.title or layer.id

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -12,7 +13,16 @@ LAYER_KINDS = frozenset(
 )
 
 #: Viewer renderers a layer spec may request explicitly.
-RENDER_KINDS = frozenset({"geojson", "mvt", "wms", "wmts", "wfs", "xyz", "cog"})
+#:
+#: ``rastertile`` is the portal's own HTTP raster-tile lane
+#: (``GET /datasets/{id}/rastertile/{z}/{x}/{y}.png``): a PostGIS (or filesystem)
+#: raster is rendered server-side with the dataset's saved display and streamed as
+#: PNG XYZ tiles. Unlike ``cog`` it needs no Cloud-Optimized GeoTIFF and unlike
+#: ``wms``/``wmts`` it needs no publication — the exact gap for a raster that is
+#: stored but neither published nor COG.
+RENDER_KINDS = frozenset(
+    {"geojson", "mvt", "wms", "wmts", "wfs", "xyz", "cog", "rastertile"}
+)
 
 
 def _render_or_none(spec: Dict[str, Any]) -> Optional[str]:
@@ -84,6 +94,21 @@ class MapLayer:
     #: can byte-serve directly (``details.hasCOG``). It then defaults to the ``cog``
     #: renderer and the manifest exposes a Range-capable ``cogUrl``.
     has_cog: bool = False
+    #: True when the portal's raster-tile lane can render this dataset
+    #: (``GET /datasets/{id}/rastertile/{z}/{x}/{y}.png``). The viewer then draws
+    #: PNG XYZ tiles through the local ``/rasters`` proxy and the manifest exposes a
+    #: ``rasterTileUrl`` template. Set by the handler from the source dataset's
+    #: details; never guessed from the layer kind alone.
+    raster_tile: bool = False
+    #: The dataset's saved raster display block (``details.display``: displayType,
+    #: bands, colorMap, min/max, ...). Kept **server-side only** — the local proxy
+    #: forwards it upstream as the ``display`` query so the official symbology is
+    #: applied by the portal renderer and never has to travel through the browser.
+    raster_display: Optional[Dict[str, Any]] = None
+    #: Reference zoom for the raster-tile lane (the zoom whose resolution matches
+    #: the raster's native pixel size). The portal uses it to pick/overview-create
+    #: the right pyramid level; ``None`` lets the portal default apply.
+    ref_zoom: Optional[int] = None
 
     def resolved_render(self) -> str:
         """The viewer renderer for this layer (explicit override or inferred)."""
@@ -91,6 +116,8 @@ class MapLayer:
             return self.render
         if self.has_cog:
             return "cog"
+        if self.raster_tile:
+            return "rastertile"
         if self.xyz_url:
             return "xyz"
         if self.kind == "portal-publication":
@@ -122,6 +149,12 @@ class MapLayer:
             payload["rasterBands"] = self.raster_bands
         if self.has_cog and self.dataset_id is not None:
             payload["cogUrl"] = f"{base_url}/cog/{self.dataset_id}"
+        if self.resolved_render() == "rastertile" and self.dataset_id is not None:
+            # An XYZ template the browser can hand straight to ol/source/XYZ. The
+            # local proxy adds the portal credential and the saved `display`.
+            payload["rasterTileUrl"] = (
+                f"{base_url}/rasters/{self.id}/{{z}}/{{x}}/{{y}}.png"
+            )
         if self.raster:
             payload["raster"] = True
         if self.style:
@@ -190,6 +223,8 @@ def layer_from_spec(spec: Dict[str, Any]) -> MapLayer:
         title=spec.get("title"),
         style=spec.get("style"),
         symbology=spec.get("symbology") if isinstance(spec.get("symbology"), dict) else None,
+        raster_display=_display_or_none(spec),
+        ref_zoom=_int_or_none(spec.get("refZoom") or spec.get("ref_zoom")),
         bbox=spec.get("bbox"),
         query=spec.get("query"),
         render=_render_or_none(spec),
@@ -246,3 +281,16 @@ def _int_or_none(value: Any) -> Optional[int]:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _display_or_none(spec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """A caller-supplied raster display override (``display``/``rasterDisplay``)."""
+    value = spec.get("display")
+    if value is None:
+        value = spec.get("rasterDisplay") or spec.get("raster_display")
+    if isinstance(value, str) and value.strip():
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    return value if isinstance(value, dict) and value else None

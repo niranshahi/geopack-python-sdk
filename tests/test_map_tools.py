@@ -10,7 +10,11 @@ from unittest.mock import patch
 
 from geopack_sdk_mcp.maps import reset_for_tests
 from geopack_sdk_mcp.maps.errors import MapServiceError
-from geopack_sdk_mcp.maps.sources import query_dataset_geojson
+from geopack_sdk_mcp.maps.sources import (
+    query_dataset_geojson,
+    raster_tile_capable,
+    reference_zoom_for_raster,
+)
 from geopack_sdk_mcp.tool_handlers.geometry import geometry_op
 from geopack_sdk_mcp.tool_handlers.maps import show_map
 
@@ -409,6 +413,8 @@ class ShowMapTest(unittest.TestCase):
         self.assertTrue(any("does not overlap" in w for w in payload["templateWarnings"]))
 
     def test_a_raster_dataset_layer_warns_to_use_a_publication(self):
+        # No usable raster-tile source is known for this dataset (no details at all),
+        # so it still falls back to the vector footprint and warns.
         payload = show_map(
             _Client(data_type="raster"),
             layers=[{"kind": "portal-dataset", "datasetId": 1761}],
@@ -416,6 +422,151 @@ class ShowMapTest(unittest.TestCase):
         self.assertTrue(any("raster" in w for w in payload["templateWarnings"]))
         # The legend must treat it as raster rather than painting a vector fill.
         self.assertTrue(payload["layers"][0].get("raster"))
+
+    def test_a_postgis_raster_dataset_uses_server_rendered_png_tiles(self):
+        # A raster stored in PostGIS (dbTableName + rasterDbColumn) is NOT
+        # vector-only: the portal's own PNG tile lane renders it — no publication
+        # and no COG — and applies the dataset's saved display/colorMap.
+        details = {
+            "dbTableName": "rst_51251a8ba0c64e43a9fc8f5407f92a99",
+            "rasterDbColumn": "rast",
+            "srid": 32640,
+            "rasterSize": {"x": 201, "y": 376},
+            "geo_extent": [55.007, 30.387, 55.025, 30.409],
+            "bands": [{"band": 1, "type": "Float32", "minimum": 0.501, "maximum": 14.282}],
+            "display": {
+                "displayType": "colorMap",
+                "band": 1,
+                "colorMap": "jet",
+                "minimum": 0.501,
+                "maximum": 14.282,
+            },
+        }
+        payload = show_map(
+            _Client(details=details, data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 425, "title": "Ano_Mol_Raster"}],
+        )
+        layer = payload["layers"][0]
+        self.assertEqual(layer["render"], "rastertile")
+        self.assertTrue(layer["raster"])
+        self.assertIn("/rasters/", layer["rasterTileUrl"])
+        self.assertIn("{z}", layer["rasterTileUrl"])
+        # The official raster display is applied by the server, so neither the
+        # "no image" warning nor the saved-symbology disclosure may appear.
+        self.assertFalse(any("will not show an image" in w for w in payload["templateWarnings"]))
+        self.assertFalse(any("saved symbology" in w for w in payload["templateWarnings"]))
+
+    def test_render_rastertile_on_a_non_tile_dataset_warns_and_falls_back(self):
+        payload = show_map(
+            _Client(data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 1761, "render": "rastertile"}],
+        )
+        self.assertNotEqual(payload["layers"][0]["render"], "rastertile")
+        self.assertTrue(any("rastertile" in w for w in payload["templateWarnings"]))
+
+    def test_an_mbtiles_raster_is_served_by_the_raster_tile_lane(self):
+        # The filesystem adapter's raster-tile path reads tiles from the MBTiles
+        # container (flipping XYZ→TMS), so these rasters use the same lane.
+        details = {"subType": "MBTiles", "mbtiles_metadata": {"minzoom": 0, "maxzoom": 12}}
+        payload = show_map(
+            _Client(details=details, data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 900}],
+        )
+        layer = payload["layers"][0]
+        self.assertEqual(layer["render"], "rastertile")
+        self.assertIn("/rasters/", layer["rasterTileUrl"])
+
+    def test_a_caller_raster_display_overrides_the_saved_one(self):
+        # Unlike a COG, the raster-tile lane can change rendering: a caller
+        # `display` overrides the dataset's saved bands/colorMap. It stays
+        # server-side (the manifest exposes no display payload).
+        from geopack_sdk_mcp.maps import get_service
+
+        details = {
+            "dbTableName": "rst_x",
+            "rasterDbColumn": "rast",
+            "display": {"displayType": "colorMap", "band": 1, "colorMap": "jet",
+                        "minimum": 1.0, "maximum": 14.282},
+        }
+        payload = show_map(
+            _Client(details=details, data_type="raster"),
+            layers=[{
+                "kind": "portal-dataset",
+                "datasetId": 425,
+                "display": {"displayType": "colorMap", "band": 1, "colorMap": "fire",
+                            "minimum": 0, "maximum": 100},
+            }],
+        )
+        layer = payload["layers"][0]
+        self.assertEqual(layer["render"], "rastertile")
+        self.assertNotIn("rasterDisplay", layer)
+        internal = get_service().find_layer(layer["id"])
+        self.assertEqual(internal.raster_display["colorMap"], "fire")
+        self.assertEqual(internal.raster_display["minimum"], 0)
+
+    def test_a_friendly_raster_display_shape_is_normalized(self):
+        # The harness-friendly forms an agent is likely to send are accepted:
+        # bands {r,g,b} (RGB) and a customColorMap stop's color:[r,g,b,a].
+        from geopack_sdk_mcp.maps import get_service
+
+        details = {"dbTableName": "rst_x", "rasterDbColumn": "rast"}
+        payload = show_map(
+            _Client(details=details, data_type="raster"),
+            layers=[
+                {"kind": "portal-dataset", "datasetId": 1,
+                 "display": {"displayType": "RGB", "bands": {"r": 4, "g": 3, "b": 2}}},
+                {"kind": "portal-dataset", "datasetId": 2,
+                 "display": {"displayType": "colorMap", "band": 1, "colorMap": "custom",
+                             "customColorMap": [{"value": 0, "color": [255, 0, 0, 255]},
+                                                {"value": "100%", "color": [0, 0, 255]}]}},
+            ],
+        )
+        service = get_service()
+        rgb = service.find_layer(payload["layers"][0]["id"]).raster_display
+        self.assertEqual((rgb["RBand"], rgb["GBand"], rgb["BBand"]), (4, 3, 2))
+        self.assertNotIn("bands", rgb)
+        ramp = service.find_layer(payload["layers"][1]["id"]).raster_display
+        self.assertEqual(ramp["customColorMap"][0], {"value": 0, "r": 255, "g": 0, "b": 0, "a": 255})
+        self.assertEqual(ramp["customColorMap"][1]["a"], 255)
+
+    def test_an_unknown_color_map_falls_back_with_a_warning(self):
+        # `jet`/`viridis` are not portal ramps; the display is sanitized so the
+        # tile request cannot fail, and the caller is told why.
+        payload = show_map(
+            _Client(details={"dbTableName": "rst_x", "rasterDbColumn": "rast"},
+                    data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 425,
+                     "display": {"displayType": "colorMap", "colorMap": "viridis"}}],
+        )
+        self.assertTrue(any("not a portal ramp" in w for w in payload["templateWarnings"]))
+
+    def test_a_display_on_mbtiles_is_ignored_with_a_warning(self):
+        # MBTiles stores finished pictures; the portal cannot recolour them.
+        from geopack_sdk_mcp.maps import get_service
+
+        details = {"subType": "MBTiles", "mbtiles_metadata": {"maxzoom": 12}}
+        payload = show_map(
+            _Client(details=details, data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 900,
+                     "display": {"displayType": "colorMap", "colorMap": "fire"}}],
+        )
+        self.assertTrue(any("pre-rendered" in w for w in payload["templateWarnings"]))
+        self.assertIsNone(get_service().find_layer(payload["layers"][0]["id"]).raster_display)
+
+    def test_raster_tile_capability_and_reference_zoom(self):
+        # The native zoom is derived from the extent width / raster width when the
+        # portal omits metadata_3857 (a common case for PostGIS rasters), so the
+        # portal picks the right overview instead of the blurry default level.
+        extent = [55.007, 30.387, 55.025, 30.409]
+        details = {"dbTableName": "rst_x", "rasterDbColumn": "rast", "rasterSize": {"x": 201}}
+        self.assertTrue(raster_tile_capable(details))
+        self.assertEqual(reference_zoom_for_raster(details, extent), 14)
+        # metadata_3857.scalex wins (frontend parity) when present.
+        with_meta = {**details, "metadata_3857": {"scalex": 2.5}}
+        self.assertEqual(reference_zoom_for_raster(with_meta, extent), 16)
+        # A COG takes the direct byte lane; MBTiles is served by the raster-tile lane.
+        self.assertFalse(raster_tile_capable({"hasCOG": True, "dbTableName": "rst_x"}))
+        self.assertTrue(raster_tile_capable({"subType": "MBTiles", "mbtiles_metadata": {}}))
 
     def test_dataset_data_is_reprojected_to_wgs84(self):
         client = _Client()

@@ -3,6 +3,42 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.16.0 — 2026-11-27
+
+**Map viewer: server-rendered raster tiles for a raster with no publication and no COG
+(slice 033 follow-up).** A `portal-dataset` raster stored in PostGIS (or as a filesystem
+raster) is now drawn as real pixels in the built-in OpenLayers viewer. It uses the
+portal's existing PNG tile lane — `GET /datasets/{id}/rastertile/{z}/{x}/{y}.png` — which
+the SPA already consumes through `MyRasterWebTileLayer`; **no backend change** and no
+temporary/permanent COG generation was added.
+
+### Added
+
+- `render: 'rastertile'` (auto-selected for a raster portal-dataset whose `details`
+  identify a PostGIS raster table — `dbTableName` + `rasterDbColumn` — or an MBTiles
+  dataset). A COG still takes the direct `/cog` byte lane.
+- A loopback `GET /rasters/{layerId}/{z}/{x}/{y}.png` proxy that adds the portal
+  credential and forwards the dataset's saved raster `display` (bands / colorMap /
+  min-max) plus a computed `ref_z`, so the **official symbology is applied** by the
+  portal renderer and the display never travels through the browser. A layer may pass
+  an optional `display` (and `refZoom`) to **override** the saved rendering — the tile
+  lane, unlike a COG, can be re-rendered. The friendly `bands:{r,g,b}` / `[r,g,b]` and
+  `customColorMap` `color:[r,g,b,a]` shapes are normalized, an unknown `colorMap` name is
+  refused back to `grayscale` **with a warning** (a bad ramp cannot fail the tile), and a
+  `display` on a COG/MBTiles/vector layer is ignored with a warning.
+- `geopack://guide` gained a "Raster rendering (`display`)" section (ramps, bands,
+  min/max, custom stops, `refZoom`, how to read the saved `symbology`/`details.bands`),
+  and the `show_map`/`get_dataset` descriptions now point at it.
+- The manifest exposes `rasterTileUrl` (an XYZ template) for these layers; the viewer
+  draws them with `ol/source/XYZ` and shows a raster legend swatch.
+- `ref_z` is derived from `details.metadata_3857.scalex` (frontend parity) or, when
+  absent, from `geo_extent` width / `rasterSize.x`, so the portal picks the right
+  overview instead of the blurry default level.
+- Tests: a PostGIS raster selects `rastertile` with no misleading warning; an MBTiles raster uses
+  the same lane; a raster without a tile source still warns and falls back; a caller `display`
+  overrides the saved one; the `/rasters` proxy forwards credential + `display` + `ref_z`; the viewer
+  runtime has the XYZ branch.
+
 ## 0.15.0 — 2026-11-26
 
 **Authentication hardening (slice 034) — complete, not rewrite, the JWT+session flow.** A local MCP

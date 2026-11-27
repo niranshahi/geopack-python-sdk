@@ -149,7 +149,8 @@ function makeVectorStyle(baseStyle, sym) {
 // WMS/WMTS/XYZ are images rendered elsewhere: a per-layer `style` cannot recolour
 // them, and the legend must show a raster swatch rather than a vector colour.
 function isRasterRender(render) {
-  return render === 'wms' || render === 'wmts' || render === 'xyz' || render === 'cog';
+  return render === 'wms' || render === 'wmts' || render === 'xyz' ||
+    render === 'cog' || render === 'rastertile';
 }
 
 function basemapLayer(entry) {
@@ -199,6 +200,14 @@ function buildLayer(spec, index) {
     // so the whole raster never downloads and the browser can pan/zoom into it.
     source = new ol.source.GeoTIFF({ sources: [{ url: withToken(spec.cogUrl) }] });
     layer = new ol.layer.WebGLTile({ source: source });
+  } else if (render === 'rastertile') {
+    // The portal renders a PostGIS/filesystem raster to PNG tiles
+    // (`/datasets/{id}/rastertile/{z}/{x}/{y}.png`) with the dataset's saved
+    // display; the local `/rasters` proxy adds the portal credential and the
+    // `display`, so this is a normal XYZ image layer. No publication and no COG
+    // are needed — unlike the WMS/WMTS and `cog` lanes.
+    source = new ol.source.XYZ({ url: withToken(spec.rasterTileUrl) });
+    layer = new ol.layer.Tile({ source: source });
   } else {
     source = new ol.source.Vector();
     layer = new ol.layer.Vector({ source: source, style: styleArg });
