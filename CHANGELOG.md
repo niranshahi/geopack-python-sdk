@@ -3,6 +3,27 @@
 All notable changes to `geopack-sdk` and the bundled MCP server (`geopack_sdk_mcp`).
 Append-only; newest first.
 
+## 0.16.1 — 2026-11-27
+
+**Fix `colorMap: 'custom'` on the raster-tile lane (live-QA of 0.16.0).** A custom ramp
+rendered as an **empty/transparent tile** while `pseudocolor`/`fire`/`bluered` worked.
+Root cause: the backend's `ST_ColorMap` is order-sensitive, and the SPA's
+`RasterDisplayPanel.apply()` sorts `customColorMap` **descending** before rendering; the
+MCP forwarded the caller's ascending stops unchanged.
+
+### Fixed
+
+- `customColorMap` stops are normalized to the portal's flat `r/g/b/a` form **and sorted
+  descending** (percentage stops resolved against `minimum`/`maximum`; `nv`/`null` last),
+  mirroring the panel. The panel's exact working sample and the report's ascending 3/5-stop
+  ramps are now pinned by tests.
+- `geopack://guide` now states the ordering rule and the real `custom` semantics: the ramp
+  **interpolates** between stops, so **discrete/flat classes need paired same-colour stops**
+  at each boundary (e.g. `24.99%` then `25%`). `reclass` is a **boolean** that only affects
+  the **named** ramps (an 8-bit min→max value reclass), is **ignored for `custom`**, and is
+  not an `equalInterval` object. A `custom` + `reclass` call now **warns** that it has no
+  effect instead of silently doing nothing.
+
 ## 0.16.0 — 2026-11-27
 
 **Map viewer: server-rendered raster tiles for a raster with no publication and no COG

@@ -132,9 +132,22 @@ page (401), not a blank map; re-run `show_map` for a fresh `viewerUrl`.
   raster table** or an **MBTiles** container is drawn as server-side PNG tiles — `render`
   is auto-set to `'rastertile'`, no publication and no COG needed. Omit `display` and the
   dataset's **saved** rendering is applied. To change it, pass a per-layer `display`:
-  - single band: `{displayType:'colorMap', band:1, colorMap:'grayscale|pseudocolor|fire|bluered|custom', minimum, maximum, reclass:true}`;
+  - single band: `{displayType:'colorMap', band:1, colorMap:'grayscale|pseudocolor|fire|bluered|custom', minimum, maximum}`;
     for `custom` add `customColorMap:[{value:<number|'NN%'>, r,g,b,a}]` (0..255;
-    `color:[r,g,b,a]` is accepted too).
+    `color:[r,g,b,a]` is accepted too). Stops may be listed in **any order** — the MCP
+    sorts them descending for the portal's order-sensitive `ST_ColorMap` (ascending stops
+    render an empty tile).
+  - **`reclass` is NOT a class-break switch.** It is a **boolean** that only affects the
+    **named** ramps (`grayscale|pseudocolor|fire|bluered`): the portal converts the band to
+    8-bit over `minimum`→`maximum` before colouring (`ST_Reclass`). It does not stop
+    colours from blending, it is **ignored when `colorMap:'custom'`**, and an object such
+    as `{"type":"equalInterval"}` is not accepted.
+  - **Discrete (unblended) classes:** a `custom` ramp **interpolates** between stops, so a
+    multi-stop ramp fades. For flat colour per class, give each class **two same-colour
+    stops** — from just below its upper boundary to the boundary. For boundaries at
+    25/50/75%:
+    `[{"value":"0%",colorA},{"value":"24.99%",colorA},{"value":"25%",colorB},{"value":"49.99%",colorB},{"value":"50%",colorC},{"value":"74.99%",colorC},{"value":"75%",colorD},{"value":"100%",colorD}]`.
+    The 0.01% gap makes a sharp edge; the MCP sorts them descending.
   - multi-band true colour: `{displayType:'RGB', RBand:1, GBand:2, BBand:3, ABand?}`;
     the friendly `bands:{r,g,b,a}` (or `[r,g,b,a]`) form is accepted and normalized.
   - optional `resampling:'NearestNeighbor'|'Bilinear'` and `refZoom` (the native pyramid

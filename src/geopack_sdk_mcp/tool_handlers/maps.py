@@ -75,6 +75,96 @@ _RASTER_DISPLAY_KEYS = frozenset(
 )
 
 
+def _raster_stop_sort_key(
+    stop: Dict[str, Any], minimum: Any, maximum: Any
+) -> float:
+    """Sort key for a ``customColorMap`` stop (descending = highest value first).
+
+    Mirrors the portal panel, which sorts stops descending before the backend
+    renders them: ``ST_ColorMap`` is order-sensitive, and ascending stops come
+    out as an **empty (transparent) tile** — exactly the "custom shows nothing"
+    report (2026-11-27). A percent stop resolves against ``minimum``/``maximum``
+    when known; ``nv``/``null``/``nodata`` sorts last.
+    """
+    value = stop.get("value")
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("nv", "null", "nodata"):
+            return float("-inf")
+        if text.endswith("%"):
+            try:
+                percent = float(text[:-1])
+            except ValueError:
+                return float("-inf")
+            if (
+                isinstance(minimum, (int, float))
+                and isinstance(maximum, (int, float))
+                and maximum >= minimum
+            ):
+                return float(minimum) + (float(maximum) - float(minimum)) * percent / 100.0
+            return percent
+        try:
+            return float(text)
+        except ValueError:
+            return float("-inf")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return float("-inf")
+
+
+def _sorted_custom_stops(display: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Clean and descending-sort a ``customColorMap`` (portal wire form).
+
+    Accepts a stop's ``color:[r,g,b,a]`` as well as flat ``r/g/b/a`` and returns
+    the flat form the backend reads. Sorting descending is required: the portal's
+    ``ST_ColorMap`` is order-sensitive and the SPA sorts stops the same way before
+    rendering (ascending stops produce a transparent tile — live QA 2026-11-27).
+    """
+    stops = display.get("customColorMap")
+    if not isinstance(stops, list):
+        return []
+    cleaned: List[Dict[str, Any]] = []
+    for stop in stops:
+        if not isinstance(stop, dict):
+            continue
+        entry = dict(stop)
+        color = entry.pop("color", None)
+        if isinstance(color, (list, tuple)) and len(color) >= 3:
+            entry.setdefault("r", color[0])
+            entry.setdefault("g", color[1])
+            entry.setdefault("b", color[2])
+            if len(color) >= 4:
+                entry.setdefault("a", color[3])
+        if any(entry.get(key) is None for key in ("r", "g", "b")):
+            continue
+        entry.setdefault("a", 255)
+        cleaned.append(entry)
+    minimum = display.get("minimum")
+    maximum = display.get("maximum")
+    cleaned.sort(
+        key=lambda stop: _raster_stop_sort_key(stop, minimum, maximum),
+        reverse=True,
+    )
+    return cleaned
+
+
+def _prepare_saved_display(display: Dict[str, Any]) -> Dict[str, Any]:
+    """Make a dataset's saved ``display`` safe to forward (sort custom stops).
+
+    A saved custom ramp written by another client may be ascending; forwarding it
+    unchanged would render an empty tile. This only re-sorts a ``custom`` ramp and
+    keeps every other saved key intact.
+    """
+    if str(display.get("colorMap") or "").strip().lower() != "custom":
+        return display
+    stops = _sorted_custom_stops(display)
+    if not stops:
+        return display
+    prepared = dict(display)
+    prepared["customColorMap"] = stops
+    return prepared
+
+
 def _normalize_raster_display(
     display: Dict[str, Any], label: str, warnings: List[str]
 ) -> Optional[Dict[str, Any]]:
@@ -130,7 +220,14 @@ def _normalize_raster_display(
                 pass
     if "reclass" in normalized:
         value = normalized["reclass"]
-        if isinstance(value, str):
+        if isinstance(value, (dict, list)):
+            warnings.append(
+                f"layer '{label}': `reclass` must be a boolean and only affects the named "
+                "ramps (not `custom`); it is not a class-break object — using true. For flat "
+                "classes use paired same-colour `customColorMap` stops."
+            )
+            normalized["reclass"] = True
+        elif isinstance(value, str):
             normalized["reclass"] = value.strip().lower() in ("1", "true", "yes", "on")
         else:
             normalized["reclass"] = bool(value)
@@ -158,24 +255,15 @@ def _normalize_raster_display(
         color_map = "grayscale"
     normalized["colorMap"] = color_map
     if color_map == "custom":
-        stops = normalized.get("customColorMap")
-        cleaned: List[Dict[str, Any]] = []
-        if isinstance(stops, list):
-            for stop in stops:
-                if not isinstance(stop, dict):
-                    continue
-                entry = dict(stop)
-                color = entry.pop("color", None)
-                if isinstance(color, (list, tuple)) and len(color) >= 3:
-                    entry.setdefault("r", color[0])
-                    entry.setdefault("g", color[1])
-                    entry.setdefault("b", color[2])
-                    if len(color) >= 4:
-                        entry.setdefault("a", color[3])
-                if any(entry.get(key) is None for key in ("r", "g", "b")):
-                    continue
-                entry.setdefault("a", 255)
-                cleaned.append(entry)
+        if normalized.pop("reclass", None):
+            # The backend's custom branch forces reclass off; say so instead of
+            # letting the caller believe it suppresses colour blending.
+            warnings.append(
+                f"layer '{label}': `reclass` has no effect on a custom ramp (the portal "
+                "disables it for `custom`); ignored. For flat classes use paired "
+                "same-colour stops at each boundary."
+            )
+        cleaned = _sorted_custom_stops(normalized)
         if not cleaned:
             warnings.append(
                 f"layer '{label}': colorMap 'custom' needs customColorMap stops with "
@@ -554,7 +642,7 @@ def _apply_extent(
             # reference zoom; otherwise the dataset's own display is used.
             display = info.get("display")
             if not caller_display and isinstance(display, dict) and display:
-                layer.raster_display = display
+                layer.raster_display = _prepare_saved_display(display)
             ref_zoom = info.get("ref_zoom")
             if (
                 layer.ref_zoom is None
@@ -603,7 +691,7 @@ def _apply_extent(
                     )
                     if normalized is None:
                         layer.raster_display = (
-                            info.get("display")
+                            _prepare_saved_display(info["display"])
                             if isinstance(info.get("display"), dict)
                             else None
                         )

@@ -506,7 +506,10 @@ class ShowMapTest(unittest.TestCase):
 
     def test_a_friendly_raster_display_shape_is_normalized(self):
         # The harness-friendly forms an agent is likely to send are accepted:
-        # bands {r,g,b} (RGB) and a customColorMap stop's color:[r,g,b,a].
+        # bands {r,g,b} (RGB) and a customColorMap stop's color:[r,g,b,a]. The
+        # portal panel sorts stops DESCENDING before rendering — ST_ColorMap is
+        # order-sensitive and ascending stops yield a transparent tile — so the
+        # MCP mirrors that sort.
         from geopack_sdk_mcp.maps import get_service
 
         details = {"dbTableName": "rst_x", "rasterDbColumn": "rast"}
@@ -517,8 +520,10 @@ class ShowMapTest(unittest.TestCase):
                  "display": {"displayType": "RGB", "bands": {"r": 4, "g": 3, "b": 2}}},
                 {"kind": "portal-dataset", "datasetId": 2,
                  "display": {"displayType": "colorMap", "band": 1, "colorMap": "custom",
+                             "minimum": 0, "maximum": 100,
                              "customColorMap": [{"value": 0, "color": [255, 0, 0, 255]},
-                                                {"value": "100%", "color": [0, 0, 255]}]}},
+                                                {"value": "50%", "color": [0, 255, 0, 255]},
+                                                {"value": 100, "color": [0, 0, 255]}]}},
             ],
         )
         service = get_service()
@@ -526,8 +531,137 @@ class ShowMapTest(unittest.TestCase):
         self.assertEqual((rgb["RBand"], rgb["GBand"], rgb["BBand"]), (4, 3, 2))
         self.assertNotIn("bands", rgb)
         ramp = service.find_layer(payload["layers"][1]["id"]).raster_display
-        self.assertEqual(ramp["customColorMap"][0], {"value": 0, "r": 255, "g": 0, "b": 0, "a": 255})
-        self.assertEqual(ramp["customColorMap"][1]["a"], 255)
+        # Descending: 100 (absolute) → 50% (resolved to 50) → 0.
+        self.assertEqual(
+            [stop["value"] for stop in ramp["customColorMap"]], [100, "50%", 0]
+        )
+        self.assertEqual(
+            ramp["customColorMap"][0], {"value": 100, "r": 0, "g": 0, "b": 255, "a": 255}
+        )
+        self.assertEqual(ramp["customColorMap"][2]["r"], 255)
+
+    def test_a_custom_ramp_is_sorted_descending_for_st_colormap(self):
+        # Regression for the 2026-11-27 report: ascending custom stops (the
+        # natural way an agent writes them) made ST_ColorMap emit a transparent
+        # tile. The portal panel sorts descending; the MCP must too.
+        from geopack_sdk_mcp.maps import get_service
+
+        payload = show_map(
+            _Client(details={"dbTableName": "rst_x", "rasterDbColumn": "rast"},
+                    data_type="raster"),
+            layers=[{
+                "kind": "portal-dataset",
+                "datasetId": 426,
+                "display": {
+                    "displayType": "colorMap", "band": 1, "colorMap": "custom",
+                    "minimum": 6.995, "maximum": 14096.542,
+                    "customColorMap": [
+                        {"value": 7, "r": 33, "g": 40, "b": 120, "a": 255},
+                        {"value": "50%", "r": 240, "g": 240, "b": 240, "a": 255},
+                        {"value": 14096, "r": 178, "g": 24, "b": 43, "a": 255},
+                    ],
+                },
+            }],
+        )
+        internal = get_service().find_layer(payload["layers"][0]["id"])
+        values = [stop["value"] for stop in internal.raster_display["customColorMap"]]
+        self.assertEqual(values, [14096, "50%", 7])
+        self.assertEqual(internal.raster_display["customColorMap"][0]["r"], 178)
+        self.assertEqual(internal.raster_display["customColorMap"][2]["r"], 33)
+
+    def test_a_saved_ascending_custom_ramp_is_sorted_before_forwarding(self):
+        # Even a dataset saved by another client with ascending stops must not
+        # render blank: the saved display is sorted (and color arrays flattened)
+        # before it is forwarded to the portal.
+        from geopack_sdk_mcp.maps import get_service
+
+        details = {
+            "dbTableName": "rst_x",
+            "rasterDbColumn": "rast",
+            "display": {
+                "displayType": "colorMap", "band": 1, "colorMap": "custom",
+                "minimum": 0, "maximum": 100,
+                "customColorMap": [
+                    {"value": 0, "color": [255, 0, 0, 255]},
+                    {"value": 100, "color": [0, 0, 255, 255]},
+                ],
+            },
+        }
+        payload = show_map(
+            _Client(details=details, data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 1}],
+        )
+        display = get_service().find_layer(payload["layers"][0]["id"]).raster_display
+        self.assertEqual([stop["value"] for stop in display["customColorMap"]], [100, 0])
+        self.assertEqual(display["customColorMap"][0]["b"], 255)
+
+    def test_the_frontend_working_custom_sample_is_reproduced(self):
+        # The exact panel sample (ascending `color:[r,g,b,a]`) becomes flat
+        # r/g/b/a in descending order — the form the backend actually renders.
+        from geopack_sdk_mcp.maps import get_service
+
+        sample = {
+            "displayType": "colorMap", "band": 1, "colorMap": "custom",
+            "reclass": False, "minimum": 1.531, "maximum": 54.485,
+            "customColorMap": [
+                {"value": 1.5, "color": [27, 158, 119, 255]},
+                {"value": 3, "color": [163, 98, 165, 255]},
+                {"value": 10, "color": [191, 171, 15, 255]},
+                {"value": 20, "color": [102, 102, 102, 255]},
+            ],
+        }
+        payload = show_map(
+            _Client(details={"dbTableName": "rst_x", "rasterDbColumn": "rast"},
+                    data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 423, "display": sample}],
+        )
+        display = get_service().find_layer(payload["layers"][0]["id"]).raster_display
+        self.assertEqual(
+            [stop["value"] for stop in display["customColorMap"]], [20, 10, 3, 1.5]
+        )
+        self.assertEqual(
+            display["customColorMap"][0],
+            {"value": 20, "r": 102, "g": 102, "b": 102, "a": 255},
+        )
+        self.assertNotIn("color", display["customColorMap"][0])
+
+    def test_a_reclass_object_warns_and_stays_boolean(self):
+        # `reclass` is a boolean min→max stretch, not a class-break spec; an
+        # object is turned into `true` WITH a warning (it used to 500).
+        payload = show_map(
+            _Client(details={"dbTableName": "rst_x", "rasterDbColumn": "rast"},
+                    data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 1,
+                     "display": {"displayType": "colorMap", "band": 1,
+                                 "colorMap": "grayscale",
+                                 "reclass": {"type": "equalInterval", "classes": 5}}}],
+        )
+        self.assertTrue(
+            any("reclass" in w and "boolean" in w for w in payload["templateWarnings"])
+        )
+
+    def test_reclass_on_a_custom_ramp_is_ignored_with_a_warning(self):
+        # The backend disables reclass for custom ramps: it is a VALUE reclass
+        # for named ramps, not a "stop colours blending" switch.
+        from geopack_sdk_mcp.maps import get_service
+
+        payload = show_map(
+            _Client(details={"dbTableName": "rst_x", "rasterDbColumn": "rast"},
+                    data_type="raster"),
+            layers=[{"kind": "portal-dataset", "datasetId": 426,
+                     "display": {"displayType": "colorMap", "band": 1,
+                                 "colorMap": "custom", "reclass": True,
+                                 "minimum": 6.995, "maximum": 14096.542,
+                                 "customColorMap": [
+                                     {"value": "0%", "r": 178, "g": 24, "b": 43, "a": 255},
+                                     {"value": "100%", "r": 21, "g": 99, "b": 33, "a": 255},
+                                 ]}}],
+        )
+        self.assertTrue(
+            any("no effect on a custom ramp" in w for w in payload["templateWarnings"])
+        )
+        internal = get_service().find_layer(payload["layers"][0]["id"])
+        self.assertNotIn("reclass", internal.raster_display)
 
     def test_an_unknown_color_map_falls_back_with_a_warning(self):
         # `jet`/`viridis` are not portal ramps; the display is sanitized so the
